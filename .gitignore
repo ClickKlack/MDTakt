@@ -1,0 +1,31 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Engine (Laravel)
+engine/.env
+engine/vendor/
+engine/node_modules/
+engine/storage/logs/
+engine/storage/framework/cache/
+engine/storage/framework/sessions/
+engine/storage/framework/views/
+engine/bootstrap/cache/
+engine/*.zip
+
+# Collector (PHP CLI)
+collector/.env
+collector/vendor/
+
+# Viewer (Vue / Node)
+viewer/.env
+viewer/node_modules/
+viewer/dist/
+
+# Bruno (lokale Umgebung — enthält ggf. Tokens)
+shared/bruno/environments/local.bru

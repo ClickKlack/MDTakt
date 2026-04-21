@@ -26,7 +26,7 @@
 
 ### Aufgaben
 - [ ] Mono-Repo anlegen (`/collector`, `/engine`, `/viewer`, `/shared`)
-- [ ] Laravel 11 Projekt in `/engine` initialisieren
+- [ ] Laravel 13 Projekt in `/engine` initialisieren
 - [ ] `.env.example` mit `DB_TIMEZONE=UTC`, `APP_TIMEZONE=UTC` anlegen
 - [ ] PostgreSQL-Verbindung konfigurieren und testen
 - [ ] Migrationen erstellen und ausführen:

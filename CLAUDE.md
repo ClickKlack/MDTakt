@@ -97,6 +97,7 @@ Jede Implementierung ist erst fertig wenn:
 
 - `declare(strict_types=1)` in jeder PHP-Datei
 - PHP 8.3+ Features nutzen: Enums für feste Wertelisten, `readonly` Properties, typisierte Properties
+- Laravel 13 (aktuell installiert, bewusst gewählt statt L11)
 - API-Antworten ausschließlich via Laravel API Resources — kein rohes `response()->json()`
 - Bearer-Token für alle Collector-Endpunkte via Laravel Middleware absichern
 - Im Collector (CLI): Monolog `StreamHandler` auf `stdout` + tägliche Logdatei

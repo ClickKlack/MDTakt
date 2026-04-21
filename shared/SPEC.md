@@ -102,7 +102,7 @@ Für eine gegebene Sichtung (Kursnummer + Linie + Richtung + Zeit + Haltestelle)
 | Modul | Pfad | Technologie | Hosting |
 |---|---|---|---|
 | Collector | `/collector` | PHP CLI | Lokales NAS |
-| Engine (API) | `/engine` | Laravel 11, PHP 8.3+ | Hetzner, `api.strassenbahn-magdeburg.de` |
+| Engine (API) | `/engine` | Laravel 13, PHP 8.3+ | Hetzner, `api.strassenbahn-magdeburg.de` |
 | Viewer (Frontend) | `/viewer` | Vue 3, Vite, Tailwind | Hetzner, `app.strassenbahn-magdeburg.de` |
 | Gemeinsame Defs | `/shared` | OpenAPI 3.x YAML | — |
 
@@ -193,7 +193,7 @@ sightings (
 ## 9. Technische Anforderungen
 
 - **Datenbank:** PostgreSQL — Nutzung von Window Functions & CTEs für Umlauf-Abfragen. Zeitstempel immer `TIMESTAMPTZ`.
-- **PHP:** 8.3+, strikte Typisierung, Laravel 11.
+- **PHP:** 8.3+, strikte Typisierung, Laravel 13.
 - **Frontend:** Vue 3 Composition API (`<script setup>`), Tailwind CSS, Axios.
 - **Primärschlüssel:** UUID oder `BIGSERIAL` je nach Tabelle.
 - **Sprache:** Code & Kommentare Deutsch/Englisch-Mix (Fachbegriffe Englisch, Inline-Kommentare Deutsch).

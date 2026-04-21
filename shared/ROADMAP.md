@@ -25,19 +25,19 @@
 **Ziel:** Das Projekt ist aufgesetzt, die Datenbank läuft, das Schema ist migriert.
 
 ### Aufgaben
-- [ ] Mono-Repo anlegen (`/collector`, `/engine`, `/viewer`, `/shared`)
-- [ ] Laravel 13 Projekt in `/engine` initialisieren
-- [ ] `.env.example` mit `DB_TIMEZONE=UTC`, `APP_TIMEZONE=UTC` anlegen
-- [ ] PostgreSQL-Verbindung konfigurieren und testen
-- [ ] Migrationen erstellen und ausführen:
+- [x] Mono-Repo anlegen (`/collector`, `/engine`, `/viewer`, `/shared`)
+- [x] Laravel 13 Projekt in `/engine` initialisieren
+- [x] `.env.example` mit `DB_TIMEZONE=UTC`, `APP_TIMEZONE=UTC` anlegen
+- [x] PostgreSQL-Verbindung konfigurieren und testen
+- [x] Migrationen erstellen und ausführen:
   - `routes` (Tram-Linien)
   - `stops` (Haltestellen)
   - `trips` (Fahrten)
   - `stop_times` (Haltezeiten)
   - `calendar_dates` (Betriebstage)
   - `sightings` (Realsichtungen inkl. `assigned_trip_id`)
-- [ ] Alle Zeitstempel-Felder als `TIMESTAMPTZ` prüfen
-- [ ] Indizes anlegen: `course_number`, `observed_at`, `assigned_trip_id`
+- [x] Alle Zeitstempel-Felder als `TIMESTAMPTZ` prüfen
+- [x] Indizes anlegen: `course_number`, `observed_at`, `assigned_trip_id`
 
 ### Abnahmekriterium
 `php artisan migrate` läuft fehlerfrei, alle Tabellen existieren mit korrektem Schema.

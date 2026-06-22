@@ -16,7 +16,7 @@ Lies diese Dokumente in dieser Reihenfolge:
 
 ## Projekt in einem Satz
 
-MD-Takt ist eine Plattform zur manuellen Umlauf-Rekonstruktion für Magdeburger Straßenbahnen (MVB) — auf Basis von GTFS-Fahrplandaten und Realsichtungen aus MDKursTracker.
+MD-Takt ist eine Plattform zur manuellen Umlauf-Rekonstruktion für den Magdeburger Nahverkehr (MVB — Tram und Bus) — auf Basis von GTFS-Fahrplandaten und Realsichtungen aus MDKursTracker.
 
 ---
 

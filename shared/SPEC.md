@@ -5,7 +5,9 @@
 
 ## 1. Einleitung
 
-Entwicklung einer spezialisierten Plattform zur Umlauf-Erkennung für den Magdeburger ÖPNV (**ausschließlich Straßenbahn/Tram, MVB**). Das System nutzt GTFS-Daten als Soll-Grundlage und ergänzt diese durch Realsichtungen aus dem externen Tool **MDKursTracker**.
+Entwicklung einer spezialisierten Plattform zur Umlauf-Erkennung für den Magdeburger ÖPNV (**alle Linien der MVB — Tram und Bus**). Das System nutzt GTFS-Daten als Soll-Grundlage und ergänzt diese durch Realsichtungen aus dem externen Tool **MDKursTracker**.
+
+> Hinweis: Der Scope wurde von „nur Straßenbahn" auf den gesamten MVB-Verkehr erweitert. Projektname (MD-Takt) und Domains (`strassenbahn-magdeburg.de`) bleiben vorerst bestehen.
 
 **Kern-Ziel des MVP:** Einem Nutzer ermöglichen, manuell im Frontend erfasste Sichtungen (Kursnummer + Kontext) mit GTFS-Trips zu verknüpfen und so Umläufe eines Tages zu rekonstruieren und anzuzeigen.
 
@@ -31,7 +33,7 @@ Entwicklung einer spezialisierten Plattform zur Umlauf-Erkennung für den Magdeb
   - `trips.txt` — Fahrten mit `trip_id`, `route_id`, `block_id`, `service_id`
   - `stop_times.txt` — Haltezeiten je Fahrt
   - `stops.txt` — Haltestellen
-  - `routes.txt` — Linien (gefiltert auf `route_type = 0` = Tram)
+  - `routes.txt` — Linien (gefiltert auf die MVB-Agency; alle Verkehrsmittel, `route_type` wird übernommen)
   - `calendar.txt` / `calendar_dates.txt` — Betriebstage
 - **Wichtig:** Das GTFS-Feld `block_id` *kann* Umläufe kodieren, ist aber nicht zuverlässig befüllt. Die Umlauf-Rekonstruktion aus Sichtungen ist daher der primäre Ansatz.
 
@@ -57,8 +59,8 @@ Für eine gegebene Sichtung (Kursnummer + Linie + Richtung + Zeit + Haltestelle)
 
 ### 3.2 Matching-Logik (Vorschlag, im Frontend manuell bestätigbar)
 
-1. **Filter nach Betriebstag** — aus `observed_at` den korrekten GTFS `service_date` ermitteln.
-2. **Filter nach Linie** — `routes.txt` nach `route_short_name` filtern (nur Trams, `route_type=0`).
+1. **Filter nach Betriebstag** — aus `observed_at` den korrekten GTFS `service_date` ermitteln; gültige `service_id`s ergeben sich aus `calendar` (Wochenmuster) kombiniert mit `calendar_dates` (Ausnahmen).
+2. **Filter nach Linie** — `routes.txt` nach `route_short_name` filtern (alle MVB-Linien, Tram + Bus).
 3. **Filter nach Haltestelle** — `stop_times.txt` auf Fahrten einschränken, die die gesichtete Haltestelle bedienen.
 4. **Filter nach Zeitfenster** — Abfahrts-/Ankunftszeit ±N Minuten um `observed_at`.
 5. **Ergebnis:** Liste von `trip_id`-Kandidaten → Nutzer wählt den korrekten Trip aus.
@@ -104,6 +106,7 @@ Für eine gegebene Sichtung (Kursnummer + Linie + Richtung + Zeit + Haltestelle)
 | Collector | `/collector` | PHP CLI | Lokales NAS |
 | Engine (API) | `/engine` | Laravel 13, PHP 8.3+ | Hetzner, `api.strassenbahn-magdeburg.de` |
 | Viewer (Frontend) | `/viewer` | Vue 3, Vite, Tailwind | Hetzner, `app.strassenbahn-magdeburg.de` |
+| Admin-Tool (Post-MVP) | `/admin` | Vue 3, Vite, Tailwind | Hetzner, `admin.strassenbahn-magdeburg.de` (TBD) |
 | Gemeinsame Defs | `/shared` | OpenAPI 3.x YAML | — |
 
 ---
@@ -116,8 +119,8 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 | Method | Endpunkt | Beschreibung |
 |---|---|---|
 | `GET` | `/api/v1/trips?date=&line=&stop=&time=` | GTFS-Trips nach Datum, Linie, Haltestelle, Zeit filtern (Matching-Kandidaten) |
-| `GET` | `/api/v1/stops` | Alle Tram-Haltestellen |
-| `GET` | `/api/v1/lines` | Alle Tram-Linien |
+| `GET` | `/api/v1/stops` | Alle MVB-Haltestellen |
+| `GET` | `/api/v1/lines` | Alle MVB-Linien (Tram + Bus) |
 
 ### Sichtungen
 | Method | Endpunkt | Beschreibung |
@@ -136,7 +139,14 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 | Method | Endpunkt | Beschreibung |
 |---|---|---|
 | `POST` | `/api/v1/collector/gtfs-import` | GTFS-Feed-Import anstoßen |
+| `GET` | `/api/v1/collector/imports` | Import-Historie & Datenstand (interne Token-Variante) |
 | `POST` | `/api/v1/collector/sightings` | Sichtungen im Batch importieren |
+
+### Admin (Post-MVP, Sanctum-geschützt)
+| Method | Endpunkt | Beschreibung |
+|---|---|---|
+| `POST` | `/api/v1/admin/login` | Admin-Login, gibt Sanctum-Token zurück |
+| `GET` | `/api/v1/admin/imports` | Import-Historie & Datenstand fürs Admin-Frontend (Browser) |
 
 ---
 
@@ -144,7 +154,8 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 
 - **Collector → Engine:** Bearer-Token (statischer API-Key in `.env`, kein Login).
 - **Viewer → Engine:** Kein Auth im MVP (öffentliche Lesezugriffe + manuelles Matching ohne Login).
-- **Zukunft:** Falls Multi-User benötigt, Laravel Sanctum nachrüsten.
+- **Admin-Tool → Engine (Post-MVP):** Laravel Sanctum (Login + Token). Eingeführt mit dem Admin-Auditing-Tool (ROADMAP I-11/I-12). Der Collector-Token bleibt rein intern und gelangt **nie** ins Browser-Frontend.
+- **Zukunft:** Vollwertiges Multi-User-System baut auf demselben Sanctum-Fundament auf.
 
 ---
 
@@ -156,7 +167,8 @@ routes          (route_id PK, route_short_name, route_type)
 stops           (stop_id PK, stop_name, lat, lon)
 trips           (trip_id PK, route_id FK, service_id, block_id, direction_id)
 stop_times      (trip_id FK, stop_id FK, arrival_time, departure_time, stop_sequence)
-calendar_dates  (service_id, date, exception_type)
+calendar        (service_id PK, monday..sunday, start_date, end_date)   -- reguläres Wochenmuster
+calendar_dates  (service_id, date, exception_type)                      -- Ausnahmen zum Wochenmuster
 
 -- Betriebsdaten
 sightings (
@@ -176,7 +188,7 @@ sightings (
 ## 8. MVP-Scope & Abgrenzung
 
 ### Im MVP enthalten
-- GTFS-Import (Tram-Linien, Magdeburg/MVB-Feed)
+- GTFS-Import (alle MVB-Linien — Tram + Bus — aus dem Magdeburg/MVB-Feed)
 - Sichtungs-Import via Collector
 - Manueller Matching-Workflow im Viewer (Sichtung → Trip-Kandidaten → Bestätigung)
 - Tagesansicht: Liste aller Umläufe mit ihren Trips
@@ -184,9 +196,12 @@ sightings (
 ### Explizit NICHT im MVP
 - Automatische/KI-gestützte Umlauf-Zuordnung ohne Nutzerinteraktion
 - Echtzeit-Fahrzeugpositionen / GTFS-RT
-- Bus, S-Bahn oder andere Verkehrsmittel
-- Multi-User / Login-System
+- S-Bahn, Regionalverkehr oder Verkehrsmittel anderer Verbünde (außerhalb der MVB)
+- Multi-User / Login-System (der öffentliche Viewer bleibt ohne Login)
 - Mobile App
+
+### Post-MVP-Erweiterungen (geplant, siehe §10 / ROADMAP I-11/I-12)
+- Admin-Tool für GTFS-Import-Auditing (`/admin`) mit Single-Admin-Login via Laravel Sanctum
 
 ---
 
@@ -197,3 +212,28 @@ sightings (
 - **Frontend:** Vue 3 Composition API (`<script setup>`), Tailwind CSS, Axios.
 - **Primärschlüssel:** UUID oder `BIGSERIAL` je nach Tabelle.
 - **Sprache:** Code & Kommentare Deutsch/Englisch-Mix (Fachbegriffe Englisch, Inline-Kommentare Deutsch).
+
+---
+
+## 10. Admin-Tool: GTFS-Import-Auditing (Post-MVP)
+
+Separates Admin-Frontend (`/admin`), **getrennt vom öffentlichen Viewer**, zur Nachvollziehbarkeit der GTFS-Importe.
+
+### 10.1 Zweck
+- Überblick, **ob und wann** ein GTFS-Import lief und **ob er erfolgreich** war.
+- **Datenstand**: aktueller Bestand je Tabelle (routes/stops/trips/stop_times/calendar_dates), Feed-Version und Gültigkeitszeitraum aus `feed_info.txt`.
+- **Fehlerdiagnose**: fehlgeschlagene Läufe (`failed`) inkl. Fehlermeldung.
+
+### 10.2 Datengrundlage
+- Tabelle `gtfs_import_runs` (eingeführt in ROADMAP I-02b): pro Lauf `status`, `started_at`/`finished_at`, `counts`, `feed_version`, Gültigkeitszeitraum, `error_message`.
+- Gelesen über `GET /api/v1/admin/imports` (Sanctum-geschützt). Die interne Token-Variante `GET /api/v1/collector/imports` bleibt für NAS-Skripte bestehen; beide nutzen dieselbe Abfrage-Logik (Engine-seitig in einem gemeinsamen Service gebündelt).
+
+### 10.3 Sichten (read-only)
+- **Import-Historie**: Liste der Läufe mit Status-Badge (`success`/`failed`/`running`), Start-/Endzeit, Counts, Feed-Version.
+- **Datenstand**: aktueller Bestand je Tabelle + letzter erfolgreicher Import.
+- **Lauf-Detail**: alle Felder eines Laufs, bei `failed` die Fehlermeldung.
+
+### 10.4 Auth & Abgrenzung
+- Zugriff nur nach Admin-Login (Laravel Sanctum, ROADMAP I-11). Collector-Token niemals im Browser.
+- **Read-only**: Das *Anstoßen* von Importen bleibt CLI/Cron auf dem NAS (I-09) — kein Trigger-Button im geplanten Umfang.
+- Zeitzonen-Konvertierung nach `Europe/Berlin` ausschließlich in `admin/src/utils/timezone.ts` (analog zur Viewer-Regel).

@@ -49,6 +49,17 @@ md-takt/
 │   ├── vite.config.ts
 │   └── package.json
 │
+├── admin/                            # Vue 3 SPA — Admin-Tool (Post-MVP, I-11/I-12)
+│   ├── src/
+│   │   ├── components/               # Wiederverwendbare Vue-Komponenten
+│   │   ├── views/                    # Import-Historie, Datenstand, Lauf-Detail
+│   │   ├── services/
+│   │   │   └── api.ts                # Axios-Client inkl. Sanctum-Token-Interceptor
+│   │   └── utils/
+│   │       └── timezone.ts           # Europe/Berlin-Konvertierung — NUR hier
+│   ├── vite.config.ts
+│   └── package.json
+│
 └── shared/                           # Gemeinsame Definitionen — kein ausführbarer Code
     ├── openapi.yaml                  # API-Kontrakt (OpenAPI 3.x) — vor Implementierung pflegen
     └── bruno/                        # API-Tests (Bruno)
@@ -77,6 +88,7 @@ md-takt/
 |---|---|---|
 | Frontend (Live) | https://app.strassenbahn-magdeburg.de | `/viewer` |
 | Backend-API (Live) | https://api.strassenbahn-magdeburg.de | `/engine` |
+| Admin-Tool (Post-MVP) | https://admin.strassenbahn-magdeburg.de (TBD) | `/admin` |
 | Hauptdomain | https://strassenbahn-magdeburg.de | — |
 | Collector | Lokales NAS (kein öffentlicher Zugriff) | `/collector` |
 
@@ -90,7 +102,7 @@ md-takt/
       | HTTP-Download (täglich)
       ↓
 [Collector — NAS]
-      |-- lädt GTFS-ZIP, entpackt, filtert auf Tram (route_type=0)
+      |-- lädt GTFS-ZIP, entpackt, filtert auf die MVB-Agency (alle Verkehrsmittel: Tram + Bus)
       |-- holt Sichtungen aus MDKursTracker (API oder NaruaDB, TBD)
       |-- normalisiert Zeitstempel auf UTC
       |
@@ -116,5 +128,5 @@ md-takt/
 - **Vor jeder Aufgabe:** `SPEC.md` und diese Datei lesen.
 - **Neuer API-Endpunkt:** zuerst `shared/openapi.yaml` + Bruno-Datei anlegen, dann implementieren.
 - **Schema-Änderung:** zuerst Migration in `engine/database/migrations/`, dann Model/Service.
-- **Zeitzone:** Konvertierung nach `Europe/Berlin` ausschließlich in `viewer/src/utils/timezone.ts`.
+- **Zeitzone:** Konvertierung nach `Europe/Berlin` ausschließlich in der `timezone.ts` des jeweiligen Frontends (`viewer/src/utils/timezone.ts`, `admin/src/utils/timezone.ts`) — nirgends sonst.
 - **Unklarheit zur Fachlogik:** stoppen und nachfragen — nicht eigenständig entscheiden.

@@ -1,0 +1,31 @@
+meta {
+  name: Import Finish
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/collector/imports/{{runId}}/finish
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{collectorToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.status: eq success
+}
+
+docs {
+  # Import abschliessen
+
+  Markiert den Lauf (`runId` aus `imports-start.bru`) als erfolgreich.
+  Danach liefert `imports.bru` (GET) den Lauf in der Historie.
+}

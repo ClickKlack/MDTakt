@@ -1,0 +1,39 @@
+meta {
+  name: Import History
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v1/collector/imports?limit=20
+  body: none
+  auth: bearer
+}
+
+params:query {
+  limit: 20
+}
+
+auth:bearer {
+  token: {{collectorToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.current.tables.routes: isNumber
+  res.body.data.runs: isArray
+}
+
+docs {
+  # Import-Historie & Datenstand
+
+  Listet die letzten GTFS-Import-Läufe (Status, Counts, Feed-Version) plus den
+  aktuellen Datenbestand. Token-geschützt wie alle Collector-Endpunkte.
+
+  Voraussetzung für die Assertions: mindestens ein Import wurde zuvor durchgeführt
+  (siehe `gtfs-import.bru`).
+}

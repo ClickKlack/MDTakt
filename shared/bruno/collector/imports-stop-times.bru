@@ -1,0 +1,41 @@
+meta {
+  name: Import Stop-Times Chunk
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/collector/imports/{{runId}}/stop-times
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{collectorToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "stop_times": [
+      { "trip_id": "T1", "stop_id": "S1", "arrival_time": "05:30:00", "departure_time": "05:30:00", "stop_sequence": 1 },
+      { "trip_id": "T1", "stop_id": "S2", "arrival_time": "05:34:00", "departure_time": "05:34:00", "stop_sequence": 2 }
+    ]
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.imported.stop_times: eq 2
+}
+
+docs {
+  # stop_times-Chunk anhaengen
+
+  Benoetigt `runId` aus `imports-start.bru`. Der Collector ruft diesen Endpunkt
+  pro Chunk (Default 10.000 Zeilen) mehrfach auf.
+}

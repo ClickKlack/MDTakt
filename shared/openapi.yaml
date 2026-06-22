@@ -31,4 +31,298 @@ components:
             message:
               type: string
 
-paths: {}
+    GtfsRoute:
+      type: object
+      required: [route_id, route_short_name, route_type]
+      properties:
+        route_id: { type: string }
+        route_short_name: { type: string }
+        route_type: { type: integer, description: "GTFS route_type; vom Collector auf 0 (Tram) gefiltert" }
+
+    GtfsStop:
+      type: object
+      required: [stop_id, stop_name]
+      properties:
+        stop_id: { type: string }
+        stop_name: { type: string }
+        lat: { type: number, nullable: true }
+        lon: { type: number, nullable: true }
+
+    GtfsTrip:
+      type: object
+      required: [trip_id, route_id, service_id]
+      properties:
+        trip_id: { type: string }
+        route_id: { type: string }
+        service_id: { type: string }
+        block_id: { type: string, nullable: true }
+        direction_id: { type: integer, nullable: true, enum: [0, 1] }
+
+    GtfsStopTime:
+      type: object
+      required: [trip_id, stop_id, stop_sequence]
+      properties:
+        trip_id: { type: string }
+        stop_id: { type: string }
+        arrival_time: { type: string, nullable: true, description: "GTFS-Zeit HH:MM:SS, kann > 24:00:00 sein" }
+        departure_time: { type: string, nullable: true, description: "GTFS-Zeit HH:MM:SS, kann > 24:00:00 sein" }
+        stop_sequence: { type: integer }
+
+    GtfsCalendar:
+      type: object
+      description: "GTFS calendar.txt — reguläres Wochenmuster der Betriebstage"
+      required: [service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date]
+      properties:
+        service_id: { type: string }
+        monday: { type: integer, enum: [0, 1] }
+        tuesday: { type: integer, enum: [0, 1] }
+        wednesday: { type: integer, enum: [0, 1] }
+        thursday: { type: integer, enum: [0, 1] }
+        friday: { type: integer, enum: [0, 1] }
+        saturday: { type: integer, enum: [0, 1] }
+        sunday: { type: integer, enum: [0, 1] }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+
+    GtfsCalendarDate:
+      type: object
+      required: [service_id, date, exception_type]
+      properties:
+        service_id: { type: string }
+        date: { type: string, format: date }
+        exception_type: { type: integer, enum: [1, 2] }
+
+    GtfsFeedInfo:
+      type: object
+      description: "Optionaler Feed-Datenstand aus feed_info.txt"
+      properties:
+        feed_version: { type: string, nullable: true }
+        feed_start_date: { type: string, format: date, nullable: true }
+        feed_end_date: { type: string, format: date, nullable: true }
+
+    ImportStartRequest:
+      type: object
+      description: >
+        Startet einen Import-Lauf mit den Basistabellen (ohne stop_times).
+        Body darf gzip-komprimiert gesendet werden (Header `Content-Encoding: gzip`).
+      required: [routes, stops, trips, calendar_dates]
+      properties:
+        routes: { type: array, items: { $ref: '#/components/schemas/GtfsRoute' } }
+        stops: { type: array, items: { $ref: '#/components/schemas/GtfsStop' } }
+        trips: { type: array, items: { $ref: '#/components/schemas/GtfsTrip' } }
+        calendar: { type: array, items: { $ref: '#/components/schemas/GtfsCalendar' } }
+        calendar_dates: { type: array, items: { $ref: '#/components/schemas/GtfsCalendarDate' } }
+        feed_info: { $ref: '#/components/schemas/GtfsFeedInfo' }
+
+    StopTimesChunkRequest:
+      type: object
+      description: >
+        Ein Chunk an stop_times für einen laufenden Import.
+        Body darf gzip-komprimiert gesendet werden (Header `Content-Encoding: gzip`).
+      required: [stop_times]
+      properties:
+        stop_times: { type: array, items: { $ref: '#/components/schemas/GtfsStopTime' } }
+
+    GtfsImportRun:
+      type: object
+      required: [id, status, started_at]
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [running, success, failed] }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        feed_version: { type: string, nullable: true }
+        feed_start_date: { type: string, format: date, nullable: true }
+        feed_end_date: { type: string, format: date, nullable: true }
+        counts:
+          type: object
+          nullable: true
+          properties:
+            routes: { type: integer }
+            stops: { type: integer }
+            trips: { type: integer }
+            stop_times: { type: integer }
+            calendar_dates: { type: integer }
+        error_message: { type: string, nullable: true }
+
+    GtfsImportStatusResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [current, runs]
+          properties:
+            current:
+              type: object
+              description: "Aktueller Datenbestand und letzter erfolgreicher Stand"
+              properties:
+                last_success_at: { type: string, format: date-time, nullable: true }
+                feed_version: { type: string, nullable: true }
+                tables:
+                  type: object
+                  properties:
+                    routes: { type: integer }
+                    stops: { type: integer }
+                    trips: { type: integer }
+                    stop_times: { type: integer }
+                    calendar_dates: { type: integer }
+            runs:
+              type: array
+              items: { $ref: '#/components/schemas/GtfsImportRun' }
+
+    GtfsImportRunResponse:
+      type: object
+      description: "Zusammenfassung eines Laufs (Start/Chunk/Abschluss)"
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [run_id, status, imported]
+          properties:
+            run_id: { type: integer }
+            status: { type: string, enum: [running, success, failed] }
+            imported:
+              type: object
+              required: [routes, stops, trips, stop_times, calendar_dates]
+              properties:
+                routes: { type: integer }
+                stops: { type: integer }
+                trips: { type: integer }
+                stop_times: { type: integer }
+                calendar: { type: integer }
+                calendar_dates: { type: integer }
+
+paths:
+  /api/v1/collector/imports:
+    post:
+      operationId: startGtfsImport
+      summary: GTFS-Import starten (Basistabellen)
+      description: >
+        Startet einen Import-Lauf und speichert die Basistabellen idempotent per Upsert.
+        Die stop_times folgen separat in Chunks. Body darf gzip-komprimiert sein.
+      tags: [Collector]
+      security:
+        - CollectorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportStartRequest'
+      responses:
+        '201':
+          description: Lauf gestartet (Status running)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GtfsImportRunResponse' }
+        '400':
+          description: Ungültiger gzip-Body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Fehlender oder ungültiger Bearer-Token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validierungsfehler im Payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      operationId: listGtfsImports
+      summary: Import-Historie und aktueller Datenstand
+      description: >
+        Liefert die letzten GTFS-Import-Läufe (Status, Zeitpunkte, Counts, Feed-Version)
+        sowie den aktuellen Datenbestand. Dient der Nachvollziehbarkeit des Imports.
+      tags: [Collector]
+      security:
+        - CollectorToken: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: Anzahl der zurückgegebenen Läufe
+      responses:
+        '200':
+          description: Import-Historie und Datenstand
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GtfsImportStatusResponse'
+        '401':
+          description: Fehlender oder ungültiger Bearer-Token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/collector/imports/{run}/stop-times:
+    post:
+      operationId: appendStopTimes
+      summary: stop_times-Chunk an einen laufenden Import anhängen
+      description: Hängt einen Chunk an stop_times an. Body darf gzip-komprimiert sein.
+      tags: [Collector]
+      security:
+        - CollectorToken: []
+      parameters:
+        - name: run
+          in: path
+          required: true
+          schema: { type: integer }
+          description: ID des laufenden Imports
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopTimesChunkRequest'
+      responses:
+        '200':
+          description: Chunk gespeichert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GtfsImportRunResponse' }
+        '401':
+          description: Fehlender oder ungültiger Bearer-Token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Lauf ist bereits abgeschlossen oder fehlgeschlagen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/collector/imports/{run}/finish:
+    post:
+      operationId: finishGtfsImport
+      summary: Import-Lauf abschließen
+      description: Markiert den Lauf als erfolgreich abgeschlossen.
+      tags: [Collector]
+      security:
+        - CollectorToken: []
+      parameters:
+        - name: run
+          in: path
+          required: true
+          schema: { type: integer }
+          description: ID des laufenden Imports
+      responses:
+        '200':
+          description: Lauf abgeschlossen (Status success)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GtfsImportRunResponse' }
+        '401':
+          description: Fehlender oder ungültiger Bearer-Token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Lauf ist bereits abgeschlossen oder fehlgeschlagen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }

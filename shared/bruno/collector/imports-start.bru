@@ -1,0 +1,66 @@
+meta {
+  name: Import Start
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/collector/imports
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{collectorToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "routes": [
+      { "route_id": "1", "route_short_name": "1", "route_type": 0 }
+    ],
+    "stops": [
+      { "stop_id": "S1", "stop_name": "Hasselbachplatz", "lat": 52.1205, "lon": 11.6276 },
+      { "stop_id": "S2", "stop_name": "Alter Markt", "lat": 52.1318, "lon": 11.6395 }
+    ],
+    "trips": [
+      { "trip_id": "T1", "route_id": "1", "service_id": "W1", "block_id": "B1", "direction_id": 0 }
+    ],
+    "calendar": [
+      { "service_id": "W1", "monday": 1, "tuesday": 1, "wednesday": 1, "thursday": 1, "friday": 1, "saturday": 0, "sunday": 0, "start_date": "2026-01-01", "end_date": "2026-12-31" }
+    ],
+    "calendar_dates": [
+      { "service_id": "W1", "date": "2026-06-22", "exception_type": 1 }
+    ],
+    "feed_info": {
+      "feed_version": "2026-06-20T03:00",
+      "feed_start_date": "2026-06-20",
+      "feed_end_date": "2026-12-13"
+    }
+  }
+}
+
+script:post-response {
+  // run_id fuer die Folge-Requests (stop-times, finish) merken
+  bru.setVar("runId", res.body.data.run_id);
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.status: eq running
+  res.body.data.run_id: isNumber
+}
+
+docs {
+  # Import starten
+
+  Legt einen Lauf an und schreibt die Basistabellen (ohne stop_times).
+  Speichert `run_id` als Variable fuer die Folge-Requests. Der echte Collector
+  sendet den Body gzip-komprimiert (Header `Content-Encoding: gzip`); Bruno sendet
+  unkomprimiert — die Engine akzeptiert beides.
+}

@@ -1,0 +1,28 @@
+meta {
+  name: List Stops
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/stops
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+}
+
+docs {
+  # Alle MVB-Haltestellen
+
+  Öffentliche Stammdaten, kein Auth im MVP. Nach `stop_name` sortiert.
+
+  Voraussetzung für die Assertions: mindestens ein GTFS-Import wurde durchgeführt.
+}

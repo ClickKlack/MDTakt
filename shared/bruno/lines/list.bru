@@ -1,0 +1,29 @@
+meta {
+  name: List Lines
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/lines
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+}
+
+docs {
+  # Alle MVB-Linien (Tram + Bus)
+
+  Öffentliche Stammdaten, kein Auth im MVP. Jede Linie enthält `route_id`,
+  `route_short_name` und `route_type` (0 = Tram, 3 = Bus).
+
+  Voraussetzung für die Assertions: mindestens ein GTFS-Import wurde durchgeführt.
+}

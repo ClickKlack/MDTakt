@@ -37,7 +37,7 @@ components:
       properties:
         route_id: { type: string }
         route_short_name: { type: string }
-        route_type: { type: integer, description: "GTFS route_type; vom Collector auf 0 (Tram) gefiltert" }
+        route_type: { type: integer, description: "GTFS route_type; 0 = Tram, 3 = Bus (alle MVB-Verkehrsmittel)" }
 
     GtfsStop:
       type: object
@@ -193,7 +193,125 @@ components:
                 calendar: { type: integer }
                 calendar_dates: { type: integer }
 
+    Line:
+      type: object
+      description: "MVB-Linie für die Lines-API: roher GTFS route_type plus abgeleiteter Modus-Slug"
+      required: [route_id, route_short_name, route_type, mode]
+      properties:
+        route_id: { type: string }
+        route_short_name: { type: string }
+        route_type: { type: integer, description: "Roher GTFS route_type (0 = Tram, 3 = Bus)" }
+        mode:
+          type: string
+          enum: [tram, bus, other]
+          description: "Aus route_type abgeleiteter Verkehrsmittel-Modus; unbekannte Typen → other"
+
+    TripCandidate:
+      type: object
+      description: "GTFS-Trip inkl. Linieninfo (route_short_name/route_type/mode) als Matching-Vorbereitung"
+      required: [trip_id, route_id, service_id]
+      properties:
+        trip_id: { type: string }
+        route_id: { type: string }
+        route_short_name: { type: string, description: "nur gesetzt, wenn route-Relation geladen" }
+        route_type: { type: integer, description: "0 = Tram, 3 = Bus" }
+        mode:
+          type: string
+          enum: [tram, bus, other]
+          description: "Aus route_type abgeleiteter Modus; nur gesetzt, wenn route-Relation geladen"
+        service_id: { type: string }
+        block_id: { type: string, nullable: true }
+        direction_id: { type: integer, nullable: true, enum: [0, 1] }
+
+    LineListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Line' }
+
+    StopListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/GtfsStop' }
+
+    TripListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TripCandidate' }
+
 paths:
+  /api/v1/lines:
+    get:
+      operationId: listLines
+      summary: Alle MVB-Linien (Tram + Bus)
+      description: Öffentliche Stammdaten — kein Auth im MVP.
+      tags: [Stammdaten]
+      responses:
+        '200':
+          description: Liste aller Linien
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineListResponse' }
+
+  /api/v1/stops:
+    get:
+      operationId: listStops
+      summary: Alle MVB-Haltestellen
+      description: Öffentliche Stammdaten — kein Auth im MVP. Nach Name sortiert.
+      tags: [Stammdaten]
+      responses:
+        '200':
+          description: Liste aller Haltestellen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StopListResponse' }
+
+  /api/v1/trips:
+    get:
+      operationId: listTrips
+      summary: GTFS-Trips nach Betriebstag, Linie und Haltestelle filtern
+      description: >
+        Liefert gefilterte Trips als Matching-Vorbereitung (SPEC §3.2, Stufen 1–3).
+        Alle Filter sind optional und werden mit UND verknüpft. Der zeitliche
+        Feinfilter (time=, ±Zeitfenster) folgt erst in I-05.
+      tags: [Stammdaten]
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Betriebstag im Format YYYY-MM-DD. Filtert auf an diesem Tag gültige service_ids.
+          schema: { type: string, format: date }
+        - name: line
+          in: query
+          required: false
+          description: Linienbezeichnung (route_short_name), z.B. "1" oder "73".
+          schema: { type: string }
+        - name: stop
+          in: query
+          required: false
+          description: stop_id einer Haltestelle, die der Trip bedienen muss.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Gefilterte Trip-Liste
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TripListResponse' }
+        '422':
+          description: Ungültiger Filter (z.B. falsches Datumsformat)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+
   /api/v1/collector/imports:
     post:
       operationId: startGtfsImport

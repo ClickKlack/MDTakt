@@ -99,18 +99,22 @@ Nach Ausführen des CLI-Commands sind alle MVB-Linien (Tram + Bus), Haltestellen
 **Ziel:** Linien, Haltestellen und Trips sind über die API abrufbar. Basis für den Viewer und das Matching.
 
 ### Aufgaben
-- [ ] Eloquent Models: `Route`, `Stop`, `Trip`, `StopTime`, `CalendarDate`
-- [ ] Laravel API Resources für alle Models
-- [ ] Endpunkte implementieren:
+- [x] Eloquent Models: `Route`, `Stop`, `Trip`, `StopTime`, `CalendarDate` (+ `Calendar` für Betriebstag-Logik)
+- [x] Laravel API Resources für alle Models (`RouteResource`, `StopResource`, `TripResource`)
+- [x] Endpunkte implementieren:
   - `GET /api/v1/lines` — alle MVB-Linien (Tram + Bus)
   - `GET /api/v1/stops` — alle Haltestellen
-  - `GET /api/v1/trips?date=&line=&stop=&time=` — gefilterte Trips (Vorbereitung Matching)
-- [ ] `openapi.yaml` in `/shared` für diese Endpunkte pflegen
-- [ ] Unit Tests: `TripFilterServiceTest` — Filter nach Datum, Linie, Haltestelle, Zeitfenster
-- [ ] Bruno-Dateien: `trips/find-candidates.bru`, `shared/bruno/environments/local.bru`
+  - `GET /api/v1/trips?date=&line=&stop=` — gefilterte Trips (Vorbereitung Matching); `time=`/Toleranz bewusst auf I-05 verschoben
+- [x] `openapi.yaml` in `/shared` für diese Endpunkte pflegen
+- [x] Unit Tests: `TripFilterServiceTest` — Filter nach Datum, Linie, Haltestelle (calendar-Wochenmuster + calendar_dates-Ausnahmen); Zeitfenster folgt mit `time=` in I-05
+- [x] Bruno-Dateien: `lines/list.bru`, `stops/list.bru`, `trips/find-candidates.bru` (Environment `local.bru` bestand bereits)
 
 ### Abnahmekriterium
 Alle drei Endpunkte liefern korrekte JSON-Antworten. Bruno-Tests laufen grün.
+
+> **Hinweis:** Der `time=`-Filter und die Zeitfenster-Toleranz (`MATCHING_WINDOW_MINUTES`)
+> wurden bewusst auf I-05 verschoben (Stopp-Regel: Matching-Algorithmus). I-03 liefert
+> die strukturellen Filter Datum/Linie/Haltestelle; I-05 erweitert `GET /trips` um die zeitliche Feinauswahl.
 
 ---
 

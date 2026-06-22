@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    // Statischer Bearer-Token, mit dem sich der Collector an den internen Endpunkten authentifiziert.
+    'collector' => [
+        'token' => env('COLLECTOR_API_TOKEN'),
+    ],
+
 ];

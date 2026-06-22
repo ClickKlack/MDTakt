@@ -1,0 +1,3 @@
+agency_id,agency_name,agency_url,agency_timezone
+mvb,Magdeburger Verkehrsbetriebe GmbH,https://www.mvbnet.de,Europe/Berlin
+dvb,Dresdner Verkehrsbetriebe AG,https://www.dvb.de,Europe/Berlin

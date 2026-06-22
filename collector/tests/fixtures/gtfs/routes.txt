@@ -1,0 +1,4 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+1,mvb,1,Kannenstieg - Lerchenwuhne,0
+10,dvb,4,Radebeul - Laubegast,0
+B5,mvb,55,Innenstadt - Reform,3

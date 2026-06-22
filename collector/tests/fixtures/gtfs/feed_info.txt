@@ -1,0 +1,2 @@
+feed_publisher_name,feed_publisher_url,feed_lang,feed_start_date,feed_end_date,feed_version
+gtfs.de,https://gtfs.de,de,20260620,20261213,2026-06-20T03:00

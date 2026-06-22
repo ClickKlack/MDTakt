@@ -1,0 +1,19 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Dotenv\Dotenv;
+use MdTakt\Collector\Commands\GtfsImportCommand;
+use Symfony\Component\Console\Application;
+
+require __DIR__ . '/../vendor/autoload.php';
+
+// .env aus dem Collector-Wurzelverzeichnis laden (falls vorhanden).
+if (is_file(__DIR__ . '/../.env')) {
+    Dotenv::createImmutable(__DIR__ . '/..')->safeLoad();
+}
+
+$app = new Application('MD-Takt Collector', '0.1.0');
+$app->add(new GtfsImportCommand());
+$app->run();

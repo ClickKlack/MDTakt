@@ -1,0 +1,5 @@
+route_id,service_id,trip_id,trip_headsign,direction_id,block_id
+1,W1,T1,Lerchenwuhne,0,
+1,W1,T2,Kannenstieg,1,B1
+10,X1,T10,Laubegast,0,
+B5,W1,TB,Reform,0,

@@ -1,0 +1,4 @@
+stop_id,stop_name,stop_lat,stop_lon
+S1,Hasselbachplatz,52.1205000,11.6276000
+S2,Alter Markt,52.1318000,11.6395000
+S9,Radebeul Ost,51.1050000,13.6600000

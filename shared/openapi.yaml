@@ -16,6 +16,10 @@ components:
       type: http
       scheme: bearer
       description: Statischer API-Key für Collector-Endpunkte
+    AdminToken:
+      type: http
+      scheme: bearer
+      description: Laravel-Sanctum-Token (Admin-Schaltzentrale); via POST /api/v1/admin/login erhalten
 
   schemas:
     Error:
@@ -231,6 +235,36 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Line' }
 
+    AdminLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+
+    Admin:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+
+    AdminAuthResponse:
+      type: object
+      description: "Login-Antwort: Admin-Daten plus Sanctum-Token"
+      required: [data, token, token_type]
+      properties:
+        data: { $ref: '#/components/schemas/Admin' }
+        token: { type: string, description: "Sanctum Plain-Text-Token (Bearer)" }
+        token_type: { type: string, enum: [Bearer] }
+
+    AdminResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Admin' }
+
     StopListResponse:
       type: object
       required: [data]
@@ -311,6 +345,66 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+
+  /api/v1/admin/login:
+    post:
+      operationId: adminLogin
+      summary: Admin-Login (Single-Admin), gibt Sanctum-Token zurück
+      tags: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminLoginRequest' }
+      responses:
+        '200':
+          description: Login erfolgreich
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminAuthResponse' }
+        '401':
+          description: Ungültige Zugangsdaten
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validierungsfehler
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/logout:
+    post:
+      operationId: adminLogout
+      summary: Aktuellen Admin-Token widerrufen
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '204':
+          description: Token widerrufen
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/me:
+    get:
+      operationId: adminMe
+      summary: Angemeldeten Admin abfragen
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Admin-Daten
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/collector/imports:
     post:

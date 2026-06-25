@@ -1,0 +1,31 @@
+meta {
+  name: Admin Me
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.email: isString
+}
+
+docs {
+  # Angemeldeten Admin abfragen
+
+  Geschützter Endpunkt (`auth:sanctum`). Setzt einen gültigen `adminToken` voraus
+  (siehe `login.bru`). Ohne/ungültiger Token → 401 im Fehler-Envelope.
+}

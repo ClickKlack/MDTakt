@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\StopController;
@@ -13,6 +14,16 @@ Route::prefix('v1')->group(function (): void {
     Route::get('lines', [LineController::class, 'index'])->name('lines.index');
     Route::get('stops', [StopController::class, 'index'])->name('stops.index');
     Route::get('trips', [TripController::class, 'index'])->name('trips.index');
+
+    // Admin-Schaltzentrale — Login öffentlich, alles übrige Sanctum-geschützt.
+    Route::prefix('admin')->group(function (): void {
+        Route::post('login', [AuthController::class, 'login'])->name('admin.login');
+
+        Route::middleware('auth:sanctum')->group(function (): void {
+            Route::post('logout', [AuthController::class, 'logout'])->name('admin.logout');
+            Route::get('me', [AuthController::class, 'me'])->name('admin.me');
+        });
+    });
 
     // Interne Collector-Endpunkte — Bearer-Token-geschützt, gzip-Body wird entpackt (NAS → Engine).
     Route::prefix('collector')->middleware(['collector.token', 'decompress'])->group(function (): void {

@@ -1,0 +1,45 @@
+meta {
+  name: Admin Login
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/login
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "email": "{{adminEmail}}",
+    "password": "{{adminPassword}}"
+  }
+}
+
+script:post-response {
+  if (res.status === 200 && res.body.token) {
+    bru.setEnvVar("adminToken", res.body.token);
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.token: isString
+  res.body.data.email: isString
+}
+
+docs {
+  # Admin-Login (Single-Admin)
+
+  Liefert bei gültigen Zugangsdaten einen Sanctum-Bearer-Token zurück und legt ihn
+  als Environment-Variable `adminToken` ab (für die geschützten Admin-Requests).
+
+  `adminEmail`/`adminPassword` als Environment-Variablen setzen (entsprechen
+  `ADMIN_EMAIL`/`ADMIN_PASSWORD` der Engine). Falsche Zugangsdaten → 401 im Fehler-Envelope.
+}

@@ -33,14 +33,15 @@ Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung
 
 | # | Iteration | Warum hier |
 |---|---|---|
-| 1 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen |
-| 2 | **I-05** Matching-Logik | Engine-Kern fürs Matching |
-| 3 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage |
-| 4 | **I-11** Auth-Fundament (Sanctum) | Login als Voraussetzung fürs Admin |
-| 5 | **I-12** Admin-Schaltzentrale | **Zuerst sichtbar = Vertrauen.** Auditing zeigt sofort echte GTFS-Daten; Matching mit Seed-/Test-Sichtungen erprobbar |
-| 6 | **I-09** Collector-/**MDKursTracker-Integration** | Live-Datenfluss (Fluss 1/2) **nach** dem Admin-Frontend |
-| 7 | **I-10** Stabilisierung | Härten, Tests, Doku |
-| 8 | **I-07 + I-08** Viewer | Öffentliche Webseite **ganz zuletzt** |
+| 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** |
+| 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten |
+| 3 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen |
+| 4 | **I-05** Matching-Logik | Engine-Kern fürs Matching |
+| 5 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage |
+| 6 | **I-12 b** Admin-Matching-Workflow | Matching-UI auf den Engine-APIs (mit Seed-/Test-Sichtungen erprobbar) |
+| 7 | **I-09** Collector-/**MDKursTracker-Integration** | Live-Datenfluss (Fluss 1/2) **nach** dem Admin-Frontend |
+| 8 | **I-10** Stabilisierung | Härten, Tests, Doku |
+| 9 | **I-07 + I-08** Viewer | Öffentliche Webseite **ganz zuletzt** |
 
 **Begründung:** Das Admin-Frontend zuerst zu bauen schafft Vertrauen — der Betreiber sieht unmittelbar, was das System
 tut (Import-Stand, Matching-Ergebnisse), bevor die MDKursTracker-Anbindung live geht. Der öffentliche Viewer ist die
@@ -313,7 +314,7 @@ Ein frischer Checkout mit `README.md` als einziger Anleitung führt zu einem lau
 
 ### Aufgaben
 - [ ] Laravel Sanctum installieren und konfigurieren
-- [ ] Admin-Zugang: Single-Admin (Seed/`.env`) **oder** `users`-Tabelle + Migration — *offener Punkt, vorab klären*
+- [ ] Admin-Zugang: **Single-Admin via `.env`/Seed** (entschieden 2026-06-25). Minimale `users`-Tabelle (Sanctum-Standard), genau ein Eintrag aus `ADMIN_EMAIL` + `ADMIN_PASSWORD` (bcrypt) via Seeder; kein Self-Signup, keine Rollen
 - [ ] Login-Endpunkt `POST /api/v1/admin/login` (gibt Sanctum-Token zurück), Logout
 - [ ] Middleware/Guard für alle `/api/v1/admin/*`-Routen (`auth:sanctum`)
 - [ ] `openapi.yaml` + Bruno-Dateien: `admin/login.bru`, `environments/local.bru` um Admin-Token erweitern
@@ -370,5 +371,5 @@ GTFS-Import-Historie inkl. Datenstand und Fehlern einsehen. Uhrzeiten erscheinen
 | Umgang mit Sichtungen ohne GTFS-Trip (Betriebsfahrten) | I-05 | ❓ offen |
 | Schnittstelle MDKursTracker (API vs. NaruaDB) | I-09 | ✅ geklärt: HTTP-API (siehe INTEGRATION_MDKURSTRACKER.md) |
 | Cron-Intervall für Sichtungs-Sync | I-09 | ❓ offen |
-| Admin-Zugangsmodell (Single-Admin via Seed vs. `users`-Tabelle) | I-11 | ❓ offen |
+| Admin-Zugangsmodell (Single-Admin via Seed vs. `users`-Tabelle) | I-11 | ✅ entschieden: Single-Admin via `.env`/Seed (minimale `users`-Tabelle) |
 | Subdomain/Hosting für die Admin-Schaltzentrale (`admin.strassenbahn-magdeburg.de`?) | I-12 | ❓ offen |

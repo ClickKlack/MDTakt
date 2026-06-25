@@ -1,0 +1,30 @@
+meta {
+  name: Admin Logout
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/logout
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 204
+}
+
+docs {
+  # Admin-Logout
+
+  Widerruft den aktuellen Sanctum-Token (`auth:sanctum`). Danach ist `adminToken`
+  ungültig — ein erneuter `login` ist nötig. Antwort: 204 ohne Body.
+}

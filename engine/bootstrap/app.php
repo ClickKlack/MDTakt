@@ -1,8 +1,13 @@
 <?php
 
+use App\Http\Middleware\CollectorTokenMiddleware;
+use App\Http\Middleware\DecompressRequest;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -13,10 +18,22 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'collector.token' => \App\Http\Middleware\CollectorTokenMiddleware::class,
-            'decompress' => \App\Http\Middleware\DecompressRequest::class,
+            'collector.token' => CollectorTokenMiddleware::class,
+            'decompress' => DecompressRequest::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Nicht authentifiziert → einheitlicher Fehler-Envelope statt Laravel-Default.
+        $exceptions->render(function (AuthenticationException $e, Request $request): ?JsonResponse {
+            if (! $request->expectsJson() && ! $request->is('api/*')) {
+                return null;
+            }
+
+            return response()->json([
+                'error' => [
+                    'code' => JsonResponse::HTTP_UNAUTHORIZED,
+                    'message' => 'Unauthenticated.',
+                ],
+            ], JsonResponse::HTTP_UNAUTHORIZED);
+        });
     })->create();

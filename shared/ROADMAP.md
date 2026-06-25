@@ -14,14 +14,38 @@
 | **I-04** | Sichtungs-API | Engine + Shared | Sichtungen können gespeichert & gelesen werden |
 | **I-05** | Matching-Logik | Engine | Trip-Kandidaten werden für eine Sichtung berechnet |
 | **I-06** | Zuordnung & Umläufe | Engine | Zuordnung bestätigen, Umlauf-Tagesansicht per API |
-| **I-07** | Viewer Grundgerüst | Viewer | Vue-App läuft, Tagesansicht zeigt Umläufe |
-| **I-08** | Matching-Workflow | Viewer | Kompletter manueller Matching-Workflow im Browser |
+| **I-07** | Viewer Grundgerüst | Viewer | Öffentliche read-only Webseite, Tagesansicht der Umläufe |
+| **I-08** | Viewer-Ausbau (Info) | Viewer | Linien-/Fahrplananzeige, Haltestellenrecherche |
 | **I-09** | Collector-Integration | Collector | Automatischer GTFS-Import & Sichtungs-Sync vom NAS |
 | **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen |
-| **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte |
-| **I-12** | Admin-Tool: Import-Audit | Admin + Engine | Separates Admin-Frontend zeigt Import-Historie & Datenstand |
+| **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) |
+| **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing |
 
-> **I-11/I-12** sind Post-MVP-Erweiterungen (Admin-Tool fürs GTFS-Import-Auditing, SPEC §10). Sie hängen nur an Engine + **I-02b** — nicht am öffentlichen Viewer — und können daher unabhängig vom MVP-Strang (I-03…I-10) vorgezogen werden.
+> **Frontend-Zuschnitt:** Der **Viewer** ist die **öffentliche, rein lesende Info-Webseite** (Linien, Fahrpläne,
+> Haltestellen, Umläufe). Die **Admin-Schaltzentrale** (`/admin`, Sanctum) bündelt **alle kuratierenden/steuernden
+> Aktionen** — insbesondere den **Matching-Workflow** (aus dem Viewer hierher verschoben). Folge: **I-11 (Auth) +
+> der Matching-Teil von I-12 sind MVP-kritisch** (das Matching braucht Login). Die übrigen Schaltzentrale-Bereiche
+> (Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing) sind Ausbaustufen. Siehe SPEC §10.
+
+### Umsetzungsreihenfolge (Priorisierung)
+
+Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung. Gewünschte Reihenfolge:
+
+| # | Iteration | Warum hier |
+|---|---|---|
+| 1 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen |
+| 2 | **I-05** Matching-Logik | Engine-Kern fürs Matching |
+| 3 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage |
+| 4 | **I-11** Auth-Fundament (Sanctum) | Login als Voraussetzung fürs Admin |
+| 5 | **I-12** Admin-Schaltzentrale | **Zuerst sichtbar = Vertrauen.** Auditing zeigt sofort echte GTFS-Daten; Matching mit Seed-/Test-Sichtungen erprobbar |
+| 6 | **I-09** Collector-/**MDKursTracker-Integration** | Live-Datenfluss (Fluss 1/2) **nach** dem Admin-Frontend |
+| 7 | **I-10** Stabilisierung | Härten, Tests, Doku |
+| 8 | **I-07 + I-08** Viewer | Öffentliche Webseite **ganz zuletzt** |
+
+**Begründung:** Das Admin-Frontend zuerst zu bauen schafft Vertrauen — der Betreiber sieht unmittelbar, was das System
+tut (Import-Stand, Matching-Ergebnisse), bevor die MDKursTracker-Anbindung live geht. Der öffentliche Viewer ist die
+End-Ausgabe und kommt zuletzt. Vor dem Live-Sync wird der Admin-Matching-Workflow mit **Seed-/manuell angelegten
+Sichtungen** (I-04 `POST /api/v1/sightings` bzw. Test-Factories) erprobt.
 
 ---
 
@@ -190,9 +214,12 @@ Eine Sichtung kann einem Trip zugeordnet werden. `GET /api/v1/blocks?date=heute`
 
 ---
 
-## I-07 — Viewer Grundgerüst
+## I-07 — Viewer Grundgerüst (öffentliche Info-Webseite)
 
-**Ziel:** Die Vue-App läuft und zeigt die Tagesübersicht der Umläufe.
+**Ziel:** Die Vue-App läuft als **öffentliche, rein lesende** Webseite und zeigt die Tagesübersicht der Umläufe.
+
+> Der Viewer enthält **keine** schreibenden Aktionen. Der Matching-Workflow liegt in der Admin-Schaltzentrale (I-12).
+> ⏱️ **Umsetzung laut Priorisierung ganz zuletzt** (nach Admin-Frontend, MDKursTracker-Sync und Stabilisierung).
 
 ### Aufgaben
 - [ ] Vue 3 Projekt in `/viewer` initialisieren (Vite, TypeScript, Tailwind)
@@ -211,25 +238,22 @@ Im Browser ist eine Liste aller Umläufe des heutigen Tages sichtbar. Uhrzeiten 
 
 ---
 
-## I-08 — Matching-Workflow im Viewer
+## I-08 — Viewer-Ausbau: Linien, Fahrpläne, Haltestellen
 
-**Ziel:** Der komplette manuelle Matching-Workflow ist im Browser nutzbar.
+**Ziel:** Der öffentliche Viewer wird zur informativen Webseite — Linien- und Fahrplananzeige sowie Haltestellenrecherche.
+
+> Der frühere „Matching-Workflow im Viewer" ist in die **Admin-Schaltzentrale (I-12)** verschoben (hinter Login).
 
 ### Aufgaben
-- [ ] `MatchingView` implementieren:
-  - Eingabe: Kursnummer, Linie, Richtung, Uhrzeit, Haltestelle
-  - Button „Kandidaten suchen" → `GET /api/v1/trips?...`
-  - Kandidatenliste mit Uhrzeit, Linie, Start-/Endhaltestelle
-  - Button „Zuordnen" je Kandidat → `POST /api/v1/sightings/{id}/assign`
-  - Bestätigungs-Feedback nach erfolgreicher Zuordnung
-- [ ] `BlockDetailView` implementieren:
-  - Alle zugeordneten Trips eines Umlaufs chronologisch
-  - Noch nicht zugeordnete Sichtungen der gleichen `course_number` hervorheben
-- [ ] Sonderfall: keine Kandidaten → Hinweistext mit Handlungsempfehlung
-- [ ] Navigationsleiste: DayView ↔ MatchingView
+- [ ] `LinesView`: alle MVB-Linien (`GET /api/v1/lines`), Filter Tram/Bus über `mode`
+- [ ] `TimetableView`: Fahrplan je Linie/Haltestelle (`GET /api/v1/trips?date=&line=&stop=`), Soll-Zeiten in `Europe/Berlin`
+- [ ] `StopSearchView`: Haltestellenrecherche (`GET /api/v1/stops`), Suche/Filter nach Name
+- [ ] `BlockDetailView`: alle Trips eines Umlaufs chronologisch (read-only Anzeige)
+- [ ] Navigationsleiste: DayView ↔ Linien ↔ Fahrplan ↔ Haltestellen
+- [ ] Lade-/Leerzustände je Ansicht
 
 ### Abnahmekriterium
-Eine Sichtung kann vollständig im Browser von der Eingabe bis zur Trip-Zuordnung durchgeführt werden, ohne die API direkt aufzurufen.
+Ein Nutzer kann ohne Login Linien durchsehen, einen Fahrplan je Linie/Haltestelle anzeigen, Haltestellen suchen und einen Umlauf im Detail betrachten. Alle Uhrzeiten in `Europe/Berlin`.
 
 ---
 
@@ -237,6 +261,8 @@ Eine Sichtung kann vollständig im Browser von der Eingabe bis zur Trip-Zuordnun
 
 **Ziel:** GTFS-Import und Sichtungs-Sync laufen automatisiert vom NAS.
 
+> ⏱️ **Reihenfolge:** Die MDKursTracker-Live-Anbindung (Fluss 1/2) erfolgt laut Priorisierung **nach** der
+> Admin-Schaltzentrale (I-12) — das Admin-Frontend soll zuerst Sichtbarkeit/Vertrauen schaffen.
 > ⚠️ Vor Implementierung: Schnittstelle zu MDKursTracker (API vs. NaruaDB-Direktzugriff) final entscheiden.
 > 📄 **Schnittstelle geklärt (2026-06-22):** über **HTTP-API** (MDKursTracker = MariaDB nur lokal). Engine
 > bleibt reiner Server; Sync-Cron empfohlen in MDKursTracker; Collector nur GTFS. Details + offene Punkte:
@@ -280,9 +306,10 @@ Ein frischer Checkout mit `README.md` als einziger Anleitung führt zu einem lau
 
 ## I-11 — Auth-Fundament (Sanctum)
 
-**Ziel:** Geschützter Admin-Zugang zur Engine als Basis für das Admin-Tool (I-12).
+**Ziel:** Geschützter Admin-Zugang zur Engine als Basis für die Admin-Schaltzentrale (I-12).
 
-> Post-MVP. Vorgezogen aus dem „Zukunft"-Punkt der SPEC §6, weil das Admin-Tool einen Login braucht. Setzt nur Engine + I-02b voraus, nicht den Viewer.
+> **MVP-relevant:** Da der Matching-Workflow in die Admin-Schaltzentrale wandert, ist der Login dafür Voraussetzung —
+> Sanctum ist damit kein reines Post-MVP-Thema mehr. Setzt nur Engine voraus, nicht den Viewer; vor dem Matching-Teil von I-12 umzusetzen.
 
 ### Aufgaben
 - [ ] Laravel Sanctum installieren und konfigurieren
@@ -297,25 +324,41 @@ Ein Admin meldet sich an und erhält ein Sanctum-Token. Jeder `/api/v1/admin/*`-
 
 ---
 
-## I-12 — Admin-Tool: Import-Auditing
+## I-12 — Admin-Schaltzentrale
 
-**Ziel:** Ein separates Admin-Frontend macht den GTFS-Import nachvollziehbar (Historie, Datenstand, Fehler).
+**Ziel:** Ein separates Admin-Frontend (`/admin`, Sanctum) als zentrale Schaltzentrale — Matching, Datenkorrektur,
+Fahrplanperioden-Erkennung und Import-Auditing. Alle schreibenden/kuratierenden Aktionen leben hier, getrennt vom Viewer.
 
-> ⚠️ Vor Implementierung: I-11 (Auth) muss stehen. Konzept siehe SPEC §10.
+> ⚠️ Vor Implementierung: I-11 (Auth) muss stehen. Konzept siehe SPEC §10. Wegen des Umfangs in Phasen (a–e) gegliedert;
+> Detail-Tasks der Ausbaubereiche (d/e) werden vor der jeweiligen Phase ausspezifiziert.
 
-### Aufgaben
-- [ ] Engine: gemeinsamen `GtfsImportStatusService` extrahieren (Abfrage-Logik aus dem bestehenden `/collector/imports`-Controller herauslösen, damit kein Duplikat entsteht)
-- [ ] Engine: `GET /api/v1/admin/imports` (Sanctum-geschützt) — nutzt denselben Service, ohne Collector-Token
+### (a) Grundgerüst + Login
 - [ ] Vue 3 Projekt in `/admin` initialisieren (Vite, TypeScript, Tailwind) — **getrennt** vom Viewer
-- [ ] Sanctum-Login-Flow im Admin-Frontend (Token speichern, Axios-Interceptor, Logout)
+- [ ] Sanctum-Login-Flow (Token speichern, Axios-Interceptor, Logout)
 - [ ] `timezone.ts` im Admin (`admin/src/utils/timezone.ts`): UTC → `Europe/Berlin`, nur hier
-- [ ] View „Import-Historie": Liste der Läufe mit Status-Badge (`success`/`failed`/`running`), Start-/Endzeit, Counts, Feed-Version/Gültigkeit
-- [ ] View „Datenstand": aktueller Bestand je Tabelle + letzter erfolgreicher Import
-- [ ] Detailansicht eines Laufs inkl. Fehlermeldung bei `failed`
+
+### (b) Matching-Workflow — **MVP** (aus dem Viewer hierher verschoben)
+- [ ] `MatchingView`: Sichtungsliste (`GET /api/v1/sightings?date=`), Kandidaten (`GET /api/v1/trips?...`), Zuordnen (`POST /api/v1/sightings/{id}/assign`)
+- [ ] Umlauf-Kuratierung: zugeordnete Trips chronologisch, offene Sichtungen gleicher `course_number` hervorheben
+- [ ] Sonderfall keine Kandidaten → Hinweis + Handlungsempfehlung
+- [ ] `openapi.yaml` + Bruno für die Matching-/Assign-Endpunkte
+
+### (c) Import-Auditing
+- [ ] Engine: gemeinsamen `GtfsImportStatusService` extrahieren (Abfrage-Logik aus dem `/collector/imports`-Controller herauslösen, kein Duplikat)
+- [ ] Engine: `GET /api/v1/admin/imports` (Sanctum) — nutzt denselben Service, ohne Collector-Token
+- [ ] View „Import-Historie" (Status-Badge, Zeiten, Counts, Feed-Version) + „Datenstand" + Lauf-Detail mit Fehlermeldung
 - [ ] `openapi.yaml` + Bruno-Datei: `admin/imports.bru`
 
+### (d) Datenkorrektur — *Ausbau, Detaillierung folgt*
+- [ ] Manuelle Korrektur/Überschreibung von Zuordnungen; ggf. Stammdaten-Overrides
+
+### (e) Fahrplanperioden-Erkennung — *Ausbau, Detaillierung folgt*
+- [ ] Neuen Feed-Build mit geänderten Zeiten erkennen → betroffene Zuordnungen als *stale/neu zu bestätigen* markieren
+  (Signatur-Ansatz, siehe `INTEGRATION_MDKURSTRACKER.md` §4.2)
+
 ### Abnahmekriterium
-Nach Login zeigt das Admin-Tool die Historie der GTFS-Importe und den aktuellen Datenstand. Ein fehlgeschlagener Lauf ist als `failed` mit Fehlermeldung erkennbar. Uhrzeiten erscheinen in `Europe/Berlin`.
+Nach Login kann ein Admin den Matching-Workflow vollständig durchführen (Sichtung → Kandidat → Zuordnung) und die
+GTFS-Import-Historie inkl. Datenstand und Fehlern einsehen. Uhrzeiten erscheinen in `Europe/Berlin`. (Bereiche d/e folgen als Ausbaustufen.)
 
 ---
 
@@ -328,4 +371,4 @@ Nach Login zeigt das Admin-Tool die Historie der GTFS-Importe und den aktuellen 
 | Schnittstelle MDKursTracker (API vs. NaruaDB) | I-09 | ✅ geklärt: HTTP-API (siehe INTEGRATION_MDKURSTRACKER.md) |
 | Cron-Intervall für Sichtungs-Sync | I-09 | ❓ offen |
 | Admin-Zugangsmodell (Single-Admin via Seed vs. `users`-Tabelle) | I-11 | ❓ offen |
-| Subdomain/Hosting fürs Admin-Tool (`admin.strassenbahn-magdeburg.de`?) | I-12 | ❓ offen |
+| Subdomain/Hosting für die Admin-Schaltzentrale (`admin.strassenbahn-magdeburg.de`?) | I-12 | ❓ offen |

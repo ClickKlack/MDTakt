@@ -37,10 +37,10 @@ md-takt/
 │   │   └── app.php                   # timezone: 'UTC' — nicht ändern
 │   └── .env.example                  # inkl. DB_TIMEZONE=UTC
 │
-├── viewer/                           # Vue 3 SPA — Hetzner Shared Hosting
+├── viewer/                           # Vue 3 SPA — öffentliche Info-Webseite (read-only), Hetzner Shared Hosting
 │   ├── src/
 │   │   ├── components/               # Wiederverwendbare Vue-Komponenten
-│   │   ├── views/                    # Seiten (DayView, BlockDetailView, MatchingView)
+│   │   ├── views/                    # Seiten (DayView/Umläufe, BlockDetailView, LinesView, TimetableView, StopSearchView) — read-only
 │   │   ├── services/
 │   │   │   └── api.ts                # Zentraler Axios-Client (inkl. Interceptor)
 │   │   └── utils/
@@ -49,10 +49,10 @@ md-takt/
 │   ├── vite.config.ts
 │   └── package.json
 │
-├── admin/                            # Vue 3 SPA — Admin-Tool (Post-MVP, I-11/I-12)
+├── admin/                            # Vue 3 SPA — Admin-Schaltzentrale (Sanctum, I-11/I-12)
 │   ├── src/
 │   │   ├── components/               # Wiederverwendbare Vue-Komponenten
-│   │   ├── views/                    # Import-Historie, Datenstand, Lauf-Detail
+│   │   ├── views/                    # Matching-Workflow, Datenkorrektur, Fahrplanperioden, Import-Historie/Datenstand
 │   │   ├── services/
 │   │   │   └── api.ts                # Axios-Client inkl. Sanctum-Token-Interceptor
 │   │   └── utils/
@@ -88,7 +88,7 @@ md-takt/
 |---|---|---|
 | Frontend (Live) | https://app.strassenbahn-magdeburg.de | `/viewer` |
 | Backend-API (Live) | https://api.strassenbahn-magdeburg.de | `/engine` |
-| Admin-Tool (Post-MVP) | https://admin.strassenbahn-magdeburg.de (TBD) | `/admin` |
+| Admin-Schaltzentrale | https://admin.strassenbahn-magdeburg.de (TBD) | `/admin` |
 | Hauptdomain | https://strassenbahn-magdeburg.de | — |
 | Collector | Lokales NAS (kein öffentlicher Zugriff) | `/collector` |
 
@@ -115,10 +115,14 @@ md-takt/
       |
       | GET /api/v1/* (kein Auth im MVP)
       ↓
-[Viewer — Vue 3 SPA]
-      |-- zeigt Tagesübersicht der Umläufe
-      |-- Matching-Workflow: Sichtung → Kandidaten → Bestätigung
+[Viewer — Vue 3 SPA, öffentlich, read-only]
+      |-- informative Webseite: Linien, Fahrpläne, Haltestellenrecherche
+      |-- Tagesübersicht der Umläufe (ein Teil von vielen)
       |-- konvertiert UTC → Europe/Berlin nur in timezone.ts
+
+[Admin-Schaltzentrale — Vue 3 SPA, Sanctum]
+      |-- Matching-Workflow: Sichtung → Kandidaten → Bestätigung
+      |-- Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing, Steuerung
 ```
 
 ---

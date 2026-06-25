@@ -144,6 +144,9 @@ Sichtungen können per POST gespeichert und per GET tagesweise abgerufen werden.
 **Ziel:** Für eine Sichtung werden passende GTFS-Trip-Kandidaten berechnet und zurückgegeben.
 
 > ⚠️ Vor Implementierung: Zeitfenster-Toleranz (±N Minuten) mit Jörg abstimmen.
+> 📄 **Matching-Ansatz am realen Datensatz validiert (2026-06-22):** siehe
+> [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §4 — deterministischer
+> Soll-Zeit-Sequenz-Match, 1 HAFAS-Fahrt → N GTFS-Trips, kein Stop-ID-Crosswalk. §3.2-Neufassung noch offen.
 
 ### Aufgaben
 - [ ] `TripMatchingService` implementieren:
@@ -235,6 +238,9 @@ Eine Sichtung kann vollständig im Browser von der Eingabe bis zur Trip-Zuordnun
 **Ziel:** GTFS-Import und Sichtungs-Sync laufen automatisiert vom NAS.
 
 > ⚠️ Vor Implementierung: Schnittstelle zu MDKursTracker (API vs. NaruaDB-Direktzugriff) final entscheiden.
+> 📄 **Schnittstelle geklärt (2026-06-22):** über **HTTP-API** (MDKursTracker = MariaDB nur lokal). Engine
+> bleibt reiner Server; Sync-Cron empfohlen in MDKursTracker; Collector nur GTFS. Details + offene Punkte:
+> [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §3/§5.
 
 ### Aufgaben
 - [ ] Schnittstellen-Entscheidung MDKursTracker dokumentieren
@@ -319,7 +325,7 @@ Nach Login zeigt das Admin-Tool die Historie der GTFS-Importe und den aktuellen 
 |---|---|---|
 | Zeitfenster-Toleranz beim Matching (±N Minuten) | I-05 | ❓ offen |
 | Umgang mit Sichtungen ohne GTFS-Trip (Betriebsfahrten) | I-05 | ❓ offen |
-| Schnittstelle MDKursTracker (API vs. NaruaDB) | I-09 | ❓ offen |
+| Schnittstelle MDKursTracker (API vs. NaruaDB) | I-09 | ✅ geklärt: HTTP-API (siehe INTEGRATION_MDKURSTRACKER.md) |
 | Cron-Intervall für Sichtungs-Sync | I-09 | ❓ offen |
 | Admin-Zugangsmodell (Single-Admin via Seed vs. `users`-Tabelle) | I-11 | ❓ offen |
 | Subdomain/Hosting fürs Admin-Tool (`admin.strassenbahn-magdeburg.de`?) | I-12 | ❓ offen |

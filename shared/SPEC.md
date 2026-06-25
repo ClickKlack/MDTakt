@@ -46,7 +46,10 @@ Eine Sichtung enthält:
 - `observed_at` — Zeitstempel der Sichtung (Datum + Uhrzeit)
 - `stop_name` — Haltestelle, an der gesichtet wurde
 
-**Schnittstelle MDKursTracker → MD-Takt:** Noch offen (API oder Direktzugriff auf NaruaDB). Wird in separatem Dokument spezifiziert. Der Collector auf dem NAS ist der Integrationspunkt.
+**Schnittstelle MDKursTracker → MD-Takt:** Konzept erarbeitet & validiert (2026-06-22) — siehe
+[`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md). Kurzfassung: Integration über die
+**HTTP-API** (MDKursTracker = MariaDB nur lokal, kein DB-Direktzugriff). `course_number` ist
+Nutzereingabe und **nur je Linie eindeutig** → Umlauf-Schlüssel `(line, course_number, service_date)`.
 
 ---
 
@@ -70,6 +73,13 @@ Für eine gegebene Sichtung (Kursnummer + Linie + Richtung + Zeit + Haltestelle)
 ### 3.3 Offene Frage (vor Implementierung zu klären)
 - Toleranz des Zeitfensters (±5 min? ±10 min?) — konfigurierbar machen.
 - Umgang mit Sichtungen ohne passendem GTFS-Trip (Sonderfahrten, Betriebsfahrten).
+
+> **Update 2026-06-22 (am realen Datensatz validiert, siehe [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §4):**
+> Mit den MDKursTracker-**Soll-Zeiten** wird das Matching **deterministisch** über
+> `(Linie, Tagestyp, Soll-Zeit-Sequenz lokal)` — kein HAFAS↔GTFS-Stop-ID-Crosswalk nötig, nur
+> Namens-Normalisierung. Das ±Zeitfenster aus Stufe 4 wird damit nur noch Sicherheitsmarge. Eine
+> HAFAS-Fahrt mappt auf **N** GTFS-Trips (Linienübergänge). Die formale Neufassung von §3.2 ist noch
+> offen (Stopp-Regel) und vor I-05 mit Jörg festzulegen.
 
 ---
 

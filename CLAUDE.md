@@ -51,8 +51,8 @@ Bevor du eigenständig entscheidest, **halte an und frage**, wenn:
 | Funktions-/Variablennamen | Englisch (`findCandidateTrips`, `$courseNumber`) |
 | Datenbank (Tabellen, Spalten) | Englisch, snake_case (`assigned_trip_id`) |
 | Kommentare | Deutsch (`// Kandidaten nach Zeitfenster filtern`) |
-| Zeitstempel DB | `TIMESTAMPTZ`, intern UTC — Konvertierung nur im Viewer |
-| Zeitzone Viewer | Nur in `viewer/src/utils/timezone.ts` nach `Europe/Berlin` konvertieren |
+| Zeitstempel DB | `TIMESTAMPTZ`, intern UTC — Formatierung nur in den Frontends |
+| Zeitzone Frontends | Anzeige in **lokaler Browser-Zeitzone**, dt. Format („12:43 Uhr"); Umwandlung nur in der jeweiligen `timezone.ts`. Reine Kalenderdaten (z. B. `service_date`, Feed-Gültigkeit) ohne TZ-Verschiebung. Ausnahme prüfen: Fahrplan-/Trip-Zeiten im öffentlichen Viewer ggf. fest `Europe/Berlin` (Netz-Zeit) — bei I-12b/Viewer entscheiden. |
 | Fehlerformat API | `{ "error": { "code": int, "message": string } }` |
 | Logging | Monolog via Laravel `Log`-Facade, strukturiertes Kontext-Array |
 | Schema-Änderungen | Immer als Laravel-Migration — kein manuelles DDL |

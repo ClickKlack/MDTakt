@@ -9,12 +9,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\ImportStartRequest;
 use App\Http\Requests\StopTimesChunkRequest;
 use App\Http\Resources\GtfsImportResource;
-use App\Http\Resources\GtfsImportRunResource;
 use App\Models\GtfsImportRun;
 use App\Services\GtfsImportService;
+use App\Services\GtfsImportStatusService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 /**
  * GTFS-Import als gechunkter Lebenszyklus (Collector → Engine):
@@ -27,36 +26,16 @@ use Illuminate\Support\Facades\DB;
  */
 final class ImportController extends Controller
 {
-    public function __construct(private readonly GtfsImportService $service) {}
+    public function __construct(
+        private readonly GtfsImportService $service,
+        private readonly GtfsImportStatusService $status,
+    ) {}
 
     /** GET /api/v1/collector/imports */
     public function index(Request $request): JsonResponse
     {
-        $limit = max(1, min((int) $request->integer('limit', 20), 100));
-
-        $runs = GtfsImportRun::query()->orderByDesc('id')->limit($limit)->get();
-
-        $lastSuccess = GtfsImportRun::query()
-            ->where('status', GtfsImportStatus::Success)
-            ->orderByDesc('finished_at')
-            ->first();
-
         return response()->json([
-            'data' => [
-                'current' => [
-                    'last_success_at' => $lastSuccess?->finished_at?->toIso8601String(),
-                    'feed_version' => $lastSuccess?->feed_version,
-                    'tables' => [
-                        'routes' => DB::table('routes')->count(),
-                        'stops' => DB::table('stops')->count(),
-                        'trips' => DB::table('trips')->count(),
-                        'stop_times' => DB::table('stop_times')->count(),
-                        'calendar' => DB::table('calendar')->count(),
-                        'calendar_dates' => DB::table('calendar_dates')->count(),
-                    ],
-                ],
-                'runs' => GtfsImportRunResource::collection($runs)->resolve(),
-            ],
+            'data' => $this->status->status($request->integer('page', 1), $request->integer('per_page', 10)),
         ]);
     }
 

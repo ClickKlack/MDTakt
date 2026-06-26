@@ -44,7 +44,7 @@ md-takt/
 │   │   ├── services/
 │   │   │   └── api.ts                # Zentraler Axios-Client (inkl. Interceptor)
 │   │   └── utils/
-│   │       └── timezone.ts           # Europe/Berlin-Konvertierung — NUR hier
+│   │       └── timezone.ts           # Anzeige in Browser-Ortszeit, dt. Format — NUR hier
 │   ├── public/
 │   ├── vite.config.ts
 │   └── package.json
@@ -56,7 +56,7 @@ md-takt/
 │   │   ├── services/
 │   │   │   └── api.ts                # Axios-Client inkl. Sanctum-Token-Interceptor
 │   │   └── utils/
-│   │       └── timezone.ts           # Europe/Berlin-Konvertierung — NUR hier
+│   │       └── timezone.ts           # Anzeige in Browser-Ortszeit, dt. Format — NUR hier
 │   ├── vite.config.ts
 │   └── package.json
 │
@@ -118,7 +118,7 @@ md-takt/
 [Viewer — Vue 3 SPA, öffentlich, read-only]
       |-- informative Webseite: Linien, Fahrpläne, Haltestellenrecherche
       |-- Tagesübersicht der Umläufe (ein Teil von vielen)
-      |-- konvertiert UTC → Europe/Berlin nur in timezone.ts
+      |-- formatiert Zeiten in Browser-Ortszeit (dt. Format) nur in timezone.ts
 
 [Admin-Schaltzentrale — Vue 3 SPA, Sanctum]
       |-- Matching-Workflow: Sichtung → Kandidaten → Bestätigung
@@ -132,5 +132,5 @@ md-takt/
 - **Vor jeder Aufgabe:** `SPEC.md` und diese Datei lesen.
 - **Neuer API-Endpunkt:** zuerst `shared/openapi.yaml` + Bruno-Datei anlegen, dann implementieren.
 - **Schema-Änderung:** zuerst Migration in `engine/database/migrations/`, dann Model/Service.
-- **Zeitzone:** Konvertierung nach `Europe/Berlin` ausschließlich in der `timezone.ts` des jeweiligen Frontends (`viewer/src/utils/timezone.ts`, `admin/src/utils/timezone.ts`) — nirgends sonst.
+- **Zeitzone:** Anzeige in **lokaler Browser-Zeitzone** (dt. Format, „12:43 Uhr") ausschließlich in der `timezone.ts` des jeweiligen Frontends — nirgends sonst. Reine Kalenderdaten ohne TZ-Verschiebung. (Offen: Fahrplan-/Trip-Zeiten im öffentlichen Viewer ggf. fest `Europe/Berlin` — bei I-12b/Viewer klären.)
 - **Unklarheit zur Fachlogik:** stoppen und nachfragen — nicht eigenständig entscheiden.

@@ -5,13 +5,14 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/api/v1/collector/imports?limit=20
+  url: {{baseUrl}}/api/v1/collector/imports?page=1&per_page=10
   body: none
   auth: bearer
 }
 
 params:query {
-  limit: 20
+  page: 1
+  per_page: 10
 }
 
 auth:bearer {

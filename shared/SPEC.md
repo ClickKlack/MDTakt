@@ -252,4 +252,4 @@ Der folgende Abschnitt detailliert zunächst das **Import-Auditing**; die übrig
 ### 10.4 Auth & Abgrenzung
 - Zugriff nur nach Admin-Login (Laravel Sanctum, ROADMAP I-11). Collector-Token niemals im Browser.
 - **Bzgl. Importe read-only**: Das *Anstoßen* von Importen bleibt CLI/Cron auf dem NAS (I-09) — kein Trigger-Button im geplanten Umfang. (Andere Schaltzentrale-Bereiche wie Matching/Datenkorrektur sind sehr wohl schreibend.)
-- Zeitzonen-Konvertierung nach `Europe/Berlin` ausschließlich in `admin/src/utils/timezone.ts` (analog zur Viewer-Regel).
+- Zeit-Anzeige in **lokaler Browser-Zeitzone** (dt. Format) ausschließlich in `admin/src/utils/timezone.ts` (analog zur Viewer-Regel).

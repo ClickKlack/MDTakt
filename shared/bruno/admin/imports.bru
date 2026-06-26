@@ -1,0 +1,39 @@
+meta {
+  name: Admin Imports
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/imports?page=1&per_page=10
+  body: none
+  auth: bearer
+}
+
+params:query {
+  page: 1
+  per_page: 10
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.current.tables.routes: isNumber
+  res.body.data.runs: isArray
+  res.body.data.pagination.per_page: eq 10
+}
+
+docs {
+  # Import-Historie & Datenstand (Admin)
+
+  Sanctum-geschützte Browser-Variante von `collector/imports` — gleiche Daten,
+  ohne Collector-Token. Setzt einen gültigen `adminToken` voraus (siehe `admin/login.bru`).
+  Ohne/ungültiger Token → 401 im Fehler-Envelope.
+}

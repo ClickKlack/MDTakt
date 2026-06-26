@@ -1,14 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import LoginView from '../views/LoginView.vue'
-import DashboardView from '../views/DashboardView.vue'
+import ImportsView from '../views/ImportsView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
-    { path: '/', name: 'dashboard', component: DashboardView },
-    { path: '/:pathMatch(.*)*', redirect: '/' },
+    { path: '/imports', name: 'imports', component: ImportsView },
+    { path: '/', redirect: '/imports' },
+    { path: '/:pathMatch(.*)*', redirect: '/imports' },
   ],
 })
 
@@ -21,6 +22,6 @@ router.beforeEach((to) => {
   }
 
   if (to.name === 'login' && auth.isAuthenticated) {
-    return { name: 'dashboard' }
+    return { name: 'imports' }
   }
 })

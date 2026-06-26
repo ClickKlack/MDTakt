@@ -353,9 +353,10 @@ Fahrplanperioden-Erkennung und Import-Auditing. Alle schreibenden/kuratierenden 
 ### (d) Datenkorrektur — *Ausbau, Detaillierung folgt*
 - [ ] Manuelle Korrektur/Überschreibung von Zuordnungen; ggf. Stammdaten-Overrides
 
-### (e) Fahrplanperioden-Erkennung — *Ausbau, Detaillierung folgt*
-- [ ] Neuen Feed-Build mit geänderten Zeiten erkennen → betroffene Zuordnungen als *stale/neu zu bestätigen* markieren
-  (Signatur-Ansatz, siehe `INTEGRATION_MDKURSTRACKER.md` §4.2)
+### (e) Fahrplanperioden-Erkennung — *Konzept steht, siehe [`FAHRPLANPERIODEN.md`](FAHRPLANPERIODEN.md)*
+- [ ] Vier Fahrplantypen (Mo-Fr normal / Mo-Fr Ferien / Sa / So+Feiertage); Feiertage berechnet (Sachsen-Anhalt), Ferienzeiten als Admin-CRUD
+- [ ] Netzweite Perioden-Erkennung via Timetable-Fingerprint beim Import (`schedule_periods`)
+- [ ] Periodenwechsel → betroffene Zuordnungen als *stale/neu zu bestätigen* markieren (siehe `INTEGRATION_MDKURSTRACKER.md` §4.2)
 
 ### Abnahmekriterium
 Nach Login kann ein Admin den Matching-Workflow vollständig durchführen (Sichtung → Kandidat → Zuordnung) und die

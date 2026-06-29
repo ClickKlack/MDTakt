@@ -12,10 +12,13 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Speichert vom Collector gelieferte GTFS-Stammdaten idempotent in die Datenbank.
+ * Speichert vom Collector gelieferte GTFS-Stammdaten als vollständigen Ersatz.
  *
- * Jeder Datensatz wird per Upsert geschrieben — ein erneuter Import mit gleichen
- * Schlüsseln aktualisiert bestehende Zeilen und erzeugt keine Duplikate.
+ * Roh-GTFS ist eine transiente Quelle: nur der **aktuellste Lauf** wird gehalten.
+ * gtfs.de vergibt je Build neue Surrogat-IDs, daher würde ein Upsert je ID die
+ * Vorgänger-Zeilen nicht treffen und sie als Waisen zurücklassen. Deshalb wird zu
+ * Beginn jedes Laufs der gesamte GTFS-Bestand gelöscht und neu geschrieben.
+ * Die periodenübergreifende Konsolidierung ist eine eigene Schicht (FAHRPLANPERIODEN.md).
  */
 final class GtfsImportService
 {
@@ -67,6 +70,10 @@ final class GtfsImportService
         try {
             // Reihenfolge folgt den Fremdschlüssel-Abhängigkeiten: routes ← trips.
             DB::transaction(function () use ($data, $calendar): void {
+                // Vollständig ersetzen — alten Build entfernen, sonst akkumulieren die
+                // neuen (volatilen) IDs auf den Vorgängern. stop_times folgen per Chunk.
+                $this->clearAllGtfsData();
+
                 $this->upsertRoutes($data['routes']);
                 $this->upsertStops($data['stops']);
                 $this->upsertTrips($data['trips']);
@@ -120,6 +127,20 @@ final class GtfsImportService
         Log::info('GTFS import finished', ['run_id' => $run->id] + ($run->counts ?? []));
 
         return $run->refresh();
+    }
+
+    /**
+     * Löscht den gesamten GTFS-Bestand vor dem Neuschreiben (Reihenfolge folgt
+     * den Fremdschlüsseln). sightings.assigned_trip_id wird per nullOnDelete genullt.
+     */
+    private function clearAllGtfsData(): void
+    {
+        DB::table('stop_times')->delete();
+        DB::table('trips')->delete();
+        DB::table('stops')->delete();
+        DB::table('routes')->delete();
+        DB::table('calendar')->delete();
+        DB::table('calendar_dates')->delete();
     }
 
     private function markFailed(GtfsImportRun $run, Throwable $e): void

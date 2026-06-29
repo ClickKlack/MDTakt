@@ -93,7 +93,7 @@ final class GtfsImportTest extends TestCase
             'HTTP_ACCEPT' => 'application/json',
         ];
         if ($token !== null) {
-            $server['HTTP_AUTHORIZATION'] = 'Bearer ' . $token;
+            $server['HTTP_AUTHORIZATION'] = 'Bearer '.$token;
         }
 
         return $this->call('POST', $uri, [], [], [], $server, (string) gzencode((string) json_encode($data)));
@@ -146,7 +146,7 @@ final class GtfsImportTest extends TestCase
             'HTTP_CONTENT_ENCODING' => 'gzip',
             'CONTENT_TYPE' => 'application/json',
             'HTTP_ACCEPT' => 'application/json',
-            'HTTP_AUTHORIZATION' => 'Bearer ' . self::TOKEN,
+            'HTTP_AUTHORIZATION' => 'Bearer '.self::TOKEN,
         ];
         $this->call('POST', '/api/v1/collector/imports', [], [], [], $server, 'not-actually-gzip')
             ->assertStatus(400)
@@ -199,6 +199,50 @@ final class GtfsImportTest extends TestCase
         $this->assertDatabaseCount('stops', 2);
         $this->assertDatabaseCount('trips', 1);
         $this->assertDatabaseCount('stop_times', 2);
+        $this->assertDatabaseCount('gtfs_import_runs', 2);
+    }
+
+    public function test_new_build_with_different_ids_replaces_previous(): void
+    {
+        // Build A (route '1', trip 'T1', Halte S1/S2)
+        $this->runFullImport();
+
+        // Build B mit komplett anderen IDs (gtfs.de-Neuvergabe je Build), gleiche Linie '1'
+        $build = [
+            'routes' => [['route_id' => '99', 'route_short_name' => '1', 'route_type' => 0]],
+            'stops' => [
+                ['stop_id' => 'S9', 'stop_name' => 'Neuer Halt A', 'lat' => 52.1, 'lon' => 11.6],
+                ['stop_id' => 'S10', 'stop_name' => 'Neuer Halt B', 'lat' => 52.2, 'lon' => 11.7],
+            ],
+            'trips' => [['trip_id' => 'T9', 'route_id' => '99', 'service_id' => 'W9', 'block_id' => null, 'direction_id' => 0]],
+            'calendar' => [
+                ['service_id' => 'W9', 'monday' => 1, 'tuesday' => 1, 'wednesday' => 1, 'thursday' => 1, 'friday' => 1, 'saturday' => 0, 'sunday' => 0, 'start_date' => '2026-07-01', 'end_date' => '2026-12-31'],
+            ],
+            'calendar_dates' => [['service_id' => 'W9', 'date' => '2026-07-01', 'exception_type' => 1]],
+            'feed_info' => ['feed_version' => '2026-07-01T03:00', 'feed_start_date' => '2026-07-01', 'feed_end_date' => '2026-12-31'],
+        ];
+        $stopTimes = [
+            ['trip_id' => 'T9', 'stop_id' => 'S9', 'arrival_time' => '06:00:00', 'departure_time' => '06:00:00', 'stop_sequence' => 1],
+            ['trip_id' => 'T9', 'stop_id' => 'S10', 'arrival_time' => '06:05:00', 'departure_time' => '06:05:00', 'stop_sequence' => 2],
+        ];
+
+        $runId = (int) $this->withToken(self::TOKEN)->postJson('/api/v1/collector/imports', $build)->json('data.run_id');
+        $this->withToken(self::TOKEN)->postJson("/api/v1/collector/imports/{$runId}/stop-times", ['stop_times' => $stopTimes])->assertOk();
+        $this->withToken(self::TOKEN)->postJson("/api/v1/collector/imports/{$runId}/finish")->assertOk();
+
+        // Kein Akkumulieren: nur noch Build B im Bestand …
+        $this->assertDatabaseCount('routes', 1);
+        $this->assertDatabaseCount('trips', 1);
+        $this->assertDatabaseCount('stops', 2);
+        $this->assertDatabaseCount('stop_times', 2);
+        $this->assertDatabaseHas('routes', ['route_id' => '99']);
+
+        // … die alten Build-A-Zeilen sind weg …
+        $this->assertDatabaseMissing('routes', ['route_id' => '1']);
+        $this->assertDatabaseMissing('trips', ['trip_id' => 'T1']);
+        $this->assertDatabaseMissing('stops', ['stop_id' => 'S1']);
+
+        // … aber die Audit-Historie der Läufe bleibt erhalten.
         $this->assertDatabaseCount('gtfs_import_runs', 2);
     }
 

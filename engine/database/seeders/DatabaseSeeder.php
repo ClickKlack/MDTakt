@@ -16,5 +16,8 @@ class DatabaseSeeder extends Seeder
     {
         // Single-Admin aus der Umgebung (siehe AdminSeeder).
         $this->call(AdminSeeder::class);
+
+        // Startwerte der Linienfarben (offizielle MVB-Signet-Farben).
+        $this->call(LineColorSeeder::class);
     }
 }

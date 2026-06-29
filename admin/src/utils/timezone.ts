@@ -41,6 +41,18 @@ export function formatDateTime(utc: string | Date | null | undefined): string {
   return `${day}, ${formatTime(date)}`
 }
 
+/**
+ * GTFS-Lokalzeit („HH:MM:SS", kann > 24h sein, z. B. „25:10:00") als „HH:MM".
+ * Wall-Clock im Betriebs-TZ — KEINE Zeitzonen-Umrechnung.
+ */
+export function formatClock(time: string | null | undefined): string {
+  if (!time) {
+    return '—'
+  }
+  const match = /^(\d{1,2}):(\d{2})/.exec(time)
+  return match ? `${match[1].padStart(2, '0')}:${match[2]}` : time
+}
+
 /** Reines Kalenderdatum (YYYY-MM-DD) als „DD.MM.YYYY" — OHNE Zeitzonen-Verschiebung. */
 export function formatDate(date: string | null | undefined): string {
   if (!date) {

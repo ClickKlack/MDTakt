@@ -1,0 +1,39 @@
+meta {
+  name: Set Line Color
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{baseUrl}}/api/v1/admin/line-colors/1
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "color": "#c9346c"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.color: eq #c9346c
+}
+
+docs {
+  # Linienfarbe setzen (Admin)
+
+  Setzt/ändert die Farbe einer Linie (Schlüssel: route_short_name). Sanctum-geschützt.
+  `DELETE` auf dieselbe URL setzt die Farbe zurück (Frontend nutzt dann Fallback).
+  Farbe als Hex inkl. '#'; ungültige Werte → 422 im Fehler-Envelope.
+}

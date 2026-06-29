@@ -27,6 +27,8 @@ final class RouteResource extends JsonResource
             'route_short_name' => $this->route_short_name,
             'route_type' => $this->route_type,
             'mode' => RouteType::modeFor($this->route_type),
+            // Im Admin gepflegte Linienfarbe (null = noch nicht gesetzt → Frontend-Fallback).
+            'color' => $this->lineColor?->color,
         ];
     }
 }

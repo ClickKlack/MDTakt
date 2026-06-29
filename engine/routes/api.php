@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
+use App\Http\Controllers\Admin\LineColorController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\StopController;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function (): void {
     // Öffentliche Stammdaten-Endpunkte (kein Auth im MVP, nur Lesezugriff).
     Route::get('lines', [LineController::class, 'index'])->name('lines.index');
+    Route::get('lines/{line}/trips', [LineController::class, 'trips'])->name('lines.trips');
     Route::get('stops', [StopController::class, 'index'])->name('stops.index');
     Route::get('trips', [TripController::class, 'index'])->name('trips.index');
 
@@ -24,6 +26,8 @@ Route::prefix('v1')->group(function (): void {
             Route::post('logout', [AuthController::class, 'logout'])->name('admin.logout');
             Route::get('me', [AuthController::class, 'me'])->name('admin.me');
             Route::get('imports', [AdminImportController::class, 'index'])->name('admin.imports.index');
+            Route::put('line-colors/{line}', [LineColorController::class, 'update'])->name('admin.line-colors.update');
+            Route::delete('line-colors/{line}', [LineColorController::class, 'destroy'])->name('admin.line-colors.destroy');
         });
     });
 

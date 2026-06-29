@@ -1,0 +1,32 @@
+meta {
+  name: Line Trips (grouped)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/lines/1/trips
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.line: eq 1
+  res.body.data.groups: isArray
+}
+
+docs {
+  # Fahrten einer Linie, gruppiert nach Start → Ziel
+
+  Liefert alle Fahrten der Linie, gruppiert nach erster/letzter Haltestelle
+  (Richtung/Variante), je Gruppe nach Abfahrtszeit sortiert. Öffentliche
+  Stammdaten — kein Auth. `departure_time`/`arrival_time` sind GTFS-Lokalzeiten
+  (HH:MM:SS, können > 24h sein).
+
+  Voraussetzung für sinnvolle Daten: GTFS-Import wurde durchgeführt.
+}

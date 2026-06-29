@@ -8,6 +8,7 @@ use Database\Factories\RouteFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * GTFS-Linie (route) der MVB — Tram oder Bus, je nach route_type.
@@ -53,5 +54,15 @@ final class Route extends Model
     public function trips(): HasMany
     {
         return $this->hasMany(Trip::class, 'route_id', 'route_id');
+    }
+
+    /**
+     * Im Admin pflegbare Linienfarbe (über route_short_name verknüpft).
+     *
+     * @return HasOne<LineColor, $this>
+     */
+    public function lineColor(): HasOne
+    {
+        return $this->hasOne(LineColor::class, 'route_short_name', 'route_short_name');
     }
 }

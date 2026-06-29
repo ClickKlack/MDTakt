@@ -220,6 +220,10 @@ components:
           type: string
           enum: [tram, bus, other]
           description: "Aus route_type abgeleiteter Verkehrsmittel-Modus; unbekannte Typen → other"
+        color:
+          type: string
+          nullable: true
+          description: "Im Admin gepflegte Linienfarbe (Hex inkl. '#'); null = nicht gesetzt"
 
     TripCandidate:
       type: object
@@ -292,6 +296,40 @@ components:
           type: array
           items: { $ref: '#/components/schemas/TripCandidate' }
 
+    LineTripItem:
+      type: object
+      required: [trip_id, service_id]
+      properties:
+        trip_id: { type: string }
+        service_id: { type: string }
+        departure_time: { type: string, nullable: true, description: "Abfahrt am Starthalt (GTFS-Lokalzeit HH:MM:SS, kann >24h sein)" }
+        arrival_time: { type: string, nullable: true, description: "Ankunft am Zielhalt (GTFS-Lokalzeit)" }
+
+    LineTripGroup:
+      type: object
+      required: [start_stop, end_stop, trip_count, trips]
+      properties:
+        start_stop: { type: string }
+        end_stop: { type: string }
+        trip_count: { type: integer }
+        trips:
+          type: array
+          items: { $ref: '#/components/schemas/LineTripItem' }
+
+    LineTripsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [line, trip_count, groups]
+          properties:
+            line: { type: string }
+            trip_count: { type: integer }
+            groups:
+              type: array
+              items: { $ref: '#/components/schemas/LineTripGroup' }
+
 paths:
   /api/v1/lines:
     get:
@@ -305,6 +343,27 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LineListResponse' }
+
+  /api/v1/lines/{line}/trips:
+    get:
+      operationId: listLineTrips
+      summary: Fahrten einer Linie, gruppiert nach Starthaltestelle → Zielhaltestelle
+      description: >
+        Alle Fahrten der Linie, gruppiert nach erstem und letztem Halt (Richtung/Variante).
+        Innerhalb einer Gruppe nach Abfahrtszeit sortiert. Öffentliche Stammdaten — kein Auth.
+      tags: [Stammdaten]
+      parameters:
+        - name: line
+          in: path
+          required: true
+          description: Linienbezeichnung (route_short_name), z. B. "1" oder "73".
+          schema: { type: string }
+      responses:
+        '200':
+          description: Fahrten der Linie, gruppiert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineTripsResponse' }
 
   /api/v1/stops:
     get:
@@ -444,6 +503,55 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/line-colors/{line}:
+    put:
+      operationId: setLineColor
+      summary: Linienfarbe setzen/ändern
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: line
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [color]
+              properties:
+                color: { type: string, description: "Hex inkl. '#', z. B. #c9346c" }
+      responses:
+        '200':
+          description: Farbe gespeichert
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      route_short_name: { type: string }
+                      color: { type: string }
+        '401': { description: Nicht authentifiziert, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Ungültige Farbe, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      operationId: resetLineColor
+      summary: Linienfarbe zurücksetzen
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: line
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Farbe entfernt }
+        '401': { description: Nicht authentifiziert, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/collector/imports:
     post:

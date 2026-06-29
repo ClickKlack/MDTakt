@@ -2,12 +2,16 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import LoginView from '../views/LoginView.vue'
 import ImportsView from '../views/ImportsView.vue'
+import LinesView from '../views/LinesView.vue'
+import LineColorsView from '../views/LineColorsView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
     { path: '/imports', name: 'imports', component: ImportsView },
+    { path: '/lines', name: 'lines', component: LinesView },
+    { path: '/lines/colors', name: 'line-colors', component: LineColorsView },
     { path: '/', redirect: '/imports' },
     { path: '/:pathMatch(.*)*', redirect: '/imports' },
   ],

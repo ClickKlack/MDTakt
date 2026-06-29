@@ -30,6 +30,13 @@ async function logout(): Promise<void> {
         <span class="text-lg font-semibold text-slate-900">MD-Takt — Schaltzentrale</span>
         <nav class="flex gap-1 text-sm">
           <RouterLink
+            to="/lines"
+            class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
+            active-class="bg-slate-100 font-medium text-slate-900"
+          >
+            Linien
+          </RouterLink>
+          <RouterLink
             to="/imports"
             class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
             active-class="bg-slate-100 font-medium text-slate-900"

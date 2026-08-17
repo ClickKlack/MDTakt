@@ -5,21 +5,26 @@
 
 ## Übersicht
 
-| Iteration | Titel | Modul(e) | Ziel |
-|---|---|---|---|
-| **I-01** | Fundament | Engine | Laravel-Projekt läuft, DB-Schema steht |
-| **I-02** | GTFS-Import | Collector + Engine | MVB-Fahrplandaten (Tram + Bus) sind in der DB |
-| **I-02b** | Import-Audit | Engine + Collector | Import-Historie & Datenstand nachvollziehbar |
-| **I-03** | Stammdaten-API | Engine + Shared | Linien, Haltestellen, Trips abrufbar |
-| **I-04** | Sichtungs-API | Engine + Shared | Sichtungen können gespeichert & gelesen werden |
-| **I-05** | Matching-Logik | Engine | Trip-Kandidaten werden für eine Sichtung berechnet |
-| **I-06** | Zuordnung & Umläufe | Engine | Zuordnung bestätigen, Umlauf-Tagesansicht per API |
-| **I-07** | Viewer Grundgerüst | Viewer | Öffentliche read-only Webseite, Tagesansicht der Umläufe |
-| **I-08** | Viewer-Ausbau (Info) | Viewer | Linien-/Fahrplananzeige, Haltestellenrecherche |
-| **I-09** | Collector-Integration | Collector | Automatischer GTFS-Import & Sichtungs-Sync vom NAS |
-| **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen |
-| **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) |
-| **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing |
+| Iteration | Titel | Modul(e) | Ziel | Stand |
+|---|---|---|---|---|
+| **I-01** | Fundament | Engine | Laravel-Projekt läuft, DB-Schema steht | ✅ |
+| **I-02** | GTFS-Import | Collector + Engine | MVB-Fahrplandaten (Tram + Bus) sind in der DB | ✅ |
+| **I-02b** | Import-Audit | Engine + Collector | Import-Historie & Datenstand nachvollziehbar | ✅ |
+| **I-03** | Stammdaten-API | Engine + Shared | Linien, Haltestellen, Trips abrufbar | ✅ |
+| **I-04** | Sichtungs-API | Engine + Shared | Sichtungen können gespeichert & gelesen werden | ⬜ |
+| **I-05** | Matching-Logik | Engine | Trip-Kandidaten werden für eine Sichtung berechnet | ⬜ |
+| **I-06** | Zuordnung & Umläufe | Engine | Zuordnung bestätigen, Umlauf-Tagesansicht per API | ⬜ |
+| **I-07** | Viewer Grundgerüst | Viewer | Öffentliche read-only Webseite, Tagesansicht der Umläufe | ⬜ |
+| **I-08** | Viewer-Ausbau (Info) | Viewer | Linien-/Fahrplananzeige, Haltestellenrecherche | ⬜ |
+| **I-09** | Collector-Integration | Collector | Automatischer GTFS-Import & Sichtungs-Sync vom NAS | ⬜ |
+| **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen | ⬜ |
+| **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
+| **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f |
+
+> **Stand am 17.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
+> Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
+> (f) Linien-/Fahrten-Ansicht. **Als Nächstes: I-04 → I-05 → I-06 → I-12b** — das ist der MVP-Pfad zum
+> Matching-Workflow. Fahrplanperioden Phase B/C laufen daneben als Ausbaustufe.
 
 > **Frontend-Zuschnitt:** Der **Viewer** ist die **öffentliche, rein lesende Info-Webseite** (Linien, Fahrpläne,
 > Haltestellen, Umläufe). Die **Admin-Schaltzentrale** (`/admin`, Sanctum) bündelt **alle kuratierenden/steuernden
@@ -31,17 +36,22 @@
 
 Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung. Gewünschte Reihenfolge:
 
-| # | Iteration | Warum hier |
-|---|---|---|
-| 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** |
-| 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten |
-| 3 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen |
-| 4 | **I-05** Matching-Logik | Engine-Kern fürs Matching |
-| 5 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage |
-| 6 | **I-12 b** Admin-Matching-Workflow | Matching-UI auf den Engine-APIs (mit Seed-/Test-Sichtungen erprobbar) |
-| 7 | **I-09** Collector-/**MDKursTracker-Integration** | Live-Datenfluss (Fluss 1/2) **nach** dem Admin-Frontend |
-| 8 | **I-10** Stabilisierung | Härten, Tests, Doku |
-| 9 | **I-07 + I-08** Viewer | Öffentliche Webseite **ganz zuletzt** |
+| # | Iteration | Warum hier | Stand |
+|---|---|---|---|
+| 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** | ✅ |
+| 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten | ✅ |
+| 3 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬅️ **als Nächstes** |
+| 4 | **I-05** Matching-Logik | Engine-Kern fürs Matching | ⬜ |
+| 5 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
+| 6 | **I-12 b** Admin-Matching-Workflow | Matching-UI auf den Engine-APIs (mit Seed-/Test-Sichtungen erprobbar) | ⬜ |
+| 7 | **I-09** Collector-/**MDKursTracker-Integration** | Live-Datenfluss (Fluss 1/2) **nach** dem Admin-Frontend | ⬜ |
+| 8 | **I-10** Stabilisierung | Härten, Tests, Doku | ⬜ |
+| 9 | **I-07 + I-08** Viewer | Öffentliche Webseite **ganz zuletzt** | ⬜ |
+
+> **Dazwischengeschoben:** Die Bereiche **I-12 (e) Phase A** (Fahrplantypen) und **I-12 (f)**
+> (Linien-/Fahrten-Ansicht) sind vorgezogen umgesetzt worden — beide entstanden aus der Arbeit am
+> Import-Auditing heraus und sind für den Matching-Workflow nützlich, aber keine Voraussetzung.
+> Der MVP-Pfad bleibt I-04 → I-05 → I-06 → I-12b.
 
 **Begründung:** Das Admin-Frontend zuerst zu bauen schafft Vertrauen — der Betreiber sieht unmittelbar, was das System
 tut (Import-Stand, Matching-Ergebnisse), bevor die MDKursTracker-Anbindung live geht. Der öffentliche Viewer ist die
@@ -313,12 +323,12 @@ Ein frischer Checkout mit `README.md` als einziger Anleitung führt zu einem lau
 > Sanctum ist damit kein reines Post-MVP-Thema mehr. Setzt nur Engine voraus, nicht den Viewer; vor dem Matching-Teil von I-12 umzusetzen.
 
 ### Aufgaben
-- [ ] Laravel Sanctum installieren und konfigurieren
-- [ ] Admin-Zugang: **Single-Admin via `.env`/Seed** (entschieden 2026-06-25). Minimale `users`-Tabelle (Sanctum-Standard), genau ein Eintrag aus `ADMIN_EMAIL` + `ADMIN_PASSWORD` (bcrypt) via Seeder; kein Self-Signup, keine Rollen
-- [ ] Login-Endpunkt `POST /api/v1/admin/login` (gibt Sanctum-Token zurück), Logout
-- [ ] Middleware/Guard für alle `/api/v1/admin/*`-Routen (`auth:sanctum`)
-- [ ] `openapi.yaml` + Bruno-Dateien: `admin/login.bru`, `environments/local.bru` um Admin-Token erweitern
-- [ ] Tests: Login Erfolg/Fehlschlag, geschützter Endpunkt ohne/mit Token (401 vs. 200)
+- [x] Laravel Sanctum installieren und konfigurieren
+- [x] Admin-Zugang: **Single-Admin via `.env`/Seed** (entschieden 2026-06-25). Minimale `users`-Tabelle (Sanctum-Standard), genau ein Eintrag aus `ADMIN_EMAIL` + `ADMIN_PASSWORD` (bcrypt) via Seeder; kein Self-Signup, keine Rollen
+- [x] Login-Endpunkt `POST /api/v1/admin/login` (gibt Sanctum-Token zurück), Logout
+- [x] Middleware/Guard für alle `/api/v1/admin/*`-Routen (`auth:sanctum`)
+- [x] `openapi.yaml` + Bruno-Dateien: `admin/login.bru`, `environments/local.bru` um Admin-Token erweitern
+- [x] Tests: Login Erfolg/Fehlschlag, geschützter Endpunkt ohne/mit Token (401 vs. 200)
 
 ### Abnahmekriterium
 Ein Admin meldet sich an und erhält ein Sanctum-Token. Jeder `/api/v1/admin/*`-Aufruf ohne gültiges Token wird mit `401` im Fehler-Envelope abgewiesen.
@@ -334,9 +344,9 @@ Fahrplanperioden-Erkennung und Import-Auditing. Alle schreibenden/kuratierenden 
 > Detail-Tasks der Ausbaubereiche (d/e) werden vor der jeweiligen Phase ausspezifiziert.
 
 ### (a) Grundgerüst + Login
-- [ ] Vue 3 Projekt in `/admin` initialisieren (Vite, TypeScript, Tailwind) — **getrennt** vom Viewer
-- [ ] Sanctum-Login-Flow (Token speichern, Axios-Interceptor, Logout)
-- [ ] `timezone.ts` im Admin (`admin/src/utils/timezone.ts`): UTC → `Europe/Berlin`, nur hier
+- [x] Vue 3 Projekt in `/admin` initialisieren (Vite, TypeScript, Tailwind) — **getrennt** vom Viewer
+- [x] Sanctum-Login-Flow (Token speichern, Axios-Interceptor, Logout)
+- [x] `timezone.ts` im Admin (`admin/src/utils/timezone.ts`): UTC → lokale Browser-Zeitzone, nur hier
 
 ### (b) Matching-Workflow — **MVP** (aus dem Viewer hierher verschoben)
 - [ ] `MatchingView`: Sichtungsliste (`GET /api/v1/sightings?date=`), Kandidaten (`GET /api/v1/trips?...`), Zuordnen (`POST /api/v1/sightings/{id}/assign`)
@@ -345,18 +355,40 @@ Fahrplanperioden-Erkennung und Import-Auditing. Alle schreibenden/kuratierenden 
 - [ ] `openapi.yaml` + Bruno für die Matching-/Assign-Endpunkte
 
 ### (c) Import-Auditing
-- [ ] Engine: gemeinsamen `GtfsImportStatusService` extrahieren (Abfrage-Logik aus dem `/collector/imports`-Controller herauslösen, kein Duplikat)
-- [ ] Engine: `GET /api/v1/admin/imports` (Sanctum) — nutzt denselben Service, ohne Collector-Token
-- [ ] View „Import-Historie" (Status-Badge, Zeiten, Counts, Feed-Version) + „Datenstand" + Lauf-Detail mit Fehlermeldung
-- [ ] `openapi.yaml` + Bruno-Datei: `admin/imports.bru`
+- [x] Engine: gemeinsamen `GtfsImportStatusService` extrahieren (Abfrage-Logik aus dem `/collector/imports`-Controller herauslösen, kein Duplikat)
+- [x] Engine: `GET /api/v1/admin/imports` (Sanctum) — nutzt denselben Service, ohne Collector-Token
+- [x] View „Import-Historie" (Status-Badge, Zeiten, Counts, Feed-Version) + „Datenstand" + Fehlermeldung je Lauf; Historie paginiert
+- [x] `openapi.yaml` + Bruno-Datei: `admin/imports.bru`
 
 ### (d) Datenkorrektur — *Ausbau, Detaillierung folgt*
 - [ ] Manuelle Korrektur/Überschreibung von Zuordnungen; ggf. Stammdaten-Overrides
 
 ### (e) Fahrplanperioden-Erkennung — *Konzept steht, siehe [`FAHRPLANPERIODEN.md`](FAHRPLANPERIODEN.md)*
-- [ ] Vier Fahrplantypen (Mo-Fr normal / Mo-Fr Ferien / Sa / So+Feiertage); Feiertage berechnet (Sachsen-Anhalt), Ferienzeiten als Admin-CRUD
-- [ ] Netzweite Perioden-Erkennung via Timetable-Fingerprint beim Import (`schedule_periods`)
+
+Gegliedert nach dem Bauplan in FAHRPLANPERIODEN §7.
+
+**Phase A — Config & Fahrplantyp** ✅ *(abgeschlossen)*
+- [x] `school_holidays` (Migration, Model, Admin-CRUD) — Ferienzeiten sind nicht berechenbar
+- [x] `HolidayService`: Feiertage Sachsen-Anhalts je Jahr berechnet (fest + oster-relativ via Computus), nicht persistiert
+- [x] `FahrplanTyp`-Enum + `FahrplanTypClassifier` (`classify(date)` nach FAHRPLANPERIODEN §2.1)
+- [x] Admin-Ansicht „Kalender": Ferien-CRUD + Feiertage read-only
+- [x] Fahrplantyp am realen Fahrplan nutzbar: `GET /lines/{line}/trips?day_type=` filtert auf einen Betriebstag-Typ, aufgelöst über einen Stichtag im Feed-Fenster (häufigste Service-Zusammensetzung)
+
+**Phase B — Versionierung (Metadaten)** — *offen*
+- [ ] `schedule_periods` (Admin-CRUD: anlegen/aktiv setzen) + `line_versions` je (Linie, Fahrplantyp)
+- [ ] Fingerprint-Vergleich beim Import → neue Version / verlängern / einfrieren
+- [ ] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3); Schwelle noch festzulegen
+- [ ] Admin-Ansichten „Fahrplanperioden" + „Linien-Versionen" (Historie je Linie/Typ)
 - [ ] Periodenwechsel → betroffene Zuordnungen als *stale/neu zu bestätigen* markieren (siehe `INTEGRATION_MDKURSTRACKER.md` §4.2)
+
+**Phase C — Konsolidat-Datenbestand** — *offen, der große Umbau*
+- [ ] `consolidated_*` an `line_versions`, Merge je (Linie, Typ) nach §5.3, historische Perioden einfrieren
+- [ ] App-Endpunkte (Linien/Fahrplan/Umläufe/Matching) auf das Konsolidat umstellen — berührt I-03/I-05/I-06
+
+### (f) Linien- & Fahrten-Ansicht — *nachträglich ergänzt, nicht im ursprünglichen Plan*
+- [x] `GET /api/v1/lines` — **eine Zeile je Linienbezeichnung**, nicht je GTFS-Route (dieselbe Nummer kann auf mehreren Routen liegen, z. B. Schienenersatzverkehr als Bus)
+- [x] `GET /api/v1/lines/{line}/trips` — Fahrten gruppiert nach Start → Ziel, je Fahrt Verkehrstage und Verkehrsmittel
+- [x] Admin-Ansicht „Linien": Signets, pflegbare Linienfarben, Fahrtenliste je Richtung/Variante mit Fahrplantyp-Filter
 
 ### Abnahmekriterium
 Nach Login kann ein Admin den Matching-Workflow vollständig durchführen (Sichtung → Kandidat → Zuordnung) und die
@@ -374,3 +406,6 @@ GTFS-Import-Historie inkl. Datenstand und Fehlern einsehen. Uhrzeiten erscheinen
 | Cron-Intervall für Sichtungs-Sync | I-09 | ❓ offen |
 | Admin-Zugangsmodell (Single-Admin via Seed vs. `users`-Tabelle) | I-11 | ✅ entschieden: Single-Admin via `.env`/Seed (minimale `users`-Tabelle) |
 | Subdomain/Hosting für die Admin-Schaltzentrale (`admin.strassenbahn-magdeburg.de`?) | I-12 | ❓ offen |
+| Linien-Schlüssel im Konsolidat: `route_short_name` allein oder mit `route_type`? | I-12 (e) Phase B | ❓ offen — N2 liegt als Tram- **und** Bus-Route vor (Schienenersatzverkehr). Für die **Anzeige** ist zusammengefasst richtig (Bereich f); fürs **Konsolidat** gehören zwei Verkehrsmittel vermutlich in getrennte Versions-Stränge, sonst sieht das Ende eines Ersatzverkehrs wie eine Fahrplanänderung aus |
+| Fahrplantyp ohne Abdeckung im Feed-Fenster | I-12 (e) Phase B | ❓ offen — der rollierende ~2-Wochen-Feed enthält oft **nicht alle vier Typen** (Import 17.08.2026: kein einziger Ferien-Werktag). Der Fingerprint-Vergleich darf einen fehlenden Typ nicht als Änderung werten, sonst friert er ganze Versions-Stränge fälschlich ein |
+| Startdatum der Sommerferien Sachsen-Anhalt 2026 | — | ❓ offen — Ende ist der 16.08.2026 (bestätigt); der Beginn steht in Test-Fixtures und Bruno-Beispielen noch als unbelegtes `2026-07-13` |

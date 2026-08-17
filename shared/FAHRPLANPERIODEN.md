@@ -165,9 +165,10 @@ Roh-GTFS (Schicht 1) bleibt wie gehabt — nur der aktuellste Lauf.
 
 ## 7. Bauplan (Phasen)
 
-- **A — Config & Fahrplantyp** *(eigenständig nützlich):* `school_holidays` (Migration/Model/Admin-CRUD);
-  `HolidayService` (SA, berechnet); `FahrplanTyp`-Enum + Classifier; Tests; Admin-Views „Ferienzeiten" (CRUD) +
-  „Feiertage" (read-only).
+- **A — Config & Fahrplantyp** ✅ *(umgesetzt 17.08.2026):* `school_holidays` (Migration/Model/Admin-CRUD);
+  `HolidayService` (SA, berechnet); `FahrplanTyp`-Enum + Classifier; Tests; Admin-View „Kalender" mit
+  Ferienzeiten (CRUD) + Feiertagen (read-only). Zusätzlich nutzbar gemacht: `GET /lines/{line}/trips?day_type=`
+  filtert auf einen Betriebstag-Typ, aufgelöst über einen Stichtag im Feed-Fenster (`FahrplanTypDayResolver`).
 - **B — Versionierung (Metadaten):** `schedule_periods` (Admin-CRUD im Frontend: anlegen/aktiv) + `line_versions`
   (automatisch je (Linie, Fahrplantyp) beim Import, Fingerprint-Vergleich → neue Version/verlängern/einfrieren) +
   **Periodenwechsel-Vorschlag** bei vielen betroffenen Linien (Hinweis → Admin nimmt an: Versionen zurücknehmen,
@@ -180,6 +181,14 @@ Roh-GTFS (Schicht 1) bleibt wie gehabt — nur der aktuellste Lauf.
 ---
 
 ## 8. Offene Punkte / Caveats
+- **Linien-Schlüssel:** §5.1 setzt `route_short_name` als stabile Linie. Der Import vom 17.08.2026 zeigt, dass das
+  nicht eindeutig ist — **N2 liegt als Tram-Route (18099) und als Bus-Route (17551)** vor, weil ein
+  Schienenersatzverkehr dieselbe Nummer führte (Bus 15.–17.08., Tram ab 18.08.). Fürs Konsolidat vermutlich
+  **(`route_short_name`, `route_type`)**, sonst wirkt das Ende eines Ersatzverkehrs wie eine Fahrplanänderung.
+  *(Die Anzeige fasst bewusst zusammen — dort ist eine Linie eine Linie.)*
+- **Fehlender Typ ≠ Änderung:** Der Import vom 17.08.2026 enthielt **keinen einzigen Ferien-Werktag** (Ferienende
+  16.08., Fensterbeginn 15.08.), also nur 3 der 4 Typen. Der Fingerprint-Vergleich in Phase B darf einen im Lauf
+  **fehlenden** Typ nicht als Änderung werten — sonst friert er den `MoFrFerien`-Strang jedes Mal fälschlich ein.
 - **Schwelle „viele Linien"** für den Periodenwechsel-Vorschlag (absolute Zahl oder Anteil? konfigurierbar?).
 - Genaue **Versions-Grenz-Erkennung**: ein einzelner Feed kann schon eine künftige Linien-Version enthalten (Zeitsub-Bereiche) — Algorithmus festzurren.
 - `consolidated_stops` **global** (über alle Perioden dedupliziert, einfacher) **vs. je Periode** (historientreu, falls Halte sich ändern).

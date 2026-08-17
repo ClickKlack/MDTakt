@@ -35,7 +35,7 @@ function pickerValue(line: Line): string {
 }
 
 async function save(line: Line, color: string): Promise<void> {
-  saving.value = line.route_id
+  saving.value = line.route_short_name
   try {
     await setLineColor(line.route_short_name, color)
     line.color = color
@@ -47,7 +47,7 @@ async function save(line: Line, color: string): Promise<void> {
 }
 
 async function reset(line: Line): Promise<void> {
-  saving.value = line.route_id
+  saving.value = line.route_short_name
   try {
     await resetLineColor(line.route_short_name)
     line.color = null
@@ -75,7 +75,7 @@ async function reset(line: Line): Promise<void> {
       <div v-else-if="error" class="mt-4 rounded-md bg-red-50 px-4 py-3 text-red-700">{{ error }}</div>
 
       <ul v-else class="mt-4 divide-y divide-slate-100 overflow-hidden rounded-lg bg-white shadow-sm">
-        <li v-for="line in lines" :key="line.route_id" class="flex items-center gap-4 px-4 py-2.5">
+        <li v-for="line in lines" :key="line.route_short_name" class="flex items-center gap-4 px-4 py-2.5">
           <LineBadge :line="line" />
           <span class="w-16 text-sm font-medium text-slate-700">Linie {{ line.route_short_name }}</span>
 
@@ -83,7 +83,7 @@ async function reset(line: Line): Promise<void> {
             type="color"
             class="h-8 w-10 cursor-pointer rounded border border-slate-200 bg-white"
             :value="pickerValue(line)"
-            :disabled="saving === line.route_id"
+            :disabled="saving === line.route_short_name"
             @change="save(line, ($event.target as HTMLInputElement).value)"
           />
           <span class="w-20 font-mono text-xs text-slate-500">{{ line.color ?? lineColor(line) }}</span>
@@ -98,7 +98,7 @@ async function reset(line: Line): Promise<void> {
           <button
             v-if="line.color"
             class="ml-auto text-xs text-slate-400 hover:text-slate-700"
-            :disabled="saving === line.route_id"
+            :disabled="saving === line.route_short_name"
             @click="reset(line)"
           >
             Zurücksetzen

@@ -210,16 +210,29 @@ components:
 
     Line:
       type: object
-      description: "MVB-Linie für die Lines-API: roher GTFS route_type plus abgeleiteter Modus-Slug"
-      required: [route_id, route_short_name, route_type, mode]
+      description: >
+        MVB-Linie, identifiziert über route_short_name — eine Zeile je Linienbezeichnung,
+        nicht je GTFS-Route. Zeigt eine Bezeichnung auf mehrere Routen (Schienenersatzverkehr
+        unter derselben Nummer), beschreiben route_type/mode die prägende Route (die mit den
+        meisten Fahrten) und modes/route_ids alle beteiligten.
+      required: [route_short_name, route_type, mode, modes, route_ids]
       properties:
-        route_id: { type: string }
         route_short_name: { type: string }
-        route_type: { type: integer, description: "Roher GTFS route_type (0 = Tram, 3 = Bus)" }
+        route_type: { type: integer, description: "Roher GTFS route_type der prägenden Route (0 = Tram, 3 = Bus)" }
         mode:
           type: string
           enum: [tram, bus, other]
           description: "Aus route_type abgeleiteter Verkehrsmittel-Modus; unbekannte Typen → other"
+        modes:
+          type: array
+          items: { type: string, enum: [tram, bus, other] }
+          description: "Alle Verkehrsmittel dieser Linienbezeichnung, alphabetisch"
+          example: ['bus', 'tram']
+        route_ids:
+          type: array
+          items: { type: string }
+          description: "Alle GTFS-route_ids, die unter dieser Bezeichnung verkehren"
+          example: ['17551', '18099']
         color:
           type: string
           nullable: true
@@ -280,6 +293,40 @@ components:
       properties:
         data: { $ref: '#/components/schemas/Admin' }
 
+    SchoolHoliday:
+      type: object
+      required: [id, name, start_date, end_date]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+
+    SchoolHolidayRequest:
+      type: object
+      required: [name, start_date, end_date]
+      properties:
+        name: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date, description: "≥ start_date" }
+
+    HolidaysResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [year, holidays]
+          properties:
+            year: { type: integer }
+            holidays:
+              type: array
+              items:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  name: { type: string }
+
     StopListResponse:
       type: object
       required: [data]
@@ -296,6 +343,14 @@ components:
           type: array
           items: { $ref: '#/components/schemas/TripCandidate' }
 
+    FahrplanTyp:
+      type: string
+      description: >
+        Betriebstag-Klasse (Fahrplantyp). Ergibt sich aus dem Kalenderdatum:
+        Feiertage und Sonntage → so_feiertag, Samstage → sa, Mo-Fr je nach
+        Schulferien → mo_fr_ferien oder mo_fr.
+      enum: [mo_fr, mo_fr_ferien, sa, so_feiertag]
+
     LineTripItem:
       type: object
       required: [trip_id, service_id]
@@ -304,6 +359,32 @@ components:
         service_id: { type: string }
         departure_time: { type: string, nullable: true, description: "Abfahrt am Starthalt (GTFS-Lokalzeit HH:MM:SS, kann >24h sein)" }
         arrival_time: { type: string, nullable: true, description: "Ankunft am Zielhalt (GTFS-Lokalzeit)" }
+        day_pattern:
+          type: string
+          nullable: true
+          description: >
+            Wöchentlich wiederkehrende Verkehrstage in Kurzform ("Mo-Fr", "Sa, So",
+            "täglich"), aus dem GTFS-Wochenmuster (calendar) der service_id abgeleitet.
+            Null, wenn die Fahrt kein Wochenmuster hat — dann verkehrt sie ausschließlich
+            an den Einzelterminen in service_dates.
+          example: Mo-Fr
+        service_dates:
+          type: array
+          items: { type: string, format: date }
+          description: >
+            Einzeltermine der Fahrt (calendar_dates, exception_type 1) als reine
+            Kalenderdaten — nur gefüllt, wenn day_pattern null ist. Bei gtfs.de kommen
+            Services ohne jede calendar-Zeile regelmäßig vor; für sie ist das die einzige
+            Auskunft über die Verkehrstage. Zusätzliche Einzeltermine oberhalb eines
+            vorhandenen Wochenmusters werden hier nicht ausgewiesen.
+          example: ['2026-08-16']
+        mode:
+          type: string
+          enum: [tram, bus, other]
+          description: >
+            Verkehrsmittel dieser Fahrt, abgeleitet aus dem route_type ihrer GTFS-Route.
+            Relevant, wenn eine Linienbezeichnung auf mehrere Routen zeigt — siehe modes.
+          example: tram
 
     LineTripGroup:
       type: object
@@ -326,6 +407,34 @@ components:
           properties:
             line: { type: string }
             trip_count: { type: integer }
+            day_type:
+              type: string
+              nullable: true
+              enum: [mo_fr, mo_fr_ferien, sa, so_feiertag, null]
+              description: Angeforderter Fahrplantyp; null = ungefiltert (alle Fahrten).
+            day_type_label: { type: string, nullable: true, description: 'Anzeigename des Fahrplantyps, z. B. "Mo-Fr".' }
+            reference_date:
+              type: string
+              format: date
+              nullable: true
+              description: >
+                Stichtag, über den der Fahrplantyp aufgelöst wurde. Gewählt wird der Tag mit
+                der häufigsten Service-Zusammensetzung unter allen Tagen dieses Typs im
+                Feed-Fenster (bei Gleichstand der frühere) — nicht der erste passende Tag,
+                weil Umbrüche wie Ferienende oder das Ende eines Schienenersatzverkehrs
+                typischerweise am Fensteranfang liegen und diesen Tag untypisch machen.
+                Null bei ungefilterter Abfrage oder wenn der Feed keinen Tag dieses Typs
+                abdeckt (dann ist groups leer).
+            modes:
+              type: array
+              items: { type: string, enum: [tram, bus, other] }
+              description: >
+                Alle in der Antwort vorkommenden Verkehrsmittel, alphabetisch. Mehr als
+                ein Eintrag bedeutet, dass die Linienbezeichnung auf mehrere GTFS-Routen
+                zeigt — etwa bei einem Schienenersatzverkehr, der dieselbe Nummer als Bus
+                führt (N2 im Feed vom 17.08.2026: Tram ab 18.08., Bus 15.–17.08.). Dann
+                erst ist mode je Fahrt eine nötige Unterscheidung.
+              example: ['bus', 'tram']
             groups:
               type: array
               items: { $ref: '#/components/schemas/LineTripGroup' }
@@ -351,6 +460,12 @@ paths:
       description: >
         Alle Fahrten der Linie, gruppiert nach erstem und letztem Halt (Richtung/Variante).
         Innerhalb einer Gruppe nach Abfahrtszeit sortiert. Öffentliche Stammdaten — kein Auth.
+
+
+        Ohne day_type enthält die Antwort alle Fahrten aller Betriebstage — dieselbe
+        Abfahrtszeit kann dann mehrfach erscheinen (z. B. je einmal im Werktags- und im
+        Sonntagsfahrplan). Das Feld day_pattern je Fahrt schlüsselt das auf; day_type
+        filtert auf genau einen Betriebstag-Typ.
       tags: [Stammdaten]
       parameters:
         - name: line
@@ -358,12 +473,25 @@ paths:
           required: true
           description: Linienbezeichnung (route_short_name), z. B. "1" oder "73".
           schema: { type: string }
+        - name: day_type
+          in: query
+          required: false
+          description: >
+            Auf einen Fahrplantyp einschränken. Aufgelöst über einen Stichtag im
+            Gültigkeitsfenster des Feeds (siehe reference_date in der Antwort).
+            Deckt der Feed keinen Tag dieses Typs ab, ist groups leer.
+          schema: { $ref: '#/components/schemas/FahrplanTyp' }
       responses:
         '200':
           description: Fahrten der Linie, gruppiert
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LineTripsResponse' }
+        '422':
+          description: Unbekannter day_type
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/stops:
     get:
@@ -503,6 +631,81 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/school-holidays:
+    get:
+      operationId: listSchoolHolidays
+      summary: Schulferien-Zeiträume auflisten
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Liste der Ferienzeiten
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/SchoolHoliday' } }
+        '401': { description: Nicht authentifiziert, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      operationId: createSchoolHoliday
+      summary: Ferienzeit anlegen
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SchoolHolidayRequest' }
+      responses:
+        '201': { description: Angelegt, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/SchoolHoliday' } } } } } }
+        '401': { description: Nicht authentifiziert, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Validierungsfehler, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/admin/school-holidays/{schoolHoliday}:
+    put:
+      operationId: updateSchoolHoliday
+      summary: Ferienzeit ändern
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - { name: schoolHoliday, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SchoolHolidayRequest' }
+      responses:
+        '200': { description: Geändert, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/SchoolHoliday' } } } } } }
+        '401': { description: Nicht authentifiziert, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Validierungsfehler, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      operationId: deleteSchoolHoliday
+      summary: Ferienzeit löschen
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - { name: schoolHoliday, in: path, required: true, schema: { type: integer } }
+      responses:
+        '204': { description: Gelöscht }
+        '401': { description: Nicht authentifiziert, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/admin/holidays:
+    get:
+      operationId: listHolidays
+      summary: Berechnete Feiertage (Sachsen-Anhalt) eines Jahres — read-only
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - { name: year, in: query, required: false, schema: { type: integer } }
+      responses:
+        '200':
+          description: Feiertage des Jahres
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HolidaysResponse' }
+        '401': { description: Nicht authentifiziert, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/admin/line-colors/{line}:
     put:

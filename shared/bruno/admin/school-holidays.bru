@@ -1,0 +1,41 @@
+meta {
+  name: School Holidays
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/school-holidays
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "name": "Sommerferien 2026",
+    "start_date": "2026-07-13",
+    "end_date": "2026-08-16"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.name: eq Sommerferien 2026
+}
+
+docs {
+  # Ferienzeiten pflegen (Admin)
+
+  CRUD für Schulferien-Zeiträume (Sanctum). `GET` listet, `POST` legt an,
+  `PUT /{id}` ändert, `DELETE /{id}` löscht. Grundlage der Fahrplantyp-Klassifikation
+  („Mo-Fr Ferien"). `end_date` muss ≥ `start_date` sein, sonst 422.
+}

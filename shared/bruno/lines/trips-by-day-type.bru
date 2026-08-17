@@ -1,0 +1,109 @@
+meta {
+  name: Line Trips (nach Fahrplantyp)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/lines/6/trips?day_type=so_feiertag
+  body: none
+  auth: none
+}
+
+params:query {
+  day_type: so_feiertag
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.line: eq "6"
+  res.body.data.day_type: eq so_feiertag
+  res.body.data.day_type_label: eq So + Feiertage
+  res.body.data.groups: isArray
+}
+
+script:post-response {
+  // Jede gelieferte Fahrt muss zum angeforderten Typ passen: an einem Sonntag
+  // verkehren nur Fahrten, deren Wochenmuster den Sonntag einschliesst.
+  const data = res.getBody().data;
+
+  if (data.groups.length > 0) {
+    // Der Stichtag, ueber den der Typ aufgeloest wurde, gehoert in die Antwort.
+    if (!data.reference_date) {
+      throw new Error("reference_date fehlt, obwohl Fahrten geliefert wurden");
+    }
+
+    const muster = new Set();
+    for (const gruppe of data.groups) {
+      for (const fahrt of gruppe.trips) {
+        muster.add(fahrt.day_pattern);
+      }
+    }
+
+    // Keine reinen Werktagsmuster im Sonntagsfahrplan.
+    for (const m of muster) {
+      if (m === "Mo-Fr" || m === "Sa") {
+        throw new Error("Unerwartetes Verkehrsmuster im So-Fahrplan: " + m);
+      }
+    }
+  }
+}
+
+docs {
+  # Fahrten einer Linie, auf einen Fahrplantyp gefiltert
+
+  Ohne `day_type` enthaelt die Antwort alle Fahrten aller Betriebstage — dieselbe
+  Abfahrtszeit erscheint dann mehrfach, z. B. je einmal im Werktags- und im
+  Sonntagsfahrplan (unterschiedliche `service_id`, gleiche Uhrzeit). Das ist kein
+  Duplikat.
+
+  `day_type` schraenkt auf genau einen Betriebstag-Typ ein:
+
+  | Wert | Bedeutung |
+  |---|---|
+  | `mo_fr` | Mo-Fr ausserhalb der Schulferien |
+  | `mo_fr_ferien` | Mo-Fr innerhalb der Schulferien |
+  | `sa` | Samstag |
+  | `so_feiertag` | Sonntag und Feiertage |
+
+  Aufgeloest wird der Typ ueber einen **Stichtag**, der als `reference_date` in der
+  Antwort steht. Gewaehlt wird der Tag mit der **haeufigsten Service-Zusammensetzung**
+  unter allen Tagen dieses Typs im Feed-Fenster (bei Gleichstand der fruehere).
+
+  Nicht der erste passende Tag: Umbrueche liegen typischerweise am Fensteranfang,
+  wenn der Feed kurz danach gezogen wurde. Im Feed vom 17.08.2026 traf das zweimal
+  zu — der 16.08. trug einen Sonderfahrplan (regulaerer Sonntagsdienst entfiel,
+  ein Sonderdienst sprang ein), der 17.08. war der Umstelltag der N2 von Bus- auf
+  Tram-Betrieb. Beide haetten als Stichtag ein untypisches Bild geliefert.
+
+  Deckt der Feed keinen Tag dieses Typs ab, ist `groups` leer und
+  `reference_date` null — das ist kein Fehler. Beim rollierenden ~2-Wochen-Feed
+  von gtfs.de tritt das regelmaessig auf, etwa bei `mo_fr_ferien` ausserhalb der
+  Schulferien.
+
+  Ein unbekannter `day_type` wird mit `422` im Fehler-Envelope abgewiesen.
+
+  ## Verkehrstage je Fahrt
+
+  `day_pattern` ist das woechentliche Muster aus `calendar` ("Mo-Fr", "Sa, So",
+  "taeglich"). Es ist `null`, wenn die Fahrt gar kein Wochenmuster hat — bei
+  gtfs.de kommen Services ohne jede `calendar`-Zeile regelmaessig vor (im Feed
+  vom 17.08.2026: 1511 von 9145 Fahrten). Solche Fahrten verkehren nur an den
+  Einzelterminen aus `calendar_dates`, die dann in `service_dates` als reine
+  Kalenderdaten stehen (Formatierung: Frontend).
+
+  ## Verkehrsmittel
+
+  `modes` listet alle in der Antwort vorkommenden Verkehrsmittel. Mehr als eines
+  bedeutet, dass die Linienbezeichnung auf mehrere GTFS-Routen zeigt und die Liste
+  sie zusammenfuehrt — dann unterscheidet `mode` je Fahrt. Realfall im Feed vom
+  17.08.2026: N2 existiert als Tram (route_id 18099, ab 18.08.) und als Bus
+  (17551, 15.-17.08.) auf derselben Strecke — ein Schienenersatzverkehr, der mit
+  dem Ferienende auslief.
+
+  Voraussetzung fuer sinnvolle Daten: GTFS-Import wurde durchgefuehrt.
+}

@@ -22,8 +22,15 @@ assert {
 docs {
   # Alle MVB-Linien (Tram + Bus)
 
-  Öffentliche Stammdaten, kein Auth im MVP. Jede Linie enthält `route_id`,
-  `route_short_name` und `route_type` (0 = Tram, 3 = Bus).
+  Öffentliche Stammdaten, kein Auth im MVP. **Eine Zeile je Linienbezeichnung**
+  (`route_short_name`), nicht je GTFS-Route — das ist im System durchgängig die
+  Linien-Identität (Linienfarben liegen darauf, `/lines/{line}/trips` filtert danach).
+
+  Zeigt eine Bezeichnung auf mehrere Routen, beschreiben `route_type`/`mode` die
+  prägende Route (die mit den meisten Fahrten); `modes` und `route_ids` listen alle
+  beteiligten. Realfall im Feed vom 17.08.2026: N2 verkehrt als Tram (18099, ab 18.08.)
+  und als Bus (17551, 15.–17.08.) — ein Schienenersatzverkehr, der mit dem Ferienende
+  auslief. Ohne die Zusammenfassung stünde N2 zweimal in der Linienauswahl.
 
   Voraussetzung für die Assertions: mindestens ein GTFS-Import wurde durchgeführt.
 }

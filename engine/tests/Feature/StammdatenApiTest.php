@@ -32,6 +32,34 @@ final class StammdatenApiTest extends TestCase
             ->assertJsonFragment(['route_short_name' => '73', 'route_type' => 3, 'mode' => 'bus']);
     }
 
+    /**
+     * Dieselbe Linienbezeichnung auf zwei GTFS-Routen (N2 als Tram und als Bus während
+     * des Schienenersatzverkehrs) darf im Verzeichnis nur einen Eintrag ergeben — sonst
+     * stünde dieselbe Linie doppelt in der Auswahl, beide Male mit identischem Inhalt.
+     */
+    public function test_line_served_by_two_routes_appears_once(): void
+    {
+        $tram = Route::factory()->tram()->create(['route_id' => 'R-TRAM', 'route_short_name' => 'N2']);
+        $bus = Route::factory()->bus()->create(['route_id' => 'R-BUS', 'route_short_name' => 'N2']);
+
+        // Die Bus-Route hat mehr Fahrten → sie prägt die Linie (route_type/mode).
+        Trip::factory()->create(['trip_id' => 'T-TRAM', 'route_id' => $tram->route_id]);
+        Trip::factory()->count(2)->sequence(
+            ['trip_id' => 'T-BUS-1'],
+            ['trip_id' => 'T-BUS-2'],
+        )->create(['route_id' => $bus->route_id]);
+
+        $response = $this->getJson('/api/v1/lines');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.route_short_name', 'N2')
+            ->assertJsonPath('data.0.mode', 'bus')
+            ->assertJsonPath('data.0.route_type', 3)
+            ->assertJsonPath('data.0.modes', ['bus', 'tram'])
+            ->assertJsonPath('data.0.route_ids', ['R-BUS', 'R-TRAM']);
+    }
+
     public function test_stops_endpoint_returns_all_stops_ordered_by_name(): void
     {
         Stop::factory()->create(['stop_id' => 'S2', 'stop_name' => 'Alter Markt']);

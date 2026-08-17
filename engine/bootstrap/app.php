@@ -21,6 +21,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'collector.token' => CollectorTokenMiddleware::class,
             'decompress' => DecompressRequest::class,
         ]);
+
+        // Die Engine ist ein reiner API-Server ohne Login-Web-Route. Laravels Default
+        // (`redirectGuestsTo(fn () => route('login'))`) wird von der Authenticate-Middleware
+        // schon ausgewertet, wenn ein Request kein JSON erwartet — das liefe hier in eine
+        // RouteNotFoundException (500) statt in den 401-Envelope. Kein Redirect-Ziel = kein Redirect.
+        $middleware->redirectGuestsTo(fn (Request $request): ?string => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Nicht authentifiziert → einheitlicher Fehler-Envelope statt Laravel-Default.

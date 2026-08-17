@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Http\Resources\RouteResource;
-use App\Models\Route;
+use App\Http\Requests\LineTripsRequest;
+use App\Http\Resources\LineResource;
+use App\Services\LineDirectoryService;
 use App\Services\LineTripService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -15,23 +16,22 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
  */
 final class LineController extends Controller
 {
-    public function __construct(private readonly LineTripService $lineTrips) {}
+    public function __construct(
+        private readonly LineTripService $lineTrips,
+        private readonly LineDirectoryService $lines,
+    ) {}
 
-    /** GET /api/v1/lines */
+    /** GET /api/v1/lines — eine Zeile je Linienbezeichnung, nicht je GTFS-Route */
     public function index(): AnonymousResourceCollection
     {
-        $routes = Route::query()
-            ->with('lineColor')
-            ->orderBy('route_type')
-            ->orderBy('route_short_name')
-            ->get();
-
-        return RouteResource::collection($routes);
+        return LineResource::collection($this->lines->allLines());
     }
 
-    /** GET /api/v1/lines/{line}/trips — Fahrten gruppiert nach Start → Ziel */
-    public function trips(string $line): JsonResponse
+    /** GET /api/v1/lines/{line}/trips?day_type= — Fahrten gruppiert nach Start → Ziel */
+    public function trips(LineTripsRequest $request, string $line): JsonResponse
     {
-        return response()->json(['data' => $this->lineTrips->groupedByStartEnd($line)]);
+        return response()->json([
+            'data' => $this->lineTrips->groupedByStartEnd($line, $request->dayType()),
+        ]);
     }
 }

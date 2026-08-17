@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/api/v1/trips?date=2026-06-22&line=1&stop=S1
+  url: {{baseUrl}}/api/v1/trips?date=2026-06-22&line=1
   body: none
   auth: none
 }
@@ -13,7 +13,7 @@ get {
 params:query {
   date: 2026-06-22
   line: 1
-  stop: S1
+  ~stop: S1
 }
 
 headers {
@@ -27,11 +27,11 @@ assert {
 
 docs {
   # Trip-Kandidaten (Matching-Vorbereitung)
-
+  
   Filtert GTFS-Trips nach Betriebstag (`date`), Linie (`line` = route_short_name)
   und Haltestelle (`stop` = stop_id). Alle Filter sind optional und werden mit UND
   verknüpft (SPEC §3.2, Stufen 1–3).
-
+  
   Der zeitliche Feinfilter (`time=`, ±Zeitfenster) folgt erst in I-05
   (TripMatchingService). Passe `date`/`line`/`stop` an reale Importdaten an, damit
   die Kandidatenliste nicht leer ist.

@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\AuthController;
+use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
 use App\Http\Controllers\Admin\LineColorController;
+use App\Http\Controllers\Admin\SchoolHolidayController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\StopController;
@@ -28,6 +30,13 @@ Route::prefix('v1')->group(function (): void {
             Route::get('imports', [AdminImportController::class, 'index'])->name('admin.imports.index');
             Route::put('line-colors/{line}', [LineColorController::class, 'update'])->name('admin.line-colors.update');
             Route::delete('line-colors/{line}', [LineColorController::class, 'destroy'])->name('admin.line-colors.destroy');
+
+            // Fahrplanperioden-Config: Schulferien (CRUD) + berechnete Feiertage (read-only)
+            Route::get('school-holidays', [SchoolHolidayController::class, 'index'])->name('admin.school-holidays.index');
+            Route::post('school-holidays', [SchoolHolidayController::class, 'store'])->name('admin.school-holidays.store');
+            Route::put('school-holidays/{schoolHoliday}', [SchoolHolidayController::class, 'update'])->name('admin.school-holidays.update');
+            Route::delete('school-holidays/{schoolHoliday}', [SchoolHolidayController::class, 'destroy'])->name('admin.school-holidays.destroy');
+            Route::get('holidays', [HolidayController::class, 'index'])->name('admin.holidays.index');
         });
     });
 

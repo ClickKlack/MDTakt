@@ -4,12 +4,9 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\Calendar;
-use App\Models\CalendarDate;
 use App\Models\Trip;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -20,6 +17,8 @@ use Illuminate\Support\Facades\Log;
  */
 final class TripFilterService
 {
+    public function __construct(private readonly ServiceDayResolver $serviceDays) {}
+
     /**
      * Liefert alle Trips, die zu den gesetzten Filtern passen. Alle Kriterien
      * sind optional und werden mit UND verknüpft. Die route-Relation wird für
@@ -38,7 +37,7 @@ final class TripFilterService
 
         // Stufe 1 — Betriebstag: nur Trips mit an diesem Datum gültiger service_id
         if ($date !== null) {
-            $query->whereIn('service_id', $this->activeServiceIds($date));
+            $query->whereIn('service_id', $this->serviceDays->activeServiceIds($date));
         }
 
         // Stufe 2 — Linie: route_short_name (alle MVB-Linien, Tram + Bus)
@@ -61,42 +60,5 @@ final class TripFilterService
         ]);
 
         return $trips;
-    }
-
-    /**
-     * Ermittelt die an einem Betriebstag gültigen service_ids gemäß GTFS:
-     * reguläres Wochenmuster aus `calendar` plus/minus Ausnahmen aus `calendar_dates`.
-     *
-     * @return array<int, string>
-     */
-    private function activeServiceIds(string $date): array
-    {
-        // Betriebstag ist ein reiner Kalendertag — Wochentag bestimmt das calendar-Flag.
-        $weekday = strtolower(Carbon::parse($date)->format('l'));
-
-        // Regulär aktiv: Wochenmuster trifft zu und Datum liegt im Gültigkeitszeitraum.
-        $regular = Calendar::query()
-            ->where($weekday, true)
-            ->whereDate('start_date', '<=', $date)
-            ->whereDate('end_date', '>=', $date)
-            ->pluck('service_id');
-
-        // exception_type 1 = Betrieb zusätzlich, 2 = Betrieb entfällt.
-        $added = CalendarDate::query()
-            ->whereDate('date', $date)
-            ->where('exception_type', 1)
-            ->pluck('service_id');
-
-        $removed = CalendarDate::query()
-            ->whereDate('date', $date)
-            ->where('exception_type', 2)
-            ->pluck('service_id');
-
-        return $regular
-            ->reject(static fn (string $id): bool => $removed->contains($id))
-            ->merge($added)
-            ->unique()
-            ->values()
-            ->all();
     }
 }

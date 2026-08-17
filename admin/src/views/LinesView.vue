@@ -57,9 +57,9 @@ function select(line: Line): void {
         <div class="mt-4 flex flex-wrap gap-2">
           <button
             v-for="line in lines"
-            :key="line.route_id"
+            :key="line.route_short_name"
             class="rounded-lg p-1 transition"
-            :class="selected?.route_id === line.route_id ? 'ring-2 ring-slate-800' : 'hover:ring-2 hover:ring-slate-300'"
+            :class="selected?.route_short_name === line.route_short_name ? 'ring-2 ring-slate-800' : 'hover:ring-2 hover:ring-slate-300'"
             @click="select(line)"
           >
             <LineBadge :line="line" size="lg" />

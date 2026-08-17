@@ -1,0 +1,36 @@
+meta {
+  name: Holidays (computed)
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/holidays?year=2026
+  body: none
+  auth: bearer
+}
+
+params:query {
+  year: 2026
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.year: eq 2026
+  res.body.data.holidays: isArray
+}
+
+docs {
+  # Feiertage (Sachsen-Anhalt, berechnet) — read-only
+
+  Liefert die gesetzlichen Feiertage des Jahres (feste + oster-relative Tage,
+  Computus). Nicht persistiert; rein zur Kontrolle. Sanctum-geschützt.
+}

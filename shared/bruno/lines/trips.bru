@@ -16,7 +16,7 @@ headers {
 
 assert {
   res.status: eq 200
-  res.body.data.line: eq 1
+  res.body.data.line: eq "1"
   res.body.data.groups: isArray
 }
 

@@ -63,6 +63,16 @@ final class AdminAuthTest extends TestCase
         $response->assertStatus(401)->assertJsonPath('error.code', 401);
     }
 
+    public function test_protected_endpoint_without_token_and_without_json_header_returns_401_envelope(): void
+    {
+        // Ohne `Accept: application/json` (Browser, curl) darf die Authenticate-Middleware
+        // nicht auf Laravels Default-Redirect zur nicht existenten `login`-Route laufen — das
+        // ergäbe eine RouteNotFoundException (500) statt des 401-Envelopes.
+        $response = $this->get('/api/v1/admin/me');
+
+        $response->assertStatus(401)->assertJsonPath('error.code', 401);
+    }
+
     public function test_protected_endpoint_with_token_returns_admin(): void
     {
         $admin = $this->admin();

@@ -10,6 +10,7 @@ use App\Models\Route;
 use App\Models\Stop;
 use App\Models\StopTime;
 use App\Models\Trip;
+use App\Services\ServiceDayResolver;
 use App\Services\TripFilterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -29,7 +30,7 @@ final class TripFilterServiceTest extends TestCase
     {
         parent::setUp();
 
-        $this->service = new TripFilterService;
+        $this->service = new TripFilterService(new ServiceDayResolver);
     }
 
     public function test_filter_by_line_returns_only_matching_route(): void

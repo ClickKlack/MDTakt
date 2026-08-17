@@ -27,5 +27,10 @@ viewer/.env
 viewer/node_modules/
 viewer/dist/
 
+# Admin-Schaltzentrale (Vue / Node)
+admin/.env
+admin/node_modules/
+admin/dist/
+
 # Bruno (lokale Umgebung — enthält ggf. Tokens)
 shared/bruno/environments/local.bru

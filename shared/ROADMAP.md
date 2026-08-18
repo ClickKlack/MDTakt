@@ -429,8 +429,11 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
 - [x] **Kurze Änderungen erzeugen eine eigene Linien-Version** (entschieden 18.08.2026) — kein separater
       Ausnahme-Mechanismus
 - [ ] **Linien-Schlüssel:** `route_short_name` allein oder mit `route_type`? (N2 liegt als Tram- **und** Bus-Route vor)
-- [ ] **`day_type` in der Fahrt-Signatur:** 3 Werte (`MO-FR|SA|SO`, wie INTEGRATION §4.2 / MDKursTracker) oder 4
-      (mit Ferien, wie `FahrplanTyp`)? Betrifft die Vergleichbarkeit mit der Tracker-Seite
+- [x] **`day_type` in der Fahrt-Signatur: vier Werte** (`mo_fr`, `mo_fr_ferien`, `sa`, `so_feiertag`, wie
+      `FahrplanTyp`) — entschieden 18.08.2026. MDKursTracker liefert nur drei; das genügt, weil jede Sichtung ein
+      `service_date` mitbringt und die Engine daraus selbst klassifiziert
+- [ ] **Signatur mit oder ohne Halte?** FAHRPLANPERIODEN §5.1 und INTEGRATION §4.2 widersprechen sich.
+      *Empfehlung: ohne* — nur so kann MDKursTracker dieselbe Signatur berechnen (HAFAS-IDs statt GTFS-Koordinaten)
 - [ ] **`consolidated_stops`** global oder je Periode (FAHRPLANPERIODEN §8)
 - [ ] **Import-Takt** (täglich vs. wöchentlich) — bestimmt die Lückenfreiheit des Konsolidats
 
@@ -476,7 +479,8 @@ Lücken aus, statt sie zu verschweigen.
 | Linien-Schlüssel im Konsolidat: `route_short_name` allein oder mit `route_type`? | I-12 (e) Phase B | ❓ offen — N2 liegt als Tram- **und** Bus-Route vor (Schienenersatzverkehr). Für die **Anzeige** ist zusammengefasst richtig (Bereich f); fürs **Konsolidat** gehören zwei Verkehrsmittel vermutlich in getrennte Versions-Stränge, sonst sieht das Ende eines Ersatzverkehrs wie eine Fahrplanänderung aus |
 | Fahrplantyp ohne Abdeckung im Feed-Fenster | I-12 (e) Phase B | ❓ offen — der rollierende ~2-Wochen-Feed enthält oft **nicht alle vier Typen** (Import 17.08.2026: kein einziger Ferien-Werktag). Der Fingerprint-Vergleich darf einen fehlenden Typ nicht als Änderung werten, sonst friert er ganze Versions-Stränge fälschlich ein |
 | Umgang mit kurzen Fahrplanänderungen | I-13 | ✅ entschieden 18.08.2026: **eigene Linien-Version**; dafür Gültigkeit als Intervall-Menge je Version (FAHRPLANPERIODEN §5.4) |
-| `day_type` in der Fahrt-Signatur: 3 Werte (MDKursTracker) oder 4 (mit Ferien) | I-13 | ❓ offen |
+| `day_type` in der Fahrt-Signatur | I-13 | ✅ entschieden 18.08.2026: **vier Werte** wie `FahrplanTyp`; Tracker-Seite braucht sie nicht zu kennen (`service_date` genügt) |
+| Fahrt-Signatur mit oder ohne Halte | I-13 | ❓ offen — FAHRPLANPERIODEN §5.1 (mit) widerspricht INTEGRATION §4.2 (ohne). Empfehlung: ohne, sonst ist die Signatur systemübergreifend nicht vergleichbar |
 | Import-Takt (täglich vs. wöchentlich) — bestimmt die Lückenfreiheit des Konsolidats | I-13 | ❓ offen |
 | Rückwirkende Zuordnung von Alt-Sichtungen | I-09 | ✅ entschieden 18.08.2026: **kein Ziel** — es geht um den Fahrplan-Bestand |
 | Startdatum der Sommerferien Sachsen-Anhalt 2026 | — | ❓ offen — Ende ist der 16.08.2026 (bestätigt); der Beginn steht in Test-Fixtures und Bruno-Beispielen noch als unbelegtes `2026-07-13` |

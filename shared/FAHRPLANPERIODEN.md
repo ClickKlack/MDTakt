@@ -138,6 +138,21 @@ bleiben **eingefroren** erhalten. **Die App (Linien, Fahrplan, Umläufe, Matchin
 - **Fahrt** = **Signatur** = SHA(`route_short_name` + `day_type` + geordnete `(Halt, HH:MM)`-Sequenz)
 - **Version** = identifiziert durch den **(Linie, Fahrplantyp)-Fingerprint** innerhalb einer Periode
 
+**`day_type` in der Signatur: die vier Fahrplantypen aus §2** (entschieden 18.08.2026) — `mo_fr`, `mo_fr_ferien`,
+`sa`, `so_feiertag`, identisch zum PHP-Enum `FahrplanTyp`. Nicht die drei Werte, die MDKursTracker liefert
+(`MO-FR|SA|SO`, INTEGRATION §5.1). Das ist unkritisch, weil jede Sichtung ein `service_date` mitbringt: Die Engine
+klassifiziert das Datum selbst (§2.1) und weiß damit, ob `mo_fr` oder `mo_fr_ferien` gemeint ist. Der gröbere
+Tracker-Wert wird nicht gebraucht.
+
+> ⚠️ **Widerspruch zu INTEGRATION §4.2, noch zu klären:** Dort ist die Signatur ohne Halte definiert
+> (`route_short_name` + `day_type` + Abfahrts-`HH:MM`-Sequenz), hier **mit** `(Halt, HH:MM)`-Paaren.
+> Das ist keine Feinheit: Nur die **haltfreie** Variante kann MDKursTracker selbst berechnen — die Gegenseite hat
+> HAFAS-Haltestellen-IDs, keine GTFS-Koordinaten, und §4.1 hat den Match bewusst **ohne** Stop-ID-Crosswalk
+> validiert. Mit Halten in der Signatur wäre die Kurs↔Signatur-Zuordnung über Systemgrenzen nicht mehr vergleichbar.
+> **Empfehlung: haltfrei** (nur Zeiten) — Kollisionen sind unwahrscheinlich, weil abweichende Laufwege auf derselben
+> Linie fast immer eine abweichende Zeitsequenz haben. Koordinaten bleiben davon unberührt: Sie sind der Schlüssel
+> der **Halt-Dedup**, nicht der Fahrt-Identität.
+
 ### 5.2 Betriebstags-Logik (ohne rohen calendar)
 Der `day_type` ist **Teil des Schlüssels** (eigener Versions-Strang je Typ), nicht der GTFS-`calendar`. Aktive Fahrten
 an einem Datum D in Periode P:

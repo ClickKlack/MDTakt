@@ -110,7 +110,10 @@ Bei jedem Re-Import werden die Pointer neu aufgelöst (Identität → aktuelle I
   Fahrplanperiode. Ob/wann er an einem Datum fährt, beantwortet die `calendar`-Schicht (I-03 `TripFilterService`),
   nicht die Signatur. Gleiche Zeiten über Perioden → gleiche Signatur → Zuordnung gilt weiter; geänderte Zeiten →
   Signatur fehlt im neuen Feed → Zuordnung als *stale/neu zu bestätigen* markieren.
-- **`day_type` bleibt in der Signatur** (stabiles Wochenmuster Mo-Fr/Sa/So), die **Periodengrenzen nicht**.
+- **`day_type` bleibt in der Signatur.** MD-Takt nutzt darin die **vier** Fahrplantypen aus FAHRPLANPERIODEN §2
+  (`mo_fr`, `mo_fr_ferien`, `sa`, `so_feiertag`; entschieden 18.08.2026), nicht die drei Werte aus dem Fluss-1-Payload.
+  Kein Konflikt: Jede Sichtung trägt ein `service_date`, die Engine klassifiziert es selbst und leitet daraus den
+  Typ ab — der Tracker muss Ferien nicht kennen. Die **Periodengrenzen** bleiben aus der Signatur heraus.
 
 ### 4.3 Selbstlernende Stop-Map
 Nebenprodukt des Matchings (das die Map **nicht** voraussetzt): Nach dem Trip-Match beide Laufwege **per Zeit im

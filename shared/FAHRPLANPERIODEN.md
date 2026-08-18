@@ -134,7 +134,10 @@ bleiben **eingefroren** erhalten. **Die App (Linien, Fahrplan, Umläufe, Matchin
 
 ### 5.1 Stabile Schlüssel
 - **Linie** = `route_short_name`
-- **Halt** = gerundete **Koordinaten** (Dedup per Nearest-Neighbor); Name „latest wins" (Namen können sich ändern)
+- **Halt** = gerundete **Koordinaten** (Dedup per Nearest-Neighbor); Name „latest wins" (Namen können sich ändern).
+  **Schwelle offen:** die in INTEGRATION §4.2 genannten „~≤ 20 m" sind für das MVB-Netz zu grob — **338 von 730**
+  Halten haben einen eigenständigen anderen Halt näher als 20 m (10 m: 188, 5 m: 66). Zu weit verschmilzt Steige
+  (Hasselbachplatz: 9 Steige, ein Name), zu eng erkennt denselben Halt zwischen zwei Builds nicht wieder.
 - **Fahrt** = **Signatur** = SHA(`route_short_name` + `day_type` + geordnete `(Halt, HH:MM)`-Sequenz)
 - **Version** = identifiziert durch den **(Linie, Fahrplantyp)-Fingerprint** innerhalb einer Periode
 

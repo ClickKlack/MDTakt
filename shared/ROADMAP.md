@@ -428,14 +428,19 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
 ### Vor der Implementierung zu entscheiden (Stopp-Regel — DB-Änderung + SPEC §7)
 - [x] **Kurze Änderungen erzeugen eine eigene Linien-Version** (entschieden 18.08.2026) — kein separater
       Ausnahme-Mechanismus
-- [ ] **Linien-Schlüssel:** `route_short_name` allein oder mit `route_type`? (N2 liegt als Tram- **und** Bus-Route vor)
+- [x] **Linien-Schlüssel: `route_short_name` allein** (entschieden 18.08.2026) — das Verkehrsmittel ist Attribut der
+      Fahrt, nicht Teil des Schlüssels. N2 bekommt Bus- und Tram-Fahrplan damit als **zwei Versionen derselben Linie**
 - [x] **`day_type` in der Fahrt-Signatur: vier Werte** (`mo_fr`, `mo_fr_ferien`, `sa`, `so_feiertag`, wie
       `FahrplanTyp`) — entschieden 18.08.2026. MDKursTracker liefert nur drei; das genügt, weil jede Sichtung ein
       `service_date` mitbringt und die Engine daraus selbst klassifiziert
-- [ ] **Signatur mit oder ohne Halte?** FAHRPLANPERIODEN §5.1 und INTEGRATION §4.2 widersprechen sich.
-      *Empfehlung: ohne* — nur so kann MDKursTracker dieselbe Signatur berechnen (HAFAS-IDs statt GTFS-Koordinaten)
+- [x] **Signatur ohne Halte** (entschieden 18.08.2026) — nur `route_short_name` + `day_type` + Abfahrts-Zeitsequenz,
+      damit MDKursTracker dieselbe Signatur berechnen kann (HAFAS-IDs statt GTFS-Koordinaten)
 - [ ] **`consolidated_stops`** global oder je Periode (FAHRPLANPERIODEN §8)
-- [ ] **Import-Takt** (täglich vs. wöchentlich) — bestimmt die Lückenfreiheit des Konsolidats
+- [x] **Import-Takt: wöchentlich** (entschieden 18.08.2026) — die Quelle wird selbst nur wöchentlich aktualisiert.
+      Bei 23 Tagen Fenster überlappen aufeinanderfolgende Läufe um gut zwei Wochen, das genügt für lückenlose Abdeckung
+- [ ] **Dedup-Schwelle für Halte festlegen.** INTEGRATION §4.2 nennt „~≤ 20 m" — im MVB-Netz zu grob: **338 von 730**
+      Halten haben einen eigenständigen anderen Halt näher als 20 m (bei 10 m noch 188, bei 5 m 66). Eine zu weite
+      Schwelle verschmilzt Steige, eine zu enge erkennt denselben Halt über Builds nicht wieder
 
 ### (B) Versionierung & stabile Identität
 - [ ] Fahrt-**Signatur** je GTFS-Trip berechnen: `SHA(route_short_name + day_type + geordnete HH:MM-Sequenz)`
@@ -480,7 +485,9 @@ Lücken aus, statt sie zu verschweigen.
 | Fahrplantyp ohne Abdeckung im Feed-Fenster | I-12 (e) Phase B | ❓ offen — der rollierende ~2-Wochen-Feed enthält oft **nicht alle vier Typen** (Import 17.08.2026: kein einziger Ferien-Werktag). Der Fingerprint-Vergleich darf einen fehlenden Typ nicht als Änderung werten, sonst friert er ganze Versions-Stränge fälschlich ein |
 | Umgang mit kurzen Fahrplanänderungen | I-13 | ✅ entschieden 18.08.2026: **eigene Linien-Version**; dafür Gültigkeit als Intervall-Menge je Version (FAHRPLANPERIODEN §5.4) |
 | `day_type` in der Fahrt-Signatur | I-13 | ✅ entschieden 18.08.2026: **vier Werte** wie `FahrplanTyp`; Tracker-Seite braucht sie nicht zu kennen (`service_date` genügt) |
-| Fahrt-Signatur mit oder ohne Halte | I-13 | ❓ offen — FAHRPLANPERIODEN §5.1 (mit) widerspricht INTEGRATION §4.2 (ohne). Empfehlung: ohne, sonst ist die Signatur systemübergreifend nicht vergleichbar |
-| Import-Takt (täglich vs. wöchentlich) — bestimmt die Lückenfreiheit des Konsolidats | I-13 | ❓ offen |
+| Fahrt-Signatur mit oder ohne Halte | I-13 | ✅ entschieden 18.08.2026: **ohne** — sonst systemübergreifend nicht vergleichbar |
+| Linien-Schlüssel im Konsolidat | I-13 | ✅ entschieden 18.08.2026: **`route_short_name` allein**; Verkehrsmittel ist Fahrt-Attribut, N2 wird zu zwei Versionen einer Linie |
+| Dedup-Schwelle für Haltestellen-Koordinaten | I-13 | ❓ offen — die „~20 m" aus INTEGRATION §4.2 träfen 338 von 730 Halten und verschmölzen Steige |
+| Import-Takt | I-13 | ✅ entschieden 18.08.2026: **wöchentlich** — die Quelle aktualisiert selbst nur wöchentlich |
 | Rückwirkende Zuordnung von Alt-Sichtungen | I-09 | ✅ entschieden 18.08.2026: **kein Ziel** — es geht um den Fahrplan-Bestand |
 | Startdatum der Sommerferien Sachsen-Anhalt 2026 | — | ❓ offen — Ende ist der 16.08.2026 (bestätigt); der Beginn steht in Test-Fixtures und Bruno-Beispielen noch als unbelegtes `2026-07-13` |

@@ -20,11 +20,13 @@
 | **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen | ⬜ |
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
 | **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f |
+| **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ⬅️ **als Nächstes** |
 
-> **Stand am 17.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
+> **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
-> (f) Linien-/Fahrten-Ansicht. **Als Nächstes: I-04 → I-05 → I-06 → I-12b** — das ist der MVP-Pfad zum
-> Matching-Workflow. Fahrplanperioden Phase B/C laufen daneben als Ausbaustufe.
+> (f) Linien-/Fahrten-Ansicht.
+>
+> **Als Nächstes: I-13 (Fahrplan-Konsolidat)** — vorgezogen vor den Matching-Pfad. Danach I-04 → I-05 → I-06 → I-12b.
 
 > **Frontend-Zuschnitt:** Der **Viewer** ist die **öffentliche, rein lesende Info-Webseite** (Linien, Fahrpläne,
 > Haltestellen, Umläufe). Die **Admin-Schaltzentrale** (`/admin`, Sanctum) bündelt **alle kuratierenden/steuernden
@@ -40,18 +42,28 @@ Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung
 |---|---|---|---|
 | 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** | ✅ |
 | 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten | ✅ |
-| 3 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬅️ **als Nächstes** |
-| 4 | **I-05** Matching-Logik | Engine-Kern fürs Matching | ⬜ |
-| 5 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
-| 6 | **I-12 b** Admin-Matching-Workflow | Matching-UI auf den Engine-APIs (mit Seed-/Test-Sichtungen erprobbar) | ⬜ |
-| 7 | **I-09** Collector-/**MDKursTracker-Integration** | Live-Datenfluss (Fluss 1/2) **nach** dem Admin-Frontend | ⬜ |
-| 8 | **I-10** Stabilisierung | Härten, Tests, Doku | ⬜ |
-| 9 | **I-07 + I-08** Viewer | Öffentliche Webseite **ganz zuletzt** | ⬜ |
+| 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | ⬅️ **als Nächstes** |
+| 4 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬜ |
+| 5 | **I-05** Matching-Logik | Engine-Kern fürs Matching — setzt stabile Fahrt-Identität aus I-13 voraus | ⬜ |
+| 6 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
+| 7 | **I-12 b** Admin-Matching-Workflow | Matching-UI auf den Engine-APIs (mit Seed-/Test-Sichtungen erprobbar) | ⬜ |
+| 8 | **I-09** Collector-/**MDKursTracker-Integration** | Live-Datenfluss (Fluss 1/2) **nach** dem Admin-Frontend | ⬜ |
+| 9 | **I-10** Stabilisierung | Härten, Tests, Doku | ⬜ |
+| 10 | **I-07 + I-08** Viewer | Öffentliche Webseite **ganz zuletzt** | ⬜ |
 
-> **Dazwischengeschoben:** Die Bereiche **I-12 (e) Phase A** (Fahrplantypen) und **I-12 (f)**
-> (Linien-/Fahrten-Ansicht) sind vorgezogen umgesetzt worden — beide entstanden aus der Arbeit am
-> Import-Auditing heraus und sind für den Matching-Workflow nützlich, aber keine Voraussetzung.
-> Der MVP-Pfad bleibt I-04 → I-05 → I-06 → I-12b.
+> **Vorgezogen (18.08.2026):** **I-13** rückt vor den Matching-Pfad. Zwei Gründe, beide am Code/Datenstand belegt:
+>
+> 1. **Fahrplan-Historie verfällt.** Ein Import deckt nur ein Fenster ab (aktuell 15.08.–06.09.) und **ersetzt** den
+>    Bestand (`GtfsImportService::clearAllGtfsData()`). Ein vollständiger Fahrplan **mit** Baustellen, Ersatzverkehren
+>    und Fahrplanwechseln entsteht nur durch Konsolidierung über viele Importe. Jeder Tag ohne sie kostet Historie —
+>    das ist der einzige Arbeitsschritt hier, der sich **nicht** nachholen lässt.
+> 2. **Matching stünde sonst auf Sand.** `sightings.assigned_trip_id` zeigt auf die gtfs.de-`trip_id`, die pro Build
+>    neu vergeben wird; der FK nullt per `nullOnDelete` **alle Zuordnungen bei jedem Import**. Erst die stabile
+>    Fahrt-Signatur aus I-13 macht Zuordnungen dauerhaft.
+>
+> **Kein Ziel:** rückwirkende Zuordnung von Alt-Sichtungen (entschieden 18.08.2026). Es geht um den Fahrplan selbst.
+>
+> Ebenfalls vorgezogen umgesetzt: **I-12 (e) Phase A** (Fahrplantypen) und **I-12 (f)** (Linien-/Fahrten-Ansicht).
 
 **Begründung:** Das Admin-Frontend zuerst zu bauen schafft Vertrauen — der Betreiber sieht unmittelbar, was das System
 tut (Import-Stand, Matching-Ergebnisse), bevor die MDKursTracker-Anbindung live geht. Der öffentliche Viewer ist die
@@ -179,6 +191,8 @@ Sichtungen können per POST gespeichert und per GET tagesweise abgerufen werden.
 **Ziel:** Für eine Sichtung werden passende GTFS-Trip-Kandidaten berechnet und zurückgegeben.
 
 > ⚠️ Vor Implementierung: Zeitfenster-Toleranz (±N Minuten) mit Jörg abstimmen.
+> ⚠️ **Setzt I-13 voraus:** Zuordnungen müssen an der stabilen Fahrt-Signatur hängen, nicht an der gtfs.de-`trip_id` —
+> die wird pro Build neu vergeben, und der FK `sightings.assigned_trip_id` nullt bei jedem Import alle Zuordnungen.
 > 📄 **Matching-Ansatz am realen Datensatz validiert (2026-06-22):** siehe
 > [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §4 — deterministischer
 > Soll-Zeit-Sequenz-Match, 1 HAFAS-Fahrt → N GTFS-Trips, kein Stop-ID-Crosswalk. §3.2-Neufassung noch offen.
@@ -374,14 +388,17 @@ Gegliedert nach dem Bauplan in FAHRPLANPERIODEN §7.
 - [x] Admin-Ansicht „Kalender": Ferien-CRUD + Feiertage read-only
 - [x] Fahrplantyp am realen Fahrplan nutzbar: `GET /lines/{line}/trips?day_type=` filtert auf einen Betriebstag-Typ, aufgelöst über einen Stichtag im Feed-Fenster (häufigste Service-Zusammensetzung)
 
-**Phase B — Versionierung (Metadaten)** — *offen*
+**Phase B/C sind nach I-13 ausgelagert** — sie sind seit 18.08.2026 eigenständig priorisiert und stehen dort
+mit vollständiger Aufgabenliste. Die folgenden Punkte bleiben als Kurzfassung stehen.
+
+**Phase B — Versionierung (Metadaten)** — *offen, siehe I-13*
 - [ ] `schedule_periods` (Admin-CRUD: anlegen/aktiv setzen) + `line_versions` je (Linie, Fahrplantyp)
 - [ ] Fingerprint-Vergleich beim Import → neue Version / verlängern / einfrieren
 - [ ] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3); Schwelle noch festzulegen
 - [ ] Admin-Ansichten „Fahrplanperioden" + „Linien-Versionen" (Historie je Linie/Typ)
 - [ ] Periodenwechsel → betroffene Zuordnungen als *stale/neu zu bestätigen* markieren (siehe `INTEGRATION_MDKURSTRACKER.md` §4.2)
 
-**Phase C — Konsolidat-Datenbestand** — *offen, der große Umbau*
+**Phase C — Konsolidat-Datenbestand** — *offen, siehe I-13*
 - [ ] `consolidated_*` an `line_versions`, Merge je (Linie, Typ) nach §5.3, historische Perioden einfrieren
 - [ ] App-Endpunkte (Linien/Fahrplan/Umläufe/Matching) auf das Konsolidat umstellen — berührt I-03/I-05/I-06
 
@@ -393,6 +410,52 @@ Gegliedert nach dem Bauplan in FAHRPLANPERIODEN §7.
 ### Abnahmekriterium
 Nach Login kann ein Admin den Matching-Workflow vollständig durchführen (Sichtung → Kandidat → Zuordnung) und die
 GTFS-Import-Historie inkl. Datenstand und Fehlern einsehen. Uhrzeiten erscheinen in `Europe/Berlin`. (Bereiche d/e folgen als Ausbaustufen.)
+
+---
+
+## I-13 — Fahrplan-Konsolidat (Perioden, Versionen, datierte Ausnahmen)
+
+**Ziel:** Ein **dauerhafter, vollständiger Fahrplan-Bestand** — mit allen Änderungen (Baustellen, Ersatzverkehre,
+Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Feed-Importe überlebt.
+
+> ⚠️ **Zeitkritisch.** Der Feed deckt nur ein Fenster ab (aktuell 15.08.–06.09.) und der Import **ersetzt** den
+> Bestand. Konsolidiert wird nur, was zum Import-Zeitpunkt im Fenster liegt — **verpasste Zeiträume sind endgültig
+> verloren.** Das ist der einzige Arbeitsschritt des Projekts, der sich nicht nachholen lässt.
+>
+> 📄 Konzept: [`FAHRPLANPERIODEN.md`](FAHRPLANPERIODEN.md) — Phasen B und C aus §7, ergänzt um die datierten
+> Ausnahmen (§5.4). Phase A (Fahrplantypen, Ferien/Feiertage) ist als I-12 (e) bereits umgesetzt.
+
+### Vor der Implementierung zu entscheiden (Stopp-Regel — DB-Änderung + SPEC §7)
+- [ ] **Datierte Ausnahmen** (FAHRPLANPERIODEN §5.4) annehmen? *Empfehlung: ja* — im Feed vom 17.08.2026 dreifach
+      belegt (Sonderfahrplan 16.08., N2-Ersatzverkehr 15.–17.08., 1511 Fahrten ohne Wochenmuster)
+- [ ] **Linien-Schlüssel:** `route_short_name` allein oder mit `route_type`? (N2 liegt als Tram- **und** Bus-Route vor)
+- [ ] **`day_type` in der Fahrt-Signatur:** 3 Werte (`MO-FR|SA|SO`, wie INTEGRATION §4.2 / MDKursTracker) oder 4
+      (mit Ferien, wie `FahrplanTyp`)? Betrifft die Vergleichbarkeit mit der Tracker-Seite
+- [ ] **`consolidated_stops`** global oder je Periode (FAHRPLANPERIODEN §8)
+- [ ] **Import-Takt** (täglich vs. wöchentlich) — bestimmt die Lückenfreiheit des Konsolidats
+
+### (B) Versionierung & stabile Identität
+- [ ] Fahrt-**Signatur** je GTFS-Trip berechnen: `SHA(route_short_name + day_type + geordnete HH:MM-Sequenz)`
+      (INTEGRATION §4.2) — trägt die dauerhafte Identität, die volatile `trip_id` wird nur noch Zeiger
+- [ ] `schedule_periods` (Admin-CRUD: anlegen/aktiv setzen) + `line_versions` je (Linie, Fahrplantyp)
+- [ ] Fingerprint-Vergleich beim Import-`finish` → Version verlängern / einfrieren / neu anlegen
+- [ ] **Fehlender Fahrplantyp ≠ Änderung:** Deckt ein Lauf einen Typ nicht ab (Feed 17.08.2026 enthielt keinen
+      Ferien-Werktag), darf das den Versions-Strang nicht einfrieren
+- [ ] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3); Schwelle festlegen
+- [ ] Admin-Ansichten „Fahrplanperioden" + „Linien-Versionen" (Historie je Linie/Typ)
+
+### (C) Konsolidat-Datenbestand
+- [ ] `consolidated_stops` (Dedup per Koordinaten), `consolidated_trips`, `consolidated_stop_times`
+- [ ] `dated_exceptions` (§5.4) — datierte Überschreibungen je Linie und Kalendertag
+- [ ] Merge je (Linie, Fahrplantyp) beim Import-`finish` nach §5.3 — neuer Lauf gewinnt, ältere füllen Ränder
+- [ ] Abdeckungs-Anzeige im Admin: welche Zeiträume/Typen sind konsolidiert, wo sind Lücken
+- [ ] App-Endpunkte (Linien, Fahrplan) auf das Konsolidat umstellen — berührt I-03 und später I-05/I-06
+
+### Abnahmekriterium
+Nach mehreren Importen über einen Zeitraum, der eine Fahrplanänderung enthält, liefert die Engine für **jedes Datum
+innerhalb der konsolidierten Zeiträume** den an diesem Tag gültigen Fahrplan — einschließlich Ersatzverkehren und
+Sonderfahrplänen — obwohl der Roh-Bestand jeweils nur das letzte Feed-Fenster enthält. Die Abdeckungs-Anzeige weist
+Lücken aus, statt sie zu verschweigen.
 
 ---
 
@@ -408,4 +471,8 @@ GTFS-Import-Historie inkl. Datenstand und Fehlern einsehen. Uhrzeiten erscheinen
 | Subdomain/Hosting für die Admin-Schaltzentrale (`admin.strassenbahn-magdeburg.de`?) | I-12 | ❓ offen |
 | Linien-Schlüssel im Konsolidat: `route_short_name` allein oder mit `route_type`? | I-12 (e) Phase B | ❓ offen — N2 liegt als Tram- **und** Bus-Route vor (Schienenersatzverkehr). Für die **Anzeige** ist zusammengefasst richtig (Bereich f); fürs **Konsolidat** gehören zwei Verkehrsmittel vermutlich in getrennte Versions-Stränge, sonst sieht das Ende eines Ersatzverkehrs wie eine Fahrplanänderung aus |
 | Fahrplantyp ohne Abdeckung im Feed-Fenster | I-12 (e) Phase B | ❓ offen — der rollierende ~2-Wochen-Feed enthält oft **nicht alle vier Typen** (Import 17.08.2026: kein einziger Ferien-Werktag). Der Fingerprint-Vergleich darf einen fehlenden Typ nicht als Änderung werten, sonst friert er ganze Versions-Stränge fälschlich ein |
+| Datierte Ausnahmen im Konsolidat (Einzeltage statt Scheinversionen) | I-13 | ❓ offen — Empfehlung: annehmen, siehe FAHRPLANPERIODEN §5.4 |
+| `day_type` in der Fahrt-Signatur: 3 Werte (MDKursTracker) oder 4 (mit Ferien) | I-13 | ❓ offen |
+| Import-Takt (täglich vs. wöchentlich) — bestimmt die Lückenfreiheit des Konsolidats | I-13 | ❓ offen |
+| Rückwirkende Zuordnung von Alt-Sichtungen | I-09 | ✅ entschieden 18.08.2026: **kein Ziel** — es geht um den Fahrplan-Bestand |
 | Startdatum der Sommerferien Sachsen-Anhalt 2026 | — | ❓ offen — Ende ist der 16.08.2026 (bestätigt); der Beginn steht in Test-Fixtures und Bruno-Beispielen noch als unbelegtes `2026-07-13` |

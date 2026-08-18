@@ -426,8 +426,8 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
 > Ausnahmen (§5.4). Phase A (Fahrplantypen, Ferien/Feiertage) ist als I-12 (e) bereits umgesetzt.
 
 ### Vor der Implementierung zu entscheiden (Stopp-Regel — DB-Änderung + SPEC §7)
-- [ ] **Datierte Ausnahmen** (FAHRPLANPERIODEN §5.4) annehmen? *Empfehlung: ja* — im Feed vom 17.08.2026 dreifach
-      belegt (Sonderfahrplan 16.08., N2-Ersatzverkehr 15.–17.08., 1511 Fahrten ohne Wochenmuster)
+- [x] **Kurze Änderungen erzeugen eine eigene Linien-Version** (entschieden 18.08.2026) — kein separater
+      Ausnahme-Mechanismus
 - [ ] **Linien-Schlüssel:** `route_short_name` allein oder mit `route_type`? (N2 liegt als Tram- **und** Bus-Route vor)
 - [ ] **`day_type` in der Fahrt-Signatur:** 3 Werte (`MO-FR|SA|SO`, wie INTEGRATION §4.2 / MDKursTracker) oder 4
       (mit Ferien, wie `FahrplanTyp`)? Betrifft die Vergleichbarkeit mit der Tracker-Seite
@@ -438,7 +438,11 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
 - [ ] Fahrt-**Signatur** je GTFS-Trip berechnen: `SHA(route_short_name + day_type + geordnete HH:MM-Sequenz)`
       (INTEGRATION §4.2) — trägt die dauerhafte Identität, die volatile `trip_id` wird nur noch Zeiger
 - [ ] `schedule_periods` (Admin-CRUD: anlegen/aktiv setzen) + `line_versions` je (Linie, Fahrplantyp)
-- [ ] Fingerprint-Vergleich beim Import-`finish` → Version verlängern / einfrieren / neu anlegen
+- [ ] Fingerprint-Vergleich beim Import-`finish` → Intervall verlängern / neues Intervall / neue Version
+- [ ] **Version über Fingerprint identifizieren, Gültigkeit als Intervall-Menge** (§5.4 a) — Rückkehr zum alten
+      Fahrplan hängt ein Intervall an die bestehende Version, statt eine identische neue anzulegen
+- [ ] **Grenzen als gesichert/offen führen** (§5.4 b) — nur ein *innerhalb* eines Fensters beobachteter Wechsel ist
+      eine echte Grenze; Fensterkanten sind Untergrenzen und dürfen nicht als Fahrplanwechsel erscheinen
 - [ ] **Fehlender Fahrplantyp ≠ Änderung:** Deckt ein Lauf einen Typ nicht ab (Feed 17.08.2026 enthielt keinen
       Ferien-Werktag), darf das den Versions-Strang nicht einfrieren
 - [ ] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3); Schwelle festlegen
@@ -471,7 +475,7 @@ Lücken aus, statt sie zu verschweigen.
 | Subdomain/Hosting für die Admin-Schaltzentrale (`admin.strassenbahn-magdeburg.de`?) | I-12 | ❓ offen |
 | Linien-Schlüssel im Konsolidat: `route_short_name` allein oder mit `route_type`? | I-12 (e) Phase B | ❓ offen — N2 liegt als Tram- **und** Bus-Route vor (Schienenersatzverkehr). Für die **Anzeige** ist zusammengefasst richtig (Bereich f); fürs **Konsolidat** gehören zwei Verkehrsmittel vermutlich in getrennte Versions-Stränge, sonst sieht das Ende eines Ersatzverkehrs wie eine Fahrplanänderung aus |
 | Fahrplantyp ohne Abdeckung im Feed-Fenster | I-12 (e) Phase B | ❓ offen — der rollierende ~2-Wochen-Feed enthält oft **nicht alle vier Typen** (Import 17.08.2026: kein einziger Ferien-Werktag). Der Fingerprint-Vergleich darf einen fehlenden Typ nicht als Änderung werten, sonst friert er ganze Versions-Stränge fälschlich ein |
-| Datierte Ausnahmen im Konsolidat (Einzeltage statt Scheinversionen) | I-13 | ❓ offen — Empfehlung: annehmen, siehe FAHRPLANPERIODEN §5.4 |
+| Umgang mit kurzen Fahrplanänderungen | I-13 | ✅ entschieden 18.08.2026: **eigene Linien-Version**; dafür Gültigkeit als Intervall-Menge je Version (FAHRPLANPERIODEN §5.4) |
 | `day_type` in der Fahrt-Signatur: 3 Werte (MDKursTracker) oder 4 (mit Ferien) | I-13 | ❓ offen |
 | Import-Takt (täglich vs. wöchentlich) — bestimmt die Lückenfreiheit des Konsolidats | I-13 | ❓ offen |
 | Rückwirkende Zuordnung von Alt-Sichtungen | I-09 | ✅ entschieden 18.08.2026: **kein Ziel** — es geht um den Fahrplan-Bestand |

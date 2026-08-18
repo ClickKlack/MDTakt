@@ -20,8 +20,11 @@
 - **Zwei Schichten (§5):** Roh-GTFS je Lauf = transient (nur aktuellster Lauf); **Konsolidat je Periode** = persistent,
   stabile Schlüssel, aus den Läufen gemerged (neuer Lauf gewinnt). Historische Perioden bleiben **eingefroren** erhalten;
   die App liest das Konsolidat. **Mit Betriebstags-Logik** (Fahrplantyp je Fahrt + Periodenbereich).
-- **Datierte Ausnahmen (§5.4):** Einzeltage (Ersatzverkehr, Sonderfahrplan) sind **keine** Version des Wochenmusters,
-  sondern datierte Überschreibungen — sonst gehen genau die Änderungen verloren, wegen derer das Konsolidat existiert.
+- **Auch kurze Änderungen sind Versionen (§5.4)** — Ersatzverkehr über wenige Tage bekommt einen eigenen Eintrag.
+  Dafür ist eine Version über ihren **Fingerprint** identifiziert und trägt **mehrere Gültigkeits-Intervalle**
+  (Rückkehr zum alten Fahrplan = weiteres Intervall, keine neue Version).
+- **Gültigkeit ist beobachtet, nicht behauptet (§5.4):** Der Feed schneidet an beiden Rändern ab — Grenzen gelten erst
+  als **gesichert**, wenn der Wechsel *innerhalb* eines Fensters gesehen wurde, sonst als **offen**.
 - **Viewer** (später): zeigt zunächst nur die aktuelle Periode; Umschalten kommt später.
 
 > **Priorität (entschieden 18.08.2026):** Der **vollständige Fahrplan-Bestand ist das primäre Ziel** — vor der
@@ -139,9 +142,8 @@ bleiben **eingefroren** erhalten. **Die App (Linien, Fahrplan, Umläufe, Matchin
 Der `day_type` ist **Teil des Schlüssels** (eigener Versions-Strang je Typ), nicht der GTFS-`calendar`. Aktive Fahrten
 an einem Datum D in Periode P:
 ```
-aktive Fahrten(D, P) =
-    datierte Ausnahme für (Linie, D)          — falls vorhanden (§5.4)
-    sonst consolidated_trips der aktiven Version von (Linie, classify(D)) in P
+aktive Fahrten(D, P) = consolidated_trips der Version von (Linie, classify(D)),
+                       deren Gültigkeits-Intervalle D enthalten (§5.4)
 ```
 `classify` (§2.1) nutzt die berechneten Feiertage + die Ferien-Config — keine volatilen calendar-Zeilen im Konsolidat.
 
@@ -154,34 +156,33 @@ Innerhalb der aktuellen Periode, **je (Linie, Fahrplantyp)**:
 3. Halte per Koordinaten deduplizieren.
 4. Sind **viele (Linie, Typ) gleichzeitig** betroffen → **Periodenwechsel anbieten** (§4.3).
 
-### 5.4 Datierte Ausnahmen — der Fall, den das Versionsmodell nicht abbildet
+### 5.4 Kurze Änderungen sind Versionen — und Gültigkeit ist beobachtet, nicht behauptet
 
-Das Modell aus §4.2/§5.2 kennt nur **wöchentlich wiederkehrende** Fahrpläne je (Linie, Fahrplantyp). Der reale Feed
-enthält aber Fahrten, die an **einzelnen Kalendertagen** verkehren — und genau die tragen die Änderungen, um die es
-hier geht. Belegt am Import vom 17.08.2026:
+**Entschieden (18.08.2026):** Auch **kurze** Fahrplanänderungen (Ersatzverkehr über wenige Tage, Veranstaltung)
+erzeugen eine **eigene Linien-Version**. Sie bilden zwar keinen Fahrplanschnitt, sollen aber getrennt geführt werden —
+ein eigener Ausnahme-Mechanismus neben den Versionen entfällt damit.
 
-| Fall | Beobachtung |
+Daraus folgen zwei Dinge, ohne die das Modell nicht trägt:
+
+**(a) Version = Fingerprint, Gültigkeit = Menge von Intervallen.** Kehrt eine Linie nach der Baustelle zum alten
+Fahrplan zurück, entsteht **keine dritte Version**, sondern die frühere Version bekommt ein **weiteres Gültigkeits-
+Intervall**. Sonst wüchse die Historie bei jeder Rückkehr zum Normalzustand um eine inhaltlich identische Version,
+und „diese Linie ändert sich oft" wäre nicht mehr ablesbar. Die Version ist über ihren Fingerprint identifiziert,
+nicht über ihre Laufzeit.
+
+**(b) Gültigkeitsgrenzen sind Beobachtungen.** Der Feed schneidet an beiden Rändern ab — im Import vom 17.08.2026
+beginnen **19 von 58** Wochenmustern exakt am Fensteranfang und **24 von 58** enden exakt am Fensterende. Eine aus
+einem Lauf gelesene Gültigkeit ist deshalb nur eine **Untergrenze**. Das Konsolidat muss zwei Fälle unterscheiden:
+
+| Fall | Bedeutung |
 |---|---|
-| **Sonderfahrplan an einem Tag** | Service `763` („täglich") **entfällt** am 16.08. (`exception_type=2`), Service `198` fährt an genau diesem Tag **zusätzlich** (`exception_type=1`) — er hat gar keine `calendar`-Zeile. Betroffen: 634 Fahrten. |
-| **Ersatzverkehr über wenige Tage** | Linie N2 fuhr 15.–17.08. als **Bus** (Route 17551), ab 18.08. wieder als **Tram** (18099); der 17.08. war Umstelltag mit beidem. |
-| **Umfang insgesamt** | 1511 von 9145 Fahrten hängen an Services **ohne** Wochenmuster. |
+| **gesichert** | Der Wechsel wurde **innerhalb** eines Fensters beobachtet — Tag D trug Fingerprint A, Tag D+1 trug B. Die Grenze ist echt. |
+| **offen** | Die Version lag am Fensterrand an. Wahre Grenze unbekannt, nur „mindestens seit / mindestens bis". |
 
-Als Linien-Version modelliert wäre das falsch: Ein Ein-Tages-Ersatzverkehr würde die aktive Version einfrieren und
-eine neue anlegen, obwohl der reguläre Fahrplan tags darauf unverändert weiterläuft — die Historie füllte sich mit
-Scheinversionen, und die Rückkehr zum Normalzustand sähe wie eine weitere Änderung aus.
-
-**Vorschlag:** Das Konsolidat bekommt **zwei Gültigkeitsarten** nebeneinander:
-
-1. **Regulär** — `(Periode, Linie, Fahrplantyp, Version)` mit `valid_from`/`valid_to`, wie in §4.2.
-2. **Datierte Ausnahme** — an ein **konkretes Datum** (oder eine kurze Datumsliste) gebundene Fahrtenmenge je Linie,
-   mit Anlass-Notiz (Ersatzverkehr, Veranstaltung, Sonderfahrplan) und dem Verkehrsmittel.
-
-Der Fahrplan eines Datums D ist dann: **datierte Ausnahme, falls vorhanden — sonst die aktive Version des Typs**
-(§5.2). Das entspricht der GTFS-Semantik `calendar` vs. `calendar_dates`, ohne die volatilen calendar-Zeilen selbst
-zu übernehmen: Übernommen wird das **Ergebnis** (welche Fahrten an D verkehren), nicht die Buchführung darüber.
-
-Damit erfüllt das Konsolidat erst den eigentlichen Zweck — ein Fahrplan **mit** seinen Änderungen, nicht ein
-geglätteter Normalfahrplan, aus dem die Baustellen herausgemittelt sind.
+Ein späterer Import, dessen Fenster weiter zurück- oder vorausreicht, kann eine offene Grenze zu einer gesicherten
+verdichten. Die Anzeige muss den Unterschied zeigen, statt eine Fensterkante als Fahrplanwechsel auszugeben — das war
+der Fehlschluss, der am 16.08.2026 nahelag: der Tag sieht wie ein Sondertag aus, ist aber der letzte sichtbare Tag
+der Sommerferien- und Baustellenphase, deren Beginn vor dem Fenster liegt.
 
 ---
 
@@ -192,11 +193,11 @@ geglätteter Normalfahrplan, aus dem die Baustellen herausgemittelt sind.
 | *(keine)* `holidays` | Config | Feiertage — **nicht persistiert**, `HolidayService` berechnet sie (Sachsen-Anhalt) |
 | `school_holidays` | Config | Ferienzeiten — `id, name, start_date, end_date` (Admin-CRUD) |
 | `schedule_periods` | 2 | `id, valid_from, valid_to (nullable), label, status (current/frozen), created_via (admin/offer), detected_at` |
-| `line_versions` | 2 | `id, period_id, line (route_short_name), day_type, version_no, valid_from, valid_to (nullable), fingerprint, detected_at` |
+| `line_versions` | 2 | `id, period_id, line (route_short_name), day_type, version_no, fingerprint, first_seen_at, last_seen_at` — Gültigkeit liegt in `line_version_intervals`, nicht hier |
 | `consolidated_stops` | 2 | `id, lat, lon, name` — per Koordinaten dedupliziert *(offen: global vs. je Periode)* |
 | `consolidated_trips` | 2 | `id, line_version_id, signature, first_stop, last_stop` |
 | `consolidated_stop_times` | 2 | `consolidated_trip_id, stop_id (→consolidated_stops), stop_sequence, arrival_time, departure_time` |
-| `dated_exceptions` | 2 | Datierte Ausnahme (§5.4) — `id, period_id, line, mode, service_date, note, detected_at`; die zugehörigen Fahrten hängen wie bei einer Version an `consolidated_trips` |
+| `line_version_intervals` | 2 | Beobachtete Gültigkeit je Version (§5.4) — `line_version_id, valid_from, valid_to, from_confirmed, to_confirmed`; mehrere Intervalle je Version (Rückkehr zum alten Fahrplan) |
 
 `FahrplanTyp` als PHP-Enum (`MoFrNormal`, `MoFrFerien`, `Sa`, `SoFeiertag`). Konsolidat-Hierarchie:
 **`schedule_periods` → `line_versions` (je Linie & Typ) → `consolidated_trips` → `consolidated_stop_times`**.
@@ -234,9 +235,9 @@ Roh-GTFS (Schicht 1) bleibt wie gehabt — nur der aktuellste Lauf.
 - **Fehlender Typ ≠ Änderung:** Der Import vom 17.08.2026 enthielt **keinen einzigen Ferien-Werktag** (Ferienende
   16.08., Fensterbeginn 15.08.), also nur 3 der 4 Typen. Der Fingerprint-Vergleich in Phase B darf einen im Lauf
   **fehlenden** Typ nicht als Änderung werten — sonst friert er den `MoFrFerien`-Strang jedes Mal fälschlich ein.
-- **Datierte Ausnahmen (§5.4) bestätigen:** zwei Gültigkeitsarten (regulär + datiert) statt Versionen für Einzeltage.
-  Ohne das erzeugt jeder Ein-Tages-Ersatzverkehr eine Scheinversion. **Empfehlung: annehmen** — der Fall ist im
-  Feed vom 17.08.2026 dreifach belegt.
+- **Kurze Änderungen = eigene Version** (§5.4): entschieden 18.08.2026. Offen bleibt die Umsetzung von
+  Intervall-Gültigkeit und der Unterscheidung gesichert/offen — beides ist Voraussetzung dafür, dass Fensterkanten
+  nicht als Fahrplanwechsel erscheinen.
 - **Import-Takt:** Das Konsolidat kann nur sammeln, was im Fenster liegt. Bei 23 Tagen Fenster genügt ein Import
   je Woche für lückenlose Abdeckung; **täglich** ist die sichere Wahl (Ausfälle, Feed-Störungen). Cron festlegen —
   hängt mit dem offenen Punkt „Cron-Intervall" in der ROADMAP zusammen.

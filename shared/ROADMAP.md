@@ -435,18 +435,23 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
       `service_date` mitbringt und die Engine daraus selbst klassifiziert
 - [x] **Signatur ohne Halte** (entschieden 18.08.2026) — nur `route_short_name` + `day_type` + Abfahrts-Zeitsequenz,
       damit MDKursTracker dieselbe Signatur berechnen kann (HAFAS-IDs statt GTFS-Koordinaten)
-- [ ] **`consolidated_stops`** global oder je Periode (FAHRPLANPERIODEN §8)
+- [x] **`consolidated_stops`: global mit versionierten Attributen** (entschieden 18.08.2026) — eine Zeile je
+      physischem Halt (Identität = gerundete Koordinaten), Umbenennungen und Verlegungen als Attribut-Historie in
+      `consolidated_stop_versions`. Historisch treue Anzeige ohne vervielfachte Identität
 - [x] **Import-Takt: wöchentlich** (entschieden 18.08.2026) — die Quelle wird selbst nur wöchentlich aktualisiert.
       Bei 23 Tagen Fenster überlappen aufeinanderfolgende Läufe um gut zwei Wochen, das genügt für lückenlose Abdeckung
 - [ ] **Dedup-Schwelle für Halte festlegen.** INTEGRATION §4.2 nennt „~≤ 20 m" — im MVB-Netz zu grob: **338 von 730**
       Halten haben einen eigenständigen anderen Halt näher als 20 m (bei 10 m noch 188, bei 5 m 66). Eine zu weite
       Schwelle verschmilzt Steige, eine zu enge erkennt denselben Halt über Builds nicht wieder
 
+> 📐 **Datenmodell-Entwurf liegt vor:** FAHRPLANPERIODEN §6.1 (Tabellen) und §6.2 (Fortschreibung beim Import).
+
 ### (B) Versionierung & stabile Identität
-- [ ] Fahrt-**Signatur** je GTFS-Trip berechnen: `SHA(route_short_name + day_type + geordnete HH:MM-Sequenz)`
-      (INTEGRATION §4.2) — trägt die dauerhafte Identität, die volatile `trip_id` wird nur noch Zeiger
+- [ ] Fahrt-**Signatur** je **(Trip, Fahrplantyp)** berechnen: `SHA(route_short_name + day_type + HH:MM-Sequenz)`
+      → Tabelle `trip_signatures`; die volatile `trip_id` wird nur noch Zeiger (§6.1)
 - [ ] `schedule_periods` (Admin-CRUD: anlegen/aktiv setzen) + `line_versions` je (Linie, Fahrplantyp)
-- [ ] Fingerprint-Vergleich beim Import-`finish` → Intervall verlängern / neues Intervall / neue Version
+- [ ] **Tagesweise** Fingerprint-Auswertung beim Import-`finish` (§6.2) statt „repräsentativer Tag" — nur so
+      entstehen echte Intervalle und die Unterscheidung gesichert/offen
 - [ ] **Version über Fingerprint identifizieren, Gültigkeit als Intervall-Menge** (§5.4 a) — Rückkehr zum alten
       Fahrplan hängt ein Intervall an die bestehende Version, statt eine identische neue anzulegen
 - [ ] **Grenzen als gesichert/offen führen** (§5.4 b) — nur ein *innerhalb* eines Fensters beobachteter Wechsel ist

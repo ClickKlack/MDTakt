@@ -212,7 +212,8 @@ der Sommerferien- und Baustellenphase, deren Beginn vor dem Fenster liegt.
 | `school_holidays` | Config | Ferienzeiten — `id, name, start_date, end_date` (Admin-CRUD) |
 | `schedule_periods` | 2 | `id, valid_from, valid_to (nullable), label, status (current/frozen), created_via (admin/offer), detected_at` |
 | `line_versions` | 2 | `id, period_id, line (route_short_name), day_type, version_no, fingerprint, first_seen_at, last_seen_at` — Gültigkeit liegt in `line_version_intervals`, nicht hier |
-| `consolidated_stops` | 2 | `id, lat, lon, name` — per Koordinaten dedupliziert *(offen: global vs. je Periode)* |
+| `consolidated_stops` | 2 | **Global**, eine Zeile je physischem Halt — `id, anchor_lat, anchor_lon, first_seen_at, last_seen_at`. Identität = gerundete Koordinaten (entschieden 18.08.2026) |
+| `consolidated_stop_versions` | 2 | Attribut-Historie je Halt — `consolidated_stop_id, name, lat, lon, valid_from, valid_to, from_confirmed, to_confirmed`. Trägt Umbenennungen und Verlegungen, ohne die Identität zu vervielfachen |
 | `consolidated_trips` | 2 | `id, line_version_id, signature, first_stop, last_stop` |
 | `consolidated_stop_times` | 2 | `consolidated_trip_id, stop_id (→consolidated_stops), stop_sequence, arrival_time, departure_time` |
 | `line_version_intervals` | 2 | Beobachtete Gültigkeit je Version (§5.4) — `line_version_id, valid_from, valid_to, from_confirmed, to_confirmed`; mehrere Intervalle je Version (Rückkehr zum alten Fahrplan) |
@@ -220,6 +221,89 @@ der Sommerferien- und Baustellenphase, deren Beginn vor dem Fenster liegt.
 `FahrplanTyp` als PHP-Enum (`MoFrNormal`, `MoFrFerien`, `Sa`, `SoFeiertag`). Konsolidat-Hierarchie:
 **`schedule_periods` → `line_versions` (je Linie & Typ) → `consolidated_trips` → `consolidated_stop_times`**.
 Roh-GTFS (Schicht 1) bleibt wie gehabt — nur der aktuellste Lauf.
+
+### 6.1 Phase B — konkrete Tabellen (Entwurf, 18.08.2026)
+
+Alle Entscheidungen aus §5.4 und §5.1 eingearbeitet. **Noch nicht implementiert** — Grundlage für die Migrationen.
+
+**`schedule_periods`** — netzweite, kuratierte Periode (§4.1)
+
+| Spalte | Typ | Anmerkung |
+|---|---|---|
+| `id` | bigserial | |
+| `label` | varchar | z. B. „Jahresfahrplan 2026/27" |
+| `valid_from` | date | vom Admin gesetzt |
+| `valid_to` | date, null | offen = laufende Periode |
+| `status` | varchar | `current` \| `frozen` (PHP-Enum) |
+| `created_via` | varchar | `admin` \| `offer` — angenommener Systemvorschlag (§4.3) |
+| `created_at` | timestamptz | |
+
+**`trip_signatures`** — Brücke von der volatilen `trip_id` zur stabilen Identität (§5.1)
+
+| Spalte | Typ | Anmerkung |
+|---|---|---|
+| `id` | bigserial | |
+| `trip_id` | varchar FK → `trips` | Zeiger, wird bei jedem Import neu aufgelöst |
+| `day_type` | varchar | einer der vier Typen |
+| `signature` | char(64) | `SHA256(route_short_name │ day_type │ Abfahrts-HH:MM-Sequenz)` — **ohne Halte** |
+| | | **unique** `(trip_id, day_type)`, **index** `(signature)` |
+
+> Warum je **(Trip, Typ)** und nicht je Trip: Ein „täglich"-Service gehört zu allen vier Typen. Die Signatur trägt den
+> Typ, also braucht ein solcher Trip vier Zeilen. Die Tabelle wird bei jedem Import neu aufgebaut — sie gehört
+> logisch zu Schicht 1, ist aber der Ankerpunkt, an dem Zuordnungen (I-05/I-06) dauerhaft hängen.
+
+**`line_versions`** — ein Fahrplanstand einer Linie für einen Betriebstag-Typ (§4.2, §5.4 a)
+
+| Spalte | Typ | Anmerkung |
+|---|---|---|
+| `id` | bigserial | |
+| `period_id` | bigint FK | |
+| `line` | varchar | `route_short_name` — **ohne** `route_type` (entschieden) |
+| `day_type` | varchar | |
+| `version_no` | int | fortlaufend je `(period, line, day_type)`, nur zur Anzeige |
+| `fingerprint` | char(64) | SHA über die sortierten `trip_signatures` dieser Linie und dieses Typs |
+| `first_seen_at` / `last_seen_at` | timestamptz | |
+| | | **unique** `(period_id, line, day_type, fingerprint)` — die Version **ist** ihr Fingerprint |
+
+Keine `valid_from`/`valid_to` — die Gültigkeit liegt vollständig in:
+
+**`line_version_intervals`** — beobachtete Gültigkeit (§5.4 b)
+
+| Spalte | Typ | Anmerkung |
+|---|---|---|
+| `id` | bigserial | |
+| `line_version_id` | bigint FK, cascade | |
+| `valid_from` / `valid_to` | date | |
+| `from_confirmed` / `to_confirmed` | boolean | `false` = Fensterkante, nur Untergrenze |
+| | | **index** `(line_version_id)`, **index** `(valid_from, valid_to)` |
+
+### 6.2 Fortschreibung beim Import-`finish` (Entwurf)
+
+Ersetzt den „repräsentativen Tag" aus §5.3 durch eine **tagesweise** Auswertung — nur so entstehen echte Intervalle
+und die Unterscheidung gesichert/offen.
+
+```
+1. je (Trip, Typ): Signatur berechnen → trip_signatures neu aufbauen
+2. je Tag D im Feed-Fenster, je Linie:
+       typ_D = classify(D)                        (§2.1)
+       menge  = aktive Trips der Linie an D       (calendar + calendar_dates)
+       fp(D)  = SHA über die sortierten Signaturen dieser Menge
+3. je (Linie, Typ): aufeinanderfolgende Tage mit gleichem fp zu Intervallen bündeln
+4. je Intervall:
+       line_version zu (Periode, Linie, Typ, fp) finden oder anlegen
+       Intervall anfügen; an bestehende angrenzende Intervalle derselben Version anschließen
+       from_confirmed = Intervallbeginn liegt NICHT auf der Fensterkante
+       to_confirmed   = Intervallende  liegt NICHT auf der Fensterkante
+5. offene Grenzen verdichten: deckt dieser Lauf eine zuvor offene Grenze im Inneren ab,
+   wird sie bestätigt
+6. betrifft ein neuer Fingerprint viele Linien am selben Datum → Periodenwechsel anbieten (§4.3)
+```
+
+**Nicht als Änderung werten:** Deckt das Fenster einen Typ gar nicht ab (der Import vom 17.08.2026 enthielt keinen
+Ferien-Werktag), entstehen für diesen Typ schlicht keine Intervalle — die bestehende Version bleibt unangetastet.
+
+**Aufwand:** 23 Tage × 36 Linien ≈ 830 Fingerprints je Lauf. Die Tagesmengen kommen aus einer Bulk-Abfrage
+(`ServiceDayResolver::activeServiceIdsForRange`, bereits vorhanden), die Signaturen aus `trip_signatures`.
 
 ---
 
@@ -261,7 +345,7 @@ Roh-GTFS (Schicht 1) bleibt wie gehabt — nur der aktuellste Lauf.
   hängt mit dem offenen Punkt „Cron-Intervall" in der ROADMAP zusammen.
 - **Schwelle „viele Linien"** für den Periodenwechsel-Vorschlag (absolute Zahl oder Anteil? konfigurierbar?).
 - Genaue **Versions-Grenz-Erkennung**: ein einzelner Feed kann schon eine künftige Linien-Version enthalten (Zeitsub-Bereiche) — Algorithmus festzurren.
-- `consolidated_stops` **global** (über alle Perioden dedupliziert, einfacher) **vs. je Periode** (historientreu, falls Halte sich ändern).
+- ~~`consolidated_stops` global vs. je Periode~~ — entschieden 18.08.2026: **global mit versionierten Attributen** (§6.1).
 - **GTFS-`service_id` → Fahrplantyp:** repräsentativer Tag je Typ; Umgang mit Trips, deren Service mehrere Typen mischt.
 - Rollierendes ~2-Wochen-Fenster deckt evtl. nicht alle 4 Typen gleichzeitig ab → Versionen/Konsolidat füllen sich über mehrere Importe.
 - Wann **Roh-GTFS löschen** (sofort nach erfolgreicher Konsolidierung im `finish`, oder erst beim nächsten Import).

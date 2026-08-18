@@ -1,0 +1,83 @@
+meta {
+  name: Line Versions (Fahrplan-Historie)
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/line-versions
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.lines: isArray
+}
+
+script:post-response {
+  const data = res.getBody().data;
+
+  // Ohne Konsolidierungslauf ist die Antwort leer - dann gibt es nichts zu pruefen.
+  if (data.lines.length === 0) {
+    return;
+  }
+
+  for (const linie of data.lines) {
+    for (const version of linie.versions) {
+      if (version.intervals.length === 0) {
+        throw new Error("Version ohne Gueltigkeits-Intervall: " + linie.line + " v" + version.version_no);
+      }
+      for (const i of version.intervals) {
+        if (i.valid_from > i.valid_to) {
+          throw new Error("Intervall laeuft rueckwaerts: " + linie.line + " " + i.valid_from);
+        }
+      }
+    }
+  }
+}
+
+docs {
+  # Fahrplan-Aenderungshistorie (Konsolidat)
+
+  Je Linie und Fahrplantyp die beobachteten Versionen der laufenden Periode mit
+  ihren Gueltigkeits-Intervallen. Sanctum-geschuetzt.
+
+  ## Versionen
+
+  Eine Version ist ueber ihren **Fingerprint** identifiziert, nicht ueber ihre
+  Laufzeit. Kehrt eine Linie nach einer Baustelle zum alten Fahrplan zurueck,
+  erscheint dieselbe Version mit einem **weiteren Intervall** statt einer neuen.
+  Beispiel aus dem Import vom 17.08.2026: N1 fuehrt im Typ `mo_fr` drei
+  Versionen mit sechs Intervallen, weil montags ein anderer Fahrplan gilt als
+  Di-Fr.
+
+  ## Grenzen: gesichert vs. offen
+
+  `from_confirmed` / `to_confirmed` sagen, ob die Grenze **beobachtet** wurde:
+
+  - `true` - der Wechsel lag *innerhalb* eines Feed-Fensters, die Grenze ist echt.
+  - `false` - die Version lag an der Fensterkante an. Der wahre Beginn bzw. das
+    Ende liegt ausserhalb; es gilt nur "mindestens seit/bis".
+
+  Das ist keine Feinheit: Der gtfs.de-Feed schneidet an beiden Raendern ab (im
+  Import vom 17.08.2026 begannen 19 von 58 Wochenmustern exakt am
+  Fensteranfang). Ohne die Unterscheidung erschiene jede Fensterkante als
+  Fahrplanwechsel.
+
+  ## trip_count
+
+  Fahrten der Version, gezaehlt am ersten Tag ihres ersten Intervalls. `null`,
+  wenn dieser Tag ausserhalb des aktuellen Roh-Bestands liegt - das Konsolidat
+  haelt die Historie, der Roh-Feed nur das letzte Fenster.
+
+  Voraussetzung fuer Daten: mindestens ein GTFS-Import mit Konsolidierung.
+}

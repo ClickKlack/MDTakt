@@ -351,6 +351,82 @@ components:
         Schulferien → mo_fr_ferien oder mo_fr.
       enum: [mo_fr, mo_fr_ferien, sa, so_feiertag]
 
+    LineVersionInterval:
+      type: object
+      required: [valid_from, valid_to, from_confirmed, to_confirmed]
+      properties:
+        valid_from: { type: string, format: date }
+        valid_to: { type: string, format: date }
+        from_confirmed:
+          type: boolean
+          description: >
+            true = der Wechsel auf diese Version wurde innerhalb eines Feed-Fensters
+            beobachtet, die Grenze ist echt. false = die Version lag an der Fensterkante an,
+            der wahre Beginn liegt davor ("mindestens seit").
+        to_confirmed: { type: boolean, description: 'Analog für das Ende des Intervalls.' }
+
+    LineVersion:
+      type: object
+      required: [id, line, day_type, version_no, fingerprint, intervals]
+      properties:
+        id: { type: integer }
+        line: { type: string }
+        day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+        day_type_label: { type: string }
+        version_no: { type: integer, description: 'Fortlaufend je (Periode, Linie, Typ) — nur zur Anzeige.' }
+        fingerprint: { type: string, description: 'SHA256 über die sortierten Fahrt-Signaturen; identifiziert die Version.' }
+        trip_count: { type: integer, description: 'Fahrten dieser Version im aktuellen Roh-Bestand.' }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        intervals:
+          type: array
+          items: { $ref: '#/components/schemas/LineVersionInterval' }
+
+    SchedulePeriod:
+      type: object
+      required: [id, label, valid_from, status, created_via]
+      properties:
+        id: { type: integer }
+        label: { type: string }
+        valid_from: { type: string, format: date }
+        valid_to: { type: string, format: date, nullable: true }
+        status: { type: string, enum: [current, frozen] }
+        created_via:
+          type: string
+          enum: [admin, offer, bootstrap]
+          description: '`bootstrap` = beim ersten Konsolidierungslauf automatisch angelegt, weil noch keine Periode existierte.'
+
+    LineVersionsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [period, lines]
+          properties:
+            period:
+              allOf: [{ $ref: '#/components/schemas/SchedulePeriod' }]
+              nullable: true
+            coverage:
+              type: object
+              nullable: true
+              description: Vom Konsolidat abgedeckter Zeitraum über alle Versionen.
+              properties:
+                from: { type: string, format: date, nullable: true }
+                to: { type: string, format: date, nullable: true }
+                confirmed_boundaries: { type: integer }
+                open_boundaries: { type: integer }
+            lines:
+              type: array
+              items:
+                type: object
+                required: [line, versions]
+                properties:
+                  line: { type: string }
+                  versions:
+                    type: array
+                    items: { $ref: '#/components/schemas/LineVersion' }
+
     LineTripItem:
       type: object
       required: [trip_id, service_id]
@@ -598,6 +674,45 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AdminResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/line-versions:
+    get:
+      operationId: listLineVersions
+      summary: Fahrplan-Versionen je Linie und Betriebstag-Typ
+      description: >
+        Die Änderungshistorie des Fahrplans aus dem Konsolidat (FAHRPLANPERIODEN §5.4):
+        je Linie und Fahrplantyp die beobachteten Versionen mit ihren Gültigkeits-Intervallen.
+
+
+        Eine Version ist über ihren Fingerprint identifiziert — kehrt eine Linie nach einer
+        Baustelle zum alten Fahrplan zurück, erscheint dieselbe Version mit einem weiteren
+        Intervall statt einer neuen. Grenzen sind nur dann `confirmed`, wenn der Wechsel
+        innerhalb eines Feed-Fensters beobachtet wurde; an der Fensterkante sind sie
+        Untergrenzen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: line
+          in: query
+          required: false
+          description: Auf eine Linienbezeichnung einschränken.
+          schema: { type: string }
+        - name: day_type
+          in: query
+          required: false
+          description: Auf einen Fahrplantyp einschränken.
+          schema: { $ref: '#/components/schemas/FahrplanTyp' }
+      responses:
+        '200':
+          description: Versionen der laufenden Periode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineVersionsResponse' }
         '401':
           description: Nicht authentifiziert
           content:

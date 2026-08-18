@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
 use App\Http\Controllers\Admin\LineColorController;
+use App\Http\Controllers\Admin\LineVersionController;
 use App\Http\Controllers\Admin\SchoolHolidayController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\LineController;
@@ -37,6 +38,9 @@ Route::prefix('v1')->group(function (): void {
             Route::put('school-holidays/{schoolHoliday}', [SchoolHolidayController::class, 'update'])->name('admin.school-holidays.update');
             Route::delete('school-holidays/{schoolHoliday}', [SchoolHolidayController::class, 'destroy'])->name('admin.school-holidays.destroy');
             Route::get('holidays', [HolidayController::class, 'index'])->name('admin.holidays.index');
+
+            // Fahrplan-Konsolidat: Änderungshistorie je Linie und Betriebstag-Typ (I-13)
+            Route::get('line-versions', [LineVersionController::class, 'index'])->name('admin.line-versions.index');
         });
     });
 

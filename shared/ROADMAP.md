@@ -397,7 +397,9 @@ mit vollständiger Aufgabenliste. Die folgenden Punkte bleiben als Kurzfassung s
 - [ ] Admin-CRUD für Perioden (anlegen, aktiv setzen, einfrieren)
 - [ ] Fingerprint-Vergleich beim Import → neue Version / verlängern / einfrieren
 - [ ] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3); Schwelle noch festzulegen
-- [ ] Admin-Ansichten „Fahrplanperioden" + „Linien-Versionen" (Historie je Linie/Typ)
+- [x] Admin-Ansicht „Fahrplan-Versionen" — Historie je Linie/Typ mit Intervallen, Grenzen (gesichert/offen),
+      Periode und Abdeckung; `GET /api/v1/admin/line-versions` + openapi + Bruno
+- [ ] Admin-Ansicht „Fahrplanperioden" (anlegen, aktiv setzen, einfrieren)
 - [ ] Periodenwechsel → betroffene Zuordnungen als *stale/neu zu bestätigen* markieren (siehe `INTEGRATION_MDKURSTRACKER.md` §4.2)
 
 **Phase C — Konsolidat-Datenbestand** — *offen, siehe I-13*

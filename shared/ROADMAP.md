@@ -392,7 +392,9 @@ Gegliedert nach dem Bauplan in FAHRPLANPERIODEN §7.
 mit vollständiger Aufgabenliste. Die folgenden Punkte bleiben als Kurzfassung stehen.
 
 **Phase B — Versionierung (Metadaten)** — *offen, siehe I-13*
-- [ ] `schedule_periods` (Admin-CRUD: anlegen/aktiv setzen) + `line_versions` je (Linie, Fahrplantyp)
+- [x] `schedule_periods` + `line_versions` je (Linie, Fahrplantyp) — Tabellen und Fortschreibung; der erste Lauf
+      legt mangels Admin-CRUD eine `bootstrap`-Periode an
+- [ ] Admin-CRUD für Perioden (anlegen, aktiv setzen, einfrieren)
 - [ ] Fingerprint-Vergleich beim Import → neue Version / verlängern / einfrieren
 - [ ] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3); Schwelle noch festzulegen
 - [ ] Admin-Ansichten „Fahrplanperioden" + „Linien-Versionen" (Historie je Linie/Typ)
@@ -447,17 +449,19 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
 > 📐 **Datenmodell-Entwurf liegt vor:** FAHRPLANPERIODEN §6.1 (Tabellen) und §6.2 (Fortschreibung beim Import).
 
 ### (B) Versionierung & stabile Identität
-- [ ] Fahrt-**Signatur** je **(Trip, Fahrplantyp)** berechnen: `SHA(route_short_name + day_type + HH:MM-Sequenz)`
+- [x] Fahrt-**Signatur** je **(Trip, Fahrplantyp)** berechnen: `SHA(route_short_name + day_type + HH:MM-Sequenz)`
       → Tabelle `trip_signatures`; die volatile `trip_id` wird nur noch Zeiger (§6.1)
 - [ ] `schedule_periods` (Admin-CRUD: anlegen/aktiv setzen) + `line_versions` je (Linie, Fahrplantyp)
-- [ ] **Tagesweise** Fingerprint-Auswertung beim Import-`finish` (§6.2) statt „repräsentativer Tag" — nur so
+- [x] **Tagesweise** Fingerprint-Auswertung beim Import-`finish` (§6.2) statt „repräsentativer Tag" — nur so
       entstehen echte Intervalle und die Unterscheidung gesichert/offen
-- [ ] **Version über Fingerprint identifizieren, Gültigkeit als Intervall-Menge** (§5.4 a) — Rückkehr zum alten
+- [x] **Version über Fingerprint identifizieren, Gültigkeit als Intervall-Menge** (§5.4 a) — Rückkehr zum alten
       Fahrplan hängt ein Intervall an die bestehende Version, statt eine identische neue anzulegen
-- [ ] **Grenzen als gesichert/offen führen** (§5.4 b) — nur ein *innerhalb* eines Fensters beobachteter Wechsel ist
+- [x] **Grenzen als gesichert/offen führen** (§5.4 b) — nur ein *innerhalb* eines Fensters beobachteter Wechsel ist
       eine echte Grenze; Fensterkanten sind Untergrenzen und dürfen nicht als Fahrplanwechsel erscheinen
-- [ ] **Fehlender Fahrplantyp ≠ Änderung:** Deckt ein Lauf einen Typ nicht ab (Feed 17.08.2026 enthielt keinen
+- [x] **Fehlender Fahrplantyp ≠ Änderung:** Deckt ein Lauf einen Typ nicht ab (Feed 17.08.2026 enthielt keinen
       Ferien-Werktag), darf das den Versions-Strang nicht einfrieren
+- [x] **Ausfalltag unterbricht die Gültigkeit:** Fährt eine Linie an einem Tag nicht, während andere fahren, ist das
+      eine Beobachtung — die Gültigkeit läuft nicht darüber hinweg
 - [ ] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3); Schwelle festlegen
 - [ ] Admin-Ansichten „Fahrplanperioden" + „Linien-Versionen" (Historie je Linie/Typ)
 
@@ -495,4 +499,5 @@ Lücken aus, statt sie zu verschweigen.
 | Dedup-Schwelle für Haltestellen-Koordinaten | I-13 | ❓ offen — die „~20 m" aus INTEGRATION §4.2 träfen 338 von 730 Halten und verschmölzen Steige |
 | Import-Takt | I-13 | ✅ entschieden 18.08.2026: **wöchentlich** — die Quelle aktualisiert selbst nur wöchentlich |
 | Rückwirkende Zuordnung von Alt-Sichtungen | I-09 | ✅ entschieden 18.08.2026: **kein Ziel** — es geht um den Fahrplan-Bestand |
+| Nachtlinien: Betriebstag ≠ Kalendertag (N1 fährt montags anders als Di–Fr) | I-13 | ❓ offen — nicht dringend, siehe FAHRPLANPERIODEN §8 |
 | Startdatum der Sommerferien Sachsen-Anhalt 2026 | — | ❓ offen — Ende ist der 16.08.2026 (bestätigt); der Beginn steht in Test-Fixtures und Bruno-Beispielen noch als unbelegtes `2026-07-13` |

@@ -343,6 +343,11 @@ Ferien-Werktag), entstehen für diesen Typ schlicht keine Intervalle — die bes
 - **Import-Takt:** Das Konsolidat kann nur sammeln, was im Fenster liegt. Bei 23 Tagen Fenster genügt ein Import
   je Woche für lückenlose Abdeckung; **täglich** ist die sichere Wahl (Ausfälle, Feed-Störungen). Cron festlegen —
   hängt mit dem offenen Punkt „Cron-Intervall" in der ROADMAP zusammen.
+- **Nachtlinien: Betriebstag ≠ Kalendertag.** Beim ersten Konsolidierungslauf (18.08.2026) zeigte N1 im Typ `mo_fr`
+  **montags einen anderen Fahrplan als Di–Fr** — die Nacht von Sonntag auf Montag ist eine Sonntagsnacht, GTFS ordnet
+  diese Fahrten aber dem Montag zu. Der Typ `mo_fr` fasst für Nachtlinien also zwei Fahrpläne zusammen. Das Modell
+  verkraftet es (3 Versionen mit 6 Intervallen statt 6 Versionen), aber sauber wäre ein eigener Typ oder eine
+  Betriebstags-Definition, die die Nacht dem Vortag zuschlägt. **Nicht dringend** — die Daten sind korrekt abgebildet.
 - **Schwelle „viele Linien"** für den Periodenwechsel-Vorschlag (absolute Zahl oder Anteil? konfigurierbar?).
 - Genaue **Versions-Grenz-Erkennung**: ein einzelner Feed kann schon eine künftige Linien-Version enthalten (Zeitsub-Bereiche) — Algorithmus festzurren.
 - ~~`consolidated_stops` global vs. je Periode~~ — entschieden 18.08.2026: **global mit versionierten Attributen** (§6.1).

@@ -27,6 +27,11 @@ final class GtfsImportService
      */
     private const CHUNK_SIZE = 1000;
 
+    public function __construct(
+        private readonly TripSignatureService $signatures,
+        private readonly ScheduleVersionService $versions,
+    ) {}
+
     /**
      * Startet einen Import-Lauf: legt den Audit-Eintrag an und schreibt die
      * Stammdaten-Basistabellen (routes/stops/trips/calendar/calendar_dates). Die großen
@@ -119,14 +124,43 @@ final class GtfsImportService
      */
     public function finishRun(GtfsImportRun $run): GtfsImportRun
     {
+        $counts = ($run->counts ?? []) + $this->consolidate($run);
+
         $run->update([
             'status' => GtfsImportStatus::Success,
             'finished_at' => Carbon::now(),
+            'counts' => $counts,
         ]);
 
-        Log::info('GTFS import finished', ['run_id' => $run->id] + ($run->counts ?? []));
+        Log::info('GTFS import finished', ['run_id' => $run->id] + $counts);
 
         return $run->refresh();
+    }
+
+    /**
+     * Schreibt Fahrt-Signaturen und Linien-Versionen fort (FAHRPLANPERIODEN §6.2).
+     *
+     * Läuft nach dem Roh-Import: Der Bestand ist zu diesem Zeitpunkt vollständig geschrieben.
+     * Ein Fehler hier macht den Import **nicht** ungültig — die Roh-Daten sind korrekt und die
+     * Konsolidierung ist wiederholbar. Sie wird deshalb protokolliert und im Lauf vermerkt,
+     * statt den bereits geschriebenen Import als gescheitert zu markieren.
+     *
+     * @return array<string, mixed>
+     */
+    private function consolidate(GtfsImportRun $run): array
+    {
+        try {
+            $this->signatures->rebuild();
+
+            return $this->versions->updateFromCurrentImport();
+        } catch (Throwable $e) {
+            Log::error('Consolidation after import failed', [
+                'run_id' => $run->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return ['consolidation_error' => $e->getMessage()];
+        }
     }
 
     /**

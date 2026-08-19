@@ -3,3 +3,4 @@
 .phpunit.result.cache
 *.log
 /storage/state/*.json
+/storage/archive/

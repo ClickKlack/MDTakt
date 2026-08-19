@@ -322,7 +322,9 @@ Beide CLI-Commands laufen auf dem NAS fehlerfrei durch. Neue Sichtungen erschein
 - [ ] Log-Ausgaben auf allen Ebenen prüfen (kein DEBUG im Production-Channel)
 - [ ] `.env.example` für alle drei Module finalisieren
 - [ ] `README.md` im Repo-Root: Setup-Anleitung für alle drei Module
-- [ ] Deployment-Checkliste: Hetzner-Config, Subdomain-Setup, Cron-Einträge
+- [x] Deployment-Checkliste: [`DEPLOYMENT.md`](DEPLOYMENT.md) — Engine, Collector, Cron, Backup, Überwachung
+      (vorgezogen aus I-10, weil der Live-Betrieb nicht auf die Stabilisierung warten sollte: jede nicht
+      importierte Woche kostet unwiederbringlich Fahrplan-Historie)
 
 ### Abnahmekriterium
 Ein frischer Checkout mit `README.md` als einziger Anleitung führt zu einem lauffähigen System. Alle Bruno-Tests laufen grün gegen die Live-API.

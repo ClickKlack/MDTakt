@@ -27,6 +27,8 @@ final class EngineClient
         private readonly LoggerInterface $logger,
         private readonly string $baseUrl,
         private readonly string $token,
+        // stop_times werden in Chunks gesendet; auf langsamer Leitung darf ein Chunk dauern.
+        private readonly int $timeoutSeconds = 300,
     ) {
     }
 
@@ -104,7 +106,7 @@ final class EngineClient
                 ],
                 'body'        => $body,
                 'http_errors' => false, // Fehler selbst auswerten, um die Engine-Meldung zu loggen.
-                'timeout'     => 120,
+                'timeout'     => $this->timeoutSeconds,
             ]);
         } catch (GuzzleException $e) {
             // Kein Token ins Log.

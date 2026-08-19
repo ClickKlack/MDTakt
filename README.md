@@ -135,6 +135,7 @@ API-Tests liegen als [Bruno](https://www.usebruno.com/)-Collection in [shared/br
 | [shared/SPEC.md](shared/SPEC.md) | Fachliche Anforderungen, Datenmodell, Matching-Algorithmus |
 | [shared/PROJECT_MAP.md](shared/PROJECT_MAP.md) | Verzeichnisstruktur, Infrastruktur, Datenfluss im Detail |
 | [shared/ROADMAP.md](shared/ROADMAP.md) | Iterationsplan und aktueller Umsetzungsstand |
+| [shared/DEPLOYMENT.md](shared/DEPLOYMENT.md) | Live-Betrieb: Engine, Collector, Cron, Backup, Überwachung |
 | [shared/FAHRPLANPERIODEN.md](shared/FAHRPLANPERIODEN.md) | Konzept Fahrplanperioden und Fahrplantypen |
 | [shared/INTEGRATION_MDKURSTRACKER.md](shared/INTEGRATION_MDKURSTRACKER.md) | Anbindung an MDKursTracker, validierter Matching-Ansatz |
 | [shared/openapi.yaml](shared/openapi.yaml) | API-Kontrakt (OpenAPI 3.x) |

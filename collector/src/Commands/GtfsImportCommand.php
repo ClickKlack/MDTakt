@@ -6,6 +6,7 @@ namespace MdTakt\Collector\Commands;
 
 use GuzzleHttp\Client;
 use MdTakt\Collector\Http\EngineClient;
+use MdTakt\Collector\Services\FeedArchiveService;
 use MdTakt\Collector\Services\GtfsFeedService;
 use MdTakt\Collector\Services\ImportStateStore;
 use Monolog\Handler\RotatingFileHandler;
@@ -34,7 +35,8 @@ final class GtfsImportCommand extends Command
             ->setDescription('GTFS-Feed laden, auf Magdeburger Tram filtern und an die Engine importieren')
             ->addOption('feed-url', null, InputOption::VALUE_REQUIRED, 'GTFS-Feed-URL (override)', null)
             ->addOption('force', 'f', InputOption::VALUE_NONE, 'Import erzwingen, auch wenn der Feed unverändert ist')
-            ->addOption('keep-temp', null, InputOption::VALUE_NONE, 'Temporäre Dateien nicht löschen');
+            ->addOption('keep-temp', null, InputOption::VALUE_NONE, 'Temporäre Dateien nicht löschen')
+            ->addOption('zip', null, InputOption::VALUE_REQUIRED, 'Statt Download eine vorhandene GTFS-ZIP importieren (z. B. aus dem Archiv)', null);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -61,9 +63,40 @@ final class GtfsImportCommand extends Command
         $previous = $force ? null : $state->read();
 
         $feed = new GtfsFeedService($logger, $agencyFilter);
-        $engine = new EngineClient(new Client(), $logger, $baseUrl, $token);
+        $engine = new EngineClient(new Client(), $logger, $baseUrl, $token, (int) $this->env('ENGINE_TIMEOUT_SECONDS', '300'));
+
+        $lokaleZip = $input->getOption('zip');
 
         try {
+            if ($lokaleZip !== null) {
+                // Import aus einer bereits vorliegenden ZIP — für Wiederherstellung nach einem
+                // abgebrochenen Lauf und (später) für die rückwirkende Konsolidierung aus dem Archiv.
+                if (! is_file((string) $lokaleZip)) {
+                    $logger->error('GTFS zip not found', ['path' => $lokaleZip]);
+                    $output->writeln('<error>ZIP nicht gefunden: ' . $lokaleZip . '</error>');
+
+                    return Command::FAILURE;
+                }
+
+                $zipPath = (string) $lokaleZip;
+                $logger->info('Importing from local GTFS zip', ['path' => $zipPath]);
+
+                $feed->extract($zipPath, $extractDir);
+                $base = $feed->parseBaseTables($extractDir);
+                $tripIds = $base['trip_ids'];
+                unset($base['trip_ids']);
+
+                $result = $engine->importGtfs($base, $feed->streamStopTimes($extractDir, $tripIds));
+                $imported = $result['data']['imported'] ?? [];
+                $logger->info('GTFS import via engine completed', is_array($imported) ? $imported : []);
+
+                // Kein State-Update: Die ZIP kann ein älterer Archivstand sein — sonst hielte
+                // der Collector ihn faelschlich fuer den zuletzt geladenen Feed.
+                $output->writeln('<info>GTFS-Import aus lokaler ZIP abgeschlossen (State unveraendert).</info>');
+
+                return Command::SUCCESS;
+            }
+
             $meta = $feed->downloadConditional($feedUrl, $zipPath, $previous);
 
             // Vor dem Download abgebrochen: Server meldet "nicht geändert".
@@ -81,6 +114,14 @@ final class GtfsImportCommand extends Command
 
                 return Command::SUCCESS;
             }
+
+            // Archivieren, sobald der Inhalt als neu erkannt ist — unabhängig davon, ob der
+            // Import danach durchläuft. Das Archiv soll den Feed retten, nicht den Lauf.
+            $archivePath = $this->env('GTFS_ARCHIVE_PATH', $this->defaultArchivePath());
+            $archive = new FeedArchiveService($logger, strtolower($archivePath) === 'off' ? '' : $archivePath);
+            // feed_version steckt in feed_info.txt und ist hier noch nicht geparst — der
+            // Dateiname traegt Datum und sha256, das genuegt zur Identifikation.
+            $archive->store($zipPath, $meta['sha256']);
 
             $feed->extract($zipPath, $extractDir);
 
@@ -113,7 +154,8 @@ final class GtfsImportCommand extends Command
             return Command::FAILURE;
         } finally {
             if (! $input->getOption('keep-temp')) {
-                $this->cleanup($zipPath, $extractDir);
+                // Eine uebergebene ZIP gehoert dem Aufrufer (Archiv!) — nur das Extrakt aufraeumen.
+                $this->cleanup($lokaleZip === null ? $zipPath : null, $extractDir);
             }
         }
     }
@@ -144,6 +186,11 @@ final class GtfsImportCommand extends Command
         return dirname(__DIR__, 2) . '/storage/state/last-import.json';
     }
 
+    private function defaultArchivePath(): string
+    {
+        return dirname(__DIR__, 2) . '/storage/archive';
+    }
+
     private function ensureLogDir(string $logPath): void
     {
         $dir = dirname($logPath);
@@ -152,9 +199,9 @@ final class GtfsImportCommand extends Command
         }
     }
 
-    private function cleanup(string $zipPath, string $extractDir): void
+    private function cleanup(?string $zipPath, string $extractDir): void
     {
-        if (is_file($zipPath)) {
+        if ($zipPath !== null && is_file($zipPath)) {
             @unlink($zipPath);
         }
 

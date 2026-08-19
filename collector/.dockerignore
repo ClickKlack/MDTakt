@@ -5,3 +5,7 @@ tests/
 .git/
 .phpunit.result.cache
 phpunit.xml
+
+# Artefakte von macOS und Synology, die ueber das Netzlaufwerk in den Build-Kontext geraten
+.DS_Store
+@eaDir/

@@ -222,11 +222,61 @@ ROADMAP, offene Punkte.
 
 ---
 
+## 7b. Deployment-Skript
+
+`scripts/deploy.sh` überträgt Engine und Admin-Frontend. Umgebungsabhängige Werte liegen in
+`scripts/deploy.local.env` (gitignored, Vorlage: `deploy.local.env.example`) — SSH-Ziel,
+Serverpfad, PHP-Binary, API-URL.
+
+```bash
+cp scripts/deploy.local.env.example scripts/deploy.local.env   # einmalig, Werte eintragen
+
+./scripts/deploy.sh preflight          # nur prüfen: SSH, PHP-Version, Zielverzeichnisse
+./scripts/deploy.sh engine --dry-run   # zeigt, was übertragen würde
+./scripts/deploy.sh engine             # Laravel-API
+./scripts/deploy.sh admin              # Admin-Frontend
+./scripts/deploy.sh all                # beides
+```
+
+**Was das Skript tut**
+
+| Schritt | Anmerkung |
+|---|---|
+| `rsync` der Engine | **ohne** `.env`, `vendor/`, `storage/`, `tests/` — die drei erstgenannten bleiben auf dem Server unberührt |
+| `composer install --no-dev` **auf dem Server** | statt `vendor/` zu übertragen — so passt es zur dortigen PHP-Plattform |
+| `artisan key:generate --force` | nur wenn `APP_KEY` in der Server-`.env` noch leer ist |
+| `artisan migrate --force` | |
+| `artisan db:seed --class=AdminSeeder --force` | idempotent; die `.env` ist die Quelle der Wahrheit für den Single-Admin. Bei leeren `ADMIN_*`-Werten überspringt der Seeder sich selbst |
+| `artisan optimize` | Config-, Route- und View-Cache |
+| Admin-Build | `VITE_API_BASE_URL` wird ins Bundle kompiliert, danach `rsync` von `dist/` |
+| Abschlussprüfung | `/up` muss 200 liefern, `/.env` darf **nicht** abrufbar sein |
+
+Das Skript bricht ab, wenn der Working Tree nicht sauber ist (`--allow-dirty` überstimmt das),
+wenn die PHP-Version älter als 8.3 ist oder wenn auf dem Server keine `.env` liegt.
+
+## 7c. Erstmalige Einrichtung der `.env` auf dem Server
+
+Die `.env` enthält Geheimnisse und wird **nie** vom Skript übertragen. Einmalig von Hand:
+
+1. **Datenbank anlegen** (bei Managed Hosting im Panel), Zugangsdaten notieren.
+2. Vorlage aus `engine/.env.example` ableiten und ausfüllen — mindestens `APP_ENV=production`,
+   `APP_DEBUG=false`, `APP_URL`, die `DB_*`-Werte, ein zufälliges `COLLECTOR_API_TOKEN`
+   (`openssl rand -base64 32`) sowie `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
+3. Datei als `<engine-verzeichnis>/.env` hochladen.
+4. Fertig — `APP_KEY` und der Admin-Zugang entstehen beim ersten `deploy.sh engine` automatisch.
+
+> Der Seeder legt **keinen** Admin an, wenn `ADMIN_EMAIL` oder `ADMIN_PASSWORD` leer sind — er
+> überspringt still mit einer Warnung, statt einen Zugang mit schwachem Passwort zu erzeugen.
+
+Dasselbe `COLLECTOR_API_TOKEN` muss anschließend in die `.env` des Collectors.
+
 ## 8. Erster produktiver Lauf — Reihenfolge
 
-1. Backup-Job einrichten und **testen** (Restore auf eine Wegwerf-DB).
-2. Engine deployen, migrieren, seeden, `/up` prüfen.
-3. Collector konfigurieren, **einmal von Hand** laufen lassen.
-4. Prüfen: Admin „Imports" zeigt `success`, „Versionen" zeigt eine Periode mit Intervallen,
+1. Datenbank anlegen, `.env` einrichten (§ 7c), `key:generate`.
+2. `./scripts/deploy.sh engine` — erzeugt `APP_KEY`, migriert und legt den Admin an.
+3. `./scripts/deploy.sh admin`, Login prüfen.
+4. Backup-Job einrichten und **testen** (Restore auf eine Wegwerf-DB).
+5. Collector konfigurieren (`ENGINE_BASE_URL`, gleiches Token), **einmal von Hand** laufen lassen.
+6. Prüfen: Admin „Imports" zeigt `success`, „Versionen" zeigt eine Periode mit Intervallen,
    und im Archivverzeichnis liegt eine ZIP.
-5. Cron aktivieren.
+7. Cron auf dem Collector-Host aktivieren.

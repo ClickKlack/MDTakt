@@ -37,3 +37,4 @@ shared/bruno/environments/local.bru
 
 # Betriebsnotizen mit Umgebungsbezug (Hostnamen, Pfade, Anbieter) — gehören nicht ins Repo
 *.local.md
+scripts/*.local.env

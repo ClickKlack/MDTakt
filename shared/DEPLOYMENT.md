@@ -98,7 +98,42 @@ Engine. Auf der Collector-Seite muss deshalb kein Port erreichbar sein.
 
 ---
 
-## 3. Collector (NAS)
+## 3. Collector
+
+Der Collector ist ein **einmalig laufender Batch-Job**, kein Dienst: Er lädt den Feed, schickt ihn
+an die Engine und beendet sich. Empfohlen wird deshalb ein **ephemerer Container** — er startet je
+Lauf und wird danach verworfen. Ein dauerhaft laufender Container mit interner Cron würde 7 Tage
+für 4 Minuten Arbeit im Speicher stehen, bräuchte eigene Log-Rotation und müsste Neustarts
+überleben.
+
+### 3a. Docker (empfohlen)
+
+```bash
+cd collector
+cp .env.example .env          # ENGINE_BASE_URL, COLLECTOR_API_TOKEN, COLLECTOR_DATA eintragen
+docker compose build
+docker compose run --rm collector                              # regulärer Lauf
+docker compose run --rm collector collector:import-gtfs --force # Import erzwingen
+```
+
+**Was persistent bleiben muss.** Der Container hält nichts; alles Veränderliche liegt im Volume
+unter `/data`:
+
+| Pfad | Ohne ihn passiert |
+|---|---|
+| `/data/archive` | Die GTFS-ZIPs fehlen — Fahrplan-Inhalte vergangener Wochen sind unwiederbringlich verloren |
+| `/data/state` | Jeder Lauf importiert erneut, statt unveränderte Feeds zu überspringen |
+| `/data/logs` | Keine Nachvollziehbarkeit bei Fehlern |
+
+Das Zielverzeichnis wird über `COLLECTOR_DATA` gesetzt. Schreibt der Container als `root`, gehören
+die Dateien danach root — auf einem NAS meist unerwünscht; dann `COLLECTOR_UID`/`COLLECTOR_GID`
+auf den eigenen Nutzer setzen.
+
+Das Image bringt PHP 8.4 und `ext-zip` mit; auf dem Host wird kein PHP gebraucht. **Auf dem
+Zielsystem bauen** (`docker compose build`), damit die Architektur passt — ein auf einem
+Entwicklungsrechner gebautes arm64-Image läuft nicht auf einem x86-NAS und umgekehrt.
+
+### 3b. Ohne Docker
 
 ```bash
 cd collector
@@ -133,9 +168,15 @@ Die Quelle wird **wöchentlich** aktualisiert — häufiger zu laufen bringt nic
 überspringt unveränderte Feeds ohnehin per ETag/sha256.
 
 ```cron
-# GTFS-Import, montags 03:00
+# GTFS-Import, montags 03:00 — Docker-Variante
+0 3 * * 1 cd <COLLECTOR_VERZEICHNIS> && docker compose run --rm collector >> <LOGPFAD>/cron.log 2>&1
+
+# ohne Docker
 0 3 * * 1 cd <COLLECTOR_VERZEICHNIS> && php bin/collector collector:import-gtfs >> <LOGPFAD>/cron.log 2>&1
 ```
+
+Der Exit-Code des Containers ist der des Imports — ein Aufgabenplaner, der Fehlschläge meldet,
+erkennt einen misslungenen Lauf daran.
 
 Ein ausgefallener Lauf ist **nicht** sofort kritisch: Bei 23 Tagen Fenster und wöchentlichem Takt
 überlappen aufeinanderfolgende Läufe um gut zwei Wochen. Zwei verpasste Läufe in Folge reißen eine Lücke.

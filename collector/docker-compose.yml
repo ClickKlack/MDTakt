@@ -1,0 +1,26 @@
+# Aufruf (ein Lauf, Container wird danach entfernt):
+#
+#   docker compose run --rm collector
+#   docker compose run --rm collector collector:import-gtfs --force
+#
+# Konfiguration kommt aus collector/.env (gitignored) — mindestens ENGINE_BASE_URL
+# und COLLECTOR_API_TOKEN. COLLECTOR_DATA zeigt auf das persistente Verzeichnis.
+
+services:
+  collector:
+    build: .
+    image: mdtakt-collector:latest
+    env_file:
+      - .env
+    environment:
+      # Überschreibt einen etwaigen Pfad aus der .env — im Container gilt /data.
+      GTFS_ARCHIVE_PATH: /data/archive
+      COLLECTOR_STATE_PATH: /data/state/last-import.json
+      COLLECTOR_LOG_PATH: /data/logs/collector.log
+    volumes:
+      # Archiv, State und Logs müssen den Container überleben.
+      - ${COLLECTOR_DATA:-./storage}:/data
+    # Ohne Angabe schreibt der Container als root ins Volume. Auf einem NAS meist
+    # unerwünscht — dann COLLECTOR_UID/COLLECTOR_GID in der .env setzen.
+    user: "${COLLECTOR_UID:-0}:${COLLECTOR_GID:-0}"
+    restart: "no"

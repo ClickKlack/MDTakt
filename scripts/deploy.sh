@@ -104,7 +104,16 @@ deploy_engine() {
         cd '$REMOTE_BASE/api'
         mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/app bootstrap/cache
         chmod -R u+rwX storage bootstrap/cache
-        composer install --no-dev --optimize-autoloader --no-interaction --quiet
+        # Der System-Composer (2.5.5 unter PHP 8.4) schuettet Deprecation-Warnungen aus und
+        # setzt error_reporting selbst, -d verpufft also. Ausgabe deshalb einsammeln und nur
+        # im Fehlerfall zeigen — gefiltert, damit echte Meldungen sichtbar bleiben.
+        if ! composer install --no-dev --optimize-autoloader --no-interaction --quiet > .composer-out.log 2>&1; then
+            grep -v '^Deprecated:' .composer-out.log >&2 || true
+            rm -f .composer-out.log
+            echo 'composer install fehlgeschlagen' >&2
+            exit 1
+        fi
+        rm -f .composer-out.log
 
         # Beim ersten Deploy ist APP_KEY noch leer — ohne ihn scheitert jeder Request.
         if ! grep -qE '^APP_KEY=.+' .env; then

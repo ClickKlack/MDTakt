@@ -188,10 +188,29 @@ Ein ausgefallener Lauf ist **nicht** sofort kritisch: Bei 23 Tagen Fenster und w
 Der GTFS-Feed ist jederzeit neu ladbar. **Das Konsolidat ist es nicht.** Es ist das einzige
 unwiederbringliche Datum im System.
 
-```cron
-# Taeglich 04:00, 30 Tage Aufbewahrung
-0 4 * * * pg_dump -Fc mdtakt > /backup/mdtakt-$(date +\%F).dump && find /backup -name 'mdtakt-*.dump' -mtime +30 -delete
+Dafür liegt `scripts/backup-db.sh` bereit. Es zieht den Dump **vom Collector-Host aus**, sodass
+die Sicherung von vornherein außerhalb des Hostings liegt, prüft ihn anschließend und räumt alte
+Stände auf.
+
+```bash
+cp scripts/backup.local.env.example scripts/backup.local.env   # Zugangsdaten eintragen
+./scripts/backup-db.sh                # Dump + Prüfung + Aufräumen
+./scripts/backup-db.sh --verify-only  # nur den letzten Dump prüfen
 ```
+
+```cron
+# Taeglich 04:00
+0 4 * * * <PFAD>/backup-db.sh >> <LOGPFAD>/backup.log 2>&1
+```
+
+> **`pg_dump` muss mindestens so neu sein wie der Server** — ältere Clients verweigern den Dump.
+> Das Skript ruft deshalb einen Client im Container auf (`postgres:17-alpine`) statt sich auf das
+> zu verlassen, was auf dem Host zufällig installiert ist. Im konkreten Fall lagen dort 11 und 15
+> vor, während der Server auf 17 läuft — beide hätten abgelehnt.
+
+**Ein Dump, der sich nicht lesen lässt, ist kein Backup.** Das Skript prüft jeden Dump direkt nach
+dem Schreiben mit `pg_restore -l` und bricht ab, wenn keine Tabellendaten enthalten sind. Ersetzt
+aber nicht den gelegentlichen echten Restore-Test auf eine Wegwerf-Datenbank.
 
 Ebenfalls sichern: **das Feed-Archiv** (`GTFS_ARCHIVE_PATH`). Solange FAHRPLANPERIODEN Phase C fehlt,
 speichert die Datenbank nur, *dass* sich ein Fahrplan geändert hat — die Fahrten selbst liegen

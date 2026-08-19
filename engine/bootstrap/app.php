@@ -6,6 +6,7 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -41,5 +42,20 @@ return Application::configure(basePath: dirname(__DIR__))
                     'message' => 'Unauthenticated.',
                 ],
             ], JsonResponse::HTTP_UNAUTHORIZED);
+        });
+
+        // Rate-Limit überschritten → gleicher Envelope wie alle anderen API-Fehler.
+        // Laravel würde sonst { "message": "Too Many Attempts." } liefern.
+        $exceptions->render(function (ThrottleRequestsException $e, Request $request): ?JsonResponse {
+            if (! $request->expectsJson() && ! $request->is('api/*')) {
+                return null;
+            }
+
+            return response()->json([
+                'error' => [
+                    'code' => JsonResponse::HTTP_TOO_MANY_REQUESTS,
+                    'message' => 'Too many requests.',
+                ],
+            ], JsonResponse::HTTP_TOO_MANY_REQUESTS, $e->getHeaders());
         });
     })->create();

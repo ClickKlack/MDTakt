@@ -246,6 +246,35 @@ final class GtfsImportTest extends TestCase
         $this->assertDatabaseCount('gtfs_import_runs', 2);
     }
 
+    public function test_collector_endpoints_throttle_excessive_requests(): void
+    {
+        // Das Limit (120/min) greift auch ohne gültigen Token — eine Flut kostet so keine
+        // Token-Vergleiche und keine gzip-Dekompression.
+        for ($i = 0; $i < 120; $i++) {
+            $this->getJson('/api/v1/collector/imports')->assertStatus(401);
+        }
+
+        $this->getJson('/api/v1/collector/imports')
+            ->assertStatus(429)
+            ->assertJsonPath('error.code', 429)
+            ->assertJsonPath('error.message', 'Too many requests.');
+    }
+
+    public function test_full_import_stays_below_the_rate_limit(): void
+    {
+        // Grenzfall-Absicherung: Ein realer Lauf (Start + stop_times-Chunks + Abschluss) darf
+        // das Limit nie erreichen — ein verlorener Lauf bedeutet eine unwiederbringliche Woche.
+        $this->runFullImport();
+
+        $remaining = $this->withToken(self::TOKEN)
+            ->getJson('/api/v1/collector/imports')
+            ->assertOk()
+            ->headers->get('X-RateLimit-Remaining');
+
+        // Ein MVB-Feed sendet rund 19 Requests; hier sind es weniger, aber deutlich Luft muss bleiben.
+        $this->assertGreaterThan(100, (int) $remaining);
+    }
+
     public function test_imports_endpoint_requires_token(): void
     {
         $this->getJson('/api/v1/collector/imports')

@@ -903,6 +903,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate-Limit überschritten (120 Requests/Minute je IP)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: Validierungsfehler im Payload
           content:
@@ -939,6 +944,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate-Limit überschritten (120 Requests/Minute je IP)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/collector/imports/{run}/stop-times:
     post:
@@ -971,6 +981,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate-Limit überschritten (120 Requests/Minute je IP)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
           description: Lauf ist bereits abgeschlossen oder fehlgeschlagen
           content:
@@ -999,6 +1014,11 @@ paths:
               schema: { $ref: '#/components/schemas/GtfsImportRunResponse' }
         '401':
           description: Fehlender oder ungültiger Bearer-Token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate-Limit überschritten (120 Requests/Minute je IP)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

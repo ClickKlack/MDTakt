@@ -45,7 +45,10 @@ Route::prefix('v1')->group(function (): void {
     });
 
     // Interne Collector-Endpunkte — Bearer-Token-geschützt, gzip-Body wird entpackt (NAS → Engine).
-    Route::prefix('collector')->middleware(['collector.token', 'decompress'])->group(function (): void {
+    // throttle steht vorn: eine Flut wird verworfen, bevor Token-Vergleich und gzip-Dekompression
+    // CPU kosten. 120/min ist bewusst großzügig — ein realer Lauf sendet rund 19 Requests (Start,
+    // ~17 stop_times-Chunks, Abschluss) und das nur wöchentlich. Der Import darf nie am Limit scheitern.
+    Route::prefix('collector')->middleware(['throttle:120,1', 'collector.token', 'decompress'])->group(function (): void {
         Route::get('imports', [ImportController::class, 'index'])->name('collector.imports.index');
         Route::post('imports', [ImportController::class, 'start'])->name('collector.imports.start');
         Route::post('imports/{run}/stop-times', [ImportController::class, 'stopTimes'])->name('collector.imports.stop-times');

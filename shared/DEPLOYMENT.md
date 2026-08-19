@@ -46,6 +46,7 @@ php artisan key:generate
 | `APP_DEBUG` | `false` | sonst Stacktraces nach außen |
 | `APP_TIMEZONE` / `DB_TIMEZONE` | `UTC` | Projektregel: intern UTC, Formatierung nur im Frontend |
 | `SESSION_DRIVER` | `file` | **Stolperfalle:** Der Migrations-Satz enthält keine `sessions`-Tabelle. Mit `database` schlägt jeder Aufruf von `/` fehl |
+| `CACHE_STORE` | `file` | **Gleiche Stolperfalle:** keine `cache`-Tabelle im Migrations-Satz. Das Rate-Limit der Collector-Endpunkte liegt im Cache — mit `database` scheitert jeder Import-Request |
 | `DB_*` | Zugangsdaten | |
 | `COLLECTOR_API_TOKEN` | langes Zufallstoken | muss identisch zum Collector sein |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Admin-Zugang | wird einmalig geseedet |
@@ -63,6 +64,32 @@ Webserver auf `engine/public` zeigen lassen, HTTPS terminieren. Health-Check: `G
 ```bash
 cd admin && npm ci && npm run build   # Ergebnis: admin/dist/ statisch ausliefern
 ```
+
+---
+
+## 2b. Absicherung der Import-Endpunkte
+
+Die Collector-Endpunkte (`/api/v1/collector/*`) sind durch **einen statischen Bearer-Token**
+geschützt — `COLLECTOR_API_TOKEN`, identisch in Engine und Collector. Fehlt der Token in der
+Engine-Konfiguration, ist der Endpunkt gesperrt (Fail-Closed), nicht offen.
+
+Der Token ist damit die einzige echte Verteidigung. Erzeuge ihn mit echter Entropie:
+
+```bash
+openssl rand -base64 32
+```
+
+Zusätzlich greift ein **Rate-Limit von 120 Requests/Minute je IP** vor der Token-Prüfung, damit
+eine Flut weder Token-Vergleiche noch gzip-Dekompression auslöst. Ein realer Lauf sendet rund
+19 Requests (Start, ~17 stop_times-Chunks bei ~164.000 MVB-Zeilen, Abschluss) und das wöchentlich —
+der Puffer ist bewusst groß, weil ein am Limit gescheiterter Lauf eine unwiederbringliche Woche kostet.
+
+**Bewusst nicht umgesetzt:** eine IP-Allowlist. Das NAS hängt an einem DSL-Anschluss mit
+dynamischer IP; eine veraltete Allowlist würde genau den Lauf aussperren, der sich nicht
+nachholen lässt. Das Risiko der Maßnahme wäre größer als das Risiko, gegen das sie schützt.
+
+Die Verbindungsrichtung hilft dabei: Der Collector ist **Client** und verbindet ausgehend zur
+Engine. Am NAS muss kein Port offen sein, kein Portforwarding — DS-Lite/CGNAT ist irrelevant.
 
 ---
 

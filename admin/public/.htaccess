@@ -1,0 +1,15 @@
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Vorhandene Dateien und Verzeichnisse direkt ausliefern (Assets, favicon, lines/)
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Alles andere an die SPA — Vue Router uebernimmt das Routing clientseitig
+    RewriteRule ^ index.html [L]
+</IfModule>

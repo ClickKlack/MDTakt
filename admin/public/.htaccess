@@ -5,9 +5,10 @@
 
     RewriteEngine On
 
-    # Vorhandene Dateien und Verzeichnisse direkt ausliefern (Assets, favicon, lines/)
-    RewriteCond %{REQUEST_FILENAME} -f [OR]
-    RewriteCond %{REQUEST_FILENAME} -d
+    # Vorhandene DATEIEN direkt ausliefern (Assets, favicon, lines/*.png).
+    # Bewusst ohne -d: /lines ist zugleich SPA-Route und Asset-Verzeichnis — wuerde
+    # Apache das Verzeichnis ausliefern, endet die Route in 301 auf /lines/ und 403.
+    RewriteCond %{REQUEST_FILENAME} -f
     RewriteRule ^ - [L]
 
     # Alles andere an die SPA — Vue Router uebernimmt das Routing clientseitig

@@ -5,7 +5,7 @@ info:
   description: API zur manuellen Umlauf-Rekonstruktion für Magdeburger Straßenbahnen (MVB).
 
 servers:
-  - url: https://api.strassenbahn-magdeburg.de
+  - url: https://api.mdtakt.strassenbahn-magdeburg.de
     description: Production
   - url: http://localhost:8000
     description: Local

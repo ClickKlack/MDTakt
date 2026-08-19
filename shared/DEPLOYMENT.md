@@ -123,7 +123,11 @@ php bin/collector collector:import-gtfs
 
 ---
 
-## 4. Cron
+## 4. Cron (auf dem Collector-Host, nicht auf dem Engine-Server)
+
+Der Import wird vom **Collector** ausgelöst; der Cron gehört deshalb auf dessen Rechner. Auf dem
+Engine-Server ist dafür kein Cronjob nötig — die Konsolidierung läuft im Anschluss an den Import
+innerhalb desselben Requests.
 
 Die Quelle wird **wöchentlich** aktualisiert — häufiger zu laufen bringt nichts, der Collector
 überspringt unveränderte Feeds ohnehin per ETag/sha256.

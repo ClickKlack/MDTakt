@@ -17,6 +17,11 @@ nicht. Deshalb lohnt der Live-Betrieb, sobald Backup und Archiv stehen — unabh
 
 ---
 
+> **Konvention:** Dieses Dokument beschreibt das Vorgehen, **nicht die konkrete Umgebung.**
+> Hostnamen, IP-Adressen, Verzeichnispfade, Anbieter und Anschlussarten gehören nicht ins
+> Repository — sie stehen in den `.env`-Dateien (gitignored) und in der Betriebsdokumentation
+> außerhalb dieses Repos. Platzhalter wie `<COLLECTOR_VERZEICHNIS>` sind entsprechend zu ersetzen.
+
 ## 1. Voraussetzungen
 
 | | Version / Anmerkung |
@@ -84,12 +89,12 @@ eine Flut weder Token-Vergleiche noch gzip-Dekompression auslöst. Ein realer La
 19 Requests (Start, ~17 stop_times-Chunks bei ~164.000 MVB-Zeilen, Abschluss) und das wöchentlich —
 der Puffer ist bewusst groß, weil ein am Limit gescheiterter Lauf eine unwiederbringliche Woche kostet.
 
-**Bewusst nicht umgesetzt:** eine IP-Allowlist. Das NAS hängt an einem DSL-Anschluss mit
-dynamischer IP; eine veraltete Allowlist würde genau den Lauf aussperren, der sich nicht
-nachholen lässt. Das Risiko der Maßnahme wäre größer als das Risiko, gegen das sie schützt.
+**Bewusst nicht umgesetzt:** eine IP-Allowlist. Sie setzt eine feste Absender-IP voraus; ist die
+nicht garantiert, sperrt eine veraltete Allowlist genau den Lauf aus, der sich nicht nachholen
+lässt. Das Risiko der Maßnahme wäre größer als das Risiko, gegen das sie schützt.
 
 Die Verbindungsrichtung hilft dabei: Der Collector ist **Client** und verbindet ausgehend zur
-Engine. Am NAS muss kein Port offen sein, kein Portforwarding — DS-Lite/CGNAT ist irrelevant.
+Engine. Auf der Collector-Seite muss deshalb kein Port erreichbar sein.
 
 ---
 
@@ -107,7 +112,7 @@ cp .env.example .env
 | `COLLECTOR_API_TOKEN` | identisch zur Engine |
 | `GTFS_AGENCY_FILTER` | `Magdeburger Verkehrsbetriebe` |
 | `GTFS_ARCHIVE_PATH` | Pfad mit reichlich Platz; leer = `collector/storage/archive` |
-| `COLLECTOR_LOG_PATH` | z. B. `/var/log/mdtakt/collector.log` |
+| `COLLECTOR_LOG_PATH` | Pfad der rotierenden Logdatei; leer = `collector/storage/logs/` |
 | `ENGINE_TIMEOUT_SECONDS` | `300` — je Chunk-Request; auf langsamer Leitung höher setzen |
 
 Erster Lauf von Hand, um Token und Erreichbarkeit zu prüfen:
@@ -125,7 +130,7 @@ Die Quelle wird **wöchentlich** aktualisiert — häufiger zu laufen bringt nic
 
 ```cron
 # GTFS-Import, montags 03:00
-0 3 * * 1 cd /volume1/mdtakt/collector && /usr/bin/php bin/collector collector:import-gtfs >> /var/log/mdtakt/cron.log 2>&1
+0 3 * * 1 cd <COLLECTOR_VERZEICHNIS> && php bin/collector collector:import-gtfs >> <LOGPFAD>/cron.log 2>&1
 ```
 
 Ein ausgefallener Lauf ist **nicht** sofort kritisch: Bei 23 Tagen Fenster und wöchentlichem Takt

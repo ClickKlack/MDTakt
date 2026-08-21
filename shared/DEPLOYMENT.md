@@ -167,13 +167,36 @@ innerhalb desselben Requests.
 Die Quelle wird **wöchentlich** aktualisiert — häufiger zu laufen bringt nichts, der Collector
 überspringt unveränderte Feeds ohnehin per ETag/sha256.
 
+Für die Docker-Variante liegt `collector/run-import.sh` bereit — der Planer bekommt dann nur einen
+Pfad statt einer Befehlszeile:
+
 ```cron
-# GTFS-Import, montags 03:00 — Docker-Variante
-0 3 * * 1 cd <COLLECTOR_VERZEICHNIS> && docker compose run --rm collector >> <LOGPFAD>/cron.log 2>&1
+# GTFS-Import, montags 03:00
+0 3 * * 1 <COLLECTOR_VERZEICHNIS>/run-import.sh
 
 # ohne Docker
 0 3 * * 1 cd <COLLECTOR_VERZEICHNIS> && php bin/collector collector:import-gtfs >> <LOGPFAD>/cron.log 2>&1
 ```
+
+Das Skript setzt Arbeitsverzeichnis und `docker`-Pfad selbst — beides ist in Planer-Umgebungen
+unzuverlässig —, schreibt nach `storage/logs/cron.log` mit einfacher Rotation, verhindert per
+`flock` überlappende Läufe und reicht den Exit-Code durch. Es prüft vorab, dass `.env` und die
+`docker`-Binary vorhanden sind, damit ein Fehlstart als solcher erkennbar ist statt als
+rätselhafter Compose-Fehler.
+
+### Grafische Aufgabenplaner (z. B. Synology DSM)
+
+| Feld | Wert |
+|---|---|
+| Benutzer | `root` |
+| Zeitplan | wöchentlich, montags 03:00 |
+| Befehl | `<COLLECTOR_VERZEICHNIS>/run-import.sh` |
+| Benachrichtigung | E-Mail, **nur bei ungewöhnlicher Beendigung** |
+
+> **Zur Benachrichtigung:** Der Container Manager von DSM meldet *jeden* Container-Stopp als
+> „unerwartet beendet" — auch bei Exit-Code 0, denn ein einmalig laufender Container beendet sich
+> naturgemäß. Eine Filterung je Container gibt es nicht. Die aussagekräftige Quelle ist deshalb der
+> Aufgabenplaner selbst: Er kennt den Exit-Code und meldet nur echte Fehlschläge.
 
 Der Exit-Code des Containers ist der des Imports — ein Aufgabenplaner, der Fehlschläge meldet,
 erkennt einen misslungenen Lauf daran.

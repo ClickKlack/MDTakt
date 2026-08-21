@@ -396,6 +396,97 @@ components:
           enum: [admin, offer, bootstrap]
           description: '`bootstrap` = beim ersten Konsolidierungslauf automatisch angelegt, weil noch keine Periode existierte.'
 
+    SchedulePeriodListItem:
+      allOf:
+        - $ref: '#/components/schemas/SchedulePeriod'
+        - type: object
+          required: [line_version_count, is_deletable]
+          properties:
+            line_version_count:
+              type: integer
+              description: Zahl der Linien-Versionen, die an dieser Periode hängen.
+            is_deletable:
+              type: boolean
+              description: Nur Perioden ohne Linien-Versionen lassen sich löschen.
+
+    SchedulePeriodRequest:
+      type: object
+      required: [label, valid_from]
+      properties:
+        label:
+          type: string
+          maxLength: 255
+          example: Jahresfahrplan 2026/27
+        valid_from:
+          type: string
+          format: date
+          description: >
+            Erster Geltungstag. Muss netzweit eindeutig sein — zwei Perioden dürfen nicht am selben
+            Tag beginnen. `valid_to` wird **nicht** gesetzt: Es ergibt sich aus dem Beginn der
+            Folgeperiode, die letzte Periode bleibt offen.
+
+    SchedulePeriodListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/SchedulePeriodListItem' }
+
+    SchedulePeriodResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/SchedulePeriodListItem' }
+
+    PeriodChangeOffer:
+      type: object
+      required: [id, suggested_from, changed_line_count, active_line_count, lines, status]
+      properties:
+        id: { type: integer }
+        suggested_from:
+          type: string
+          format: date
+          description: Der beobachtete Wechseltag — Beginn der Periode, falls der Vorschlag angenommen wird.
+        changed_line_count: { type: integer }
+        active_line_count:
+          type: integer
+          description: Linien, die an diesem Tag überhaupt verkehren — Bezugsgröße der Schwelle.
+        share:
+          type: number
+          nullable: true
+          description: 'Anteil `changed/active`; ein Vorschlag entsteht ab `PERIOD_OFFER_MIN_SHARE` (Vorgabe 0.33).'
+        lines:
+          type: array
+          items: { type: string }
+        status: { type: string, enum: [open, accepted, declined] }
+        status_label: { type: string }
+        decided_at: { type: string, format: date-time, nullable: true }
+
+    PeriodChangeOfferListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/PeriodChangeOffer' }
+
+    PeriodChangeOfferResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PeriodChangeOffer' }
+
+    PeriodChangeAcceptRequest:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          maxLength: 255
+          description: Bezeichnung der neuen Periode. Ihr Beginn steht bereits fest (`suggested_from`).
+          example: Jahresfahrplan 2026/27
+
     LineVersionsResponse:
       type: object
       required: [data]
@@ -715,6 +806,230 @@ paths:
               schema: { $ref: '#/components/schemas/LineVersionsResponse' }
         '401':
           description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/schedule-periods:
+    get:
+      operationId: listSchedulePeriods
+      summary: Fahrplanperioden auflisten
+      description: >
+        Die netzweiten, kuratierten Fahrplanperioden (FAHRPLANPERIODEN §4.1) in chronologischer
+        Reihenfolge — jüngste zuerst.
+
+
+        Perioden bilden eine lückenlose, überschneidungsfreie Kette: `valid_to` ist stets abgeleitet
+        (Vortag des Nachfolgers), die jüngste Periode bleibt offen. `status: current` trägt die Periode,
+        die den heutigen Tag abdeckt.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Liste der Perioden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchedulePeriodListResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    post:
+      operationId: createSchedulePeriod
+      summary: Fahrplanperiode anlegen
+      description: >
+        Legt eine Periode an und rechnet die Kette neu: Der Vorgänger endet am Vortag, die neue Periode
+        ist ab `valid_from` gültig.
+
+
+        Eine neue Periode **setzt die Linien-Versionen zurück** — jede (Linie, Fahrplantyp) beginnt darin
+        wieder mit Version 1 (§4.1). Bereits erfasste Versionen der Vorperiode bleiben als Historie erhalten.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SchedulePeriodRequest' }
+      responses:
+        '201':
+          description: Periode angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchedulePeriodResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validierungsfehler — etwa ein bereits belegtes `valid_from`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/schedule-periods/{period}:
+    parameters:
+      - name: period
+        in: path
+        required: true
+        schema: { type: integer }
+    put:
+      operationId: updateSchedulePeriod
+      summary: Fahrplanperiode ändern
+      description: >
+        Ändert Label und/oder Beginn. Beim Verschieben von `valid_from` wird die Kette neu gerechnet;
+        die Gültigkeit der Nachbarperioden zieht mit.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SchedulePeriodRequest' }
+      responses:
+        '200':
+          description: Periode geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchedulePeriodResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validierungsfehler
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      operationId: deleteSchedulePeriod
+      summary: Fahrplanperiode löschen
+      description: >
+        Nur zulässig, solange **keine** Linien-Versionen an der Periode hängen — sonst ginge
+        beobachtete Fahrplan-Historie verloren (409). Nach dem Löschen übernimmt der Vorgänger
+        den freigewordenen Zeitraum.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '204':
+          description: Periode gelöscht
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Periode trägt Linien-Versionen und bleibt erhalten
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/period-change-offers:
+    get:
+      operationId: listPeriodChangeOffers
+      summary: Offene Periodenwechsel-Vorschläge
+      description: >
+        Ändern sich an einem Tag mindestens `PERIOD_OFFER_MIN_SHARE` (Vorgabe 33 %) der dort
+        verkehrenden Linien gleichzeitig, ist das ein Indiz für einen echten Fahrplanwechsel statt
+        für einzelne Baustellen. Das System **bietet** dann einen Periodenwechsel an — es legt ihn
+        nicht selbst an (FAHRPLANPERIODEN §4.3).
+
+
+        Gezählt werden nur **beobachtete** Wechsel: Eine Version, die an der Feed-Fensterkante
+        beginnt, ist bloß eine Untergrenze und ergibt keinen Wechseltag.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Offene Vorschläge, ältester Wechseltag zuerst
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PeriodChangeOfferListResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/period-change-offers/{offer}/accept:
+    parameters:
+      - name: offer
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      operationId: acceptPeriodChangeOffer
+      summary: Periodenwechsel annehmen
+      description: >
+        Legt die Periode zum vorgeschlagenen Tag an, **nimmt die Linien-Versionen ab diesem Tag
+        zurück** und konsolidiert neu — jede (Linie, Fahrplantyp) startet in der neuen Periode
+        wieder bei Version 1. So bleibt die alte Periode frei von Versions-Wildwuchs, der in
+        Wahrheit ein einziger Fahrplanwechsel war (§4.3).
+
+
+        Intervalle, die über den Wechseltag hinweglaufen, werden am Vortag gekappt; ihre neue
+        Obergrenze ist ein exakt bekanntes Datum und damit gesichert.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PeriodChangeAcceptRequest' }
+      responses:
+        '201':
+          description: Periode angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchedulePeriodResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Vorschlag wurde bereits beschieden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validierungsfehler
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/period-change-offers/{offer}/decline:
+    parameters:
+      - name: offer
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      operationId: declinePeriodChangeOffer
+      summary: Periodenwechsel ablehnen
+      description: >
+        Die Änderungen bleiben als gewöhnliche Linien-Versionen in der laufenden Periode stehen —
+        abgelehnt heißt „war kein Fahrplanwechsel", nicht „war nichts". Derselbe Tag wird bei
+        Folge-Importen nicht erneut vorgeschlagen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Vorschlag abgelehnt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PeriodChangeOfferResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Vorschlag wurde bereits beschieden
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

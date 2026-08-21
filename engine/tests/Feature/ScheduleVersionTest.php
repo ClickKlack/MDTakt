@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Enums\PeriodOrigin;
+use App\Enums\PeriodStatus;
 use App\Models\Calendar;
 use App\Models\CalendarDate;
 use App\Models\LineVersion;
@@ -13,6 +15,7 @@ use App\Models\Stop;
 use App\Models\StopTime;
 use App\Models\Trip;
 use App\Models\TripSignature;
+use App\Services\SchedulePeriodService;
 use App\Services\ScheduleVersionService;
 use App\Services\TripSignatureService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -232,5 +235,47 @@ final class ScheduleVersionTest extends TestCase
         // Der Wechsel wurde im Fenster beobachtet → die inneren Grenzen sind gesichert.
         $this->assertTrue($intervalle[0]->to_confirmed);
         $this->assertTrue($intervalle[1]->from_confirmed);
+    }
+
+    public function test_period_boundary_inside_the_window_splits_the_interval_and_restarts_numbering(): void
+    {
+        $line = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
+        $this->werktagsService('S1', '2026-08-17', '2026-08-28');
+        $this->fahrt('T1', 'S1', $line->route_id, ['07:00:00', '07:20:00']);
+
+        // Der Admin hat einen Fahrplanwechsel zum 24.08. deklariert — mitten im Feed-Fenster.
+        $alt = SchedulePeriod::query()->create([
+            'label' => 'Alte Periode', 'valid_from' => '2026-08-01', 'valid_to' => null,
+            'status' => PeriodStatus::Frozen, 'created_via' => PeriodOrigin::Admin,
+        ]);
+        $neu = SchedulePeriod::query()->create([
+            'label' => 'Neue Periode', 'valid_from' => '2026-08-24', 'valid_to' => null,
+            'status' => PeriodStatus::Frozen, 'created_via' => PeriodOrigin::Admin,
+        ]);
+        app(SchedulePeriodService::class)->rebuildChain();
+
+        $this->konsolidieren();
+
+        // Der Fahrplan ist unveraendert, aber die Periodengrenze teilt ihn: je Periode eine
+        // Version — und in der neuen faengt die Zaehlung wieder bei 1 an (§4.1).
+        $vorher = LineVersion::query()->where('period_id', $alt->id)->where('line', '1')->sole();
+        $nachher = LineVersion::query()->where('period_id', $neu->id)->where('line', '1')->sole();
+        $this->assertSame(1, $vorher->version_no);
+        $this->assertSame(1, $nachher->version_no);
+        $this->assertSame($vorher->fingerprint, $nachher->fingerprint, 'Gleicher Fahrplan, gleicher Fingerprint');
+
+        $davor = $vorher->intervals()->sole();
+        $danach = $nachher->intervals()->sole();
+        $this->assertSame('2026-08-21', $davor->valid_to->toDateString());
+        $this->assertSame('2026-08-24', $danach->valid_from->toDateString());
+
+        // Eine Periodengrenze ist ein exakt bekanntes Datum — anders als eine Fensterkante
+        // ist sie keine blosse Untergrenze.
+        $this->assertTrue($davor->to_confirmed);
+        $this->assertTrue($danach->from_confirmed);
+
+        // Die aeusseren Kanten liegen weiterhin am Fensterrand und bleiben offen.
+        $this->assertFalse($davor->from_confirmed);
+        $this->assertFalse($danach->to_confirmed);
     }
 }

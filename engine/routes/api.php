@@ -7,6 +7,8 @@ use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
 use App\Http\Controllers\Admin\LineColorController;
 use App\Http\Controllers\Admin\LineVersionController;
+use App\Http\Controllers\Admin\PeriodChangeOfferController;
+use App\Http\Controllers\Admin\SchedulePeriodController;
 use App\Http\Controllers\Admin\SchoolHolidayController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\LineController;
@@ -41,6 +43,17 @@ Route::prefix('v1')->group(function (): void {
 
             // Fahrplan-Konsolidat: Änderungshistorie je Linie und Betriebstag-Typ (I-13)
             Route::get('line-versions', [LineVersionController::class, 'index'])->name('admin.line-versions.index');
+
+            // Fahrplanperioden — netzweit, kuratiert (FAHRPLANPERIODEN §4.1)
+            Route::get('schedule-periods', [SchedulePeriodController::class, 'index'])->name('admin.schedule-periods.index');
+            Route::post('schedule-periods', [SchedulePeriodController::class, 'store'])->name('admin.schedule-periods.store');
+            Route::put('schedule-periods/{period}', [SchedulePeriodController::class, 'update'])->name('admin.schedule-periods.update');
+            Route::delete('schedule-periods/{period}', [SchedulePeriodController::class, 'destroy'])->name('admin.schedule-periods.destroy');
+
+            // Periodenwechsel-Vorschläge — das System bietet an, der Admin entscheidet (§4.3)
+            Route::get('period-change-offers', [PeriodChangeOfferController::class, 'index'])->name('admin.period-offers.index');
+            Route::post('period-change-offers/{offer}/accept', [PeriodChangeOfferController::class, 'accept'])->name('admin.period-offers.accept');
+            Route::post('period-change-offers/{offer}/decline', [PeriodChangeOfferController::class, 'decline'])->name('admin.period-offers.decline');
         });
     });
 

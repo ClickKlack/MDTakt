@@ -1,0 +1,67 @@
+meta {
+  name: Period Change Offers
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/period-change-offers
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+}
+
+docs {
+  # Periodenwechsel-Vorschläge (Admin)
+
+  Ändern sich an einem Tag mindestens 33 % (`PERIOD_OFFER_MIN_SHARE`) der dort
+  verkehrenden Linien gleichzeitig, ist das ein Indiz für einen echten Fahrplanwechsel
+  statt für einzelne Baustellen. Das System **bietet** einen Periodenwechsel an — es legt
+  ihn nicht selbst an (FAHRPLANPERIODEN §4.3).
+
+  Beispiel-Response:
+
+  ```json
+  {
+    "data": [
+      {
+        "id": 1,
+        "suggested_from": "2026-12-13",
+        "changed_line_count": 31,
+        "active_line_count": 36,
+        "share": 0.861,
+        "lines": ["1", "2", "3", "4", "5", "6", "8", "9", "10"],
+        "status": "open",
+        "status_label": "offen",
+        "decided_at": null
+      }
+    ]
+  }
+  ```
+
+  Entscheiden:
+
+  | Aktion | Request | Wirkung |
+  |---|---|---|
+  | Annehmen | `POST /{id}/accept` mit `{"label": "Jahresfahrplan 2026/27"}` | Periode ab `suggested_from`; Versionen ab diesem Tag werden zurückgenommen, jede Linie startet neu bei Version 1. Antwort: 201 + die neue Periode |
+  | Ablehnen | `POST /{id}/decline` | Änderungen bleiben gewöhnliche Linien-Versionen in der laufenden Periode. Antwort: 200 |
+
+  Ein bereits beschiedener Vorschlag liefert bei erneutem Zugriff 409; derselbe Tag wird
+  bei Folge-Importen nicht noch einmal vorgeschlagen.
+
+  Gezählt werden nur **beobachtete** Wechsel: Eine Version, die an der Feed-Fensterkante
+  beginnt, ist bloß eine Untergrenze (§5.4 b) und ergibt keinen Wechseltag — der erste
+  Import löst deshalb keinen Vorschlag aus.
+}

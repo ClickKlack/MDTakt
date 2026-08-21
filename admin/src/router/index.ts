@@ -6,6 +6,7 @@ import LinesView from '../views/LinesView.vue'
 import LineColorsView from '../views/LineColorsView.vue'
 import CalendarConfigView from '../views/CalendarConfigView.vue'
 import ScheduleVersionsView from '../views/ScheduleVersionsView.vue'
+import SchedulePeriodsView from '../views/SchedulePeriodsView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -16,6 +17,7 @@ export const router = createRouter({
     { path: '/lines/colors', name: 'line-colors', component: LineColorsView },
     { path: '/calendar', name: 'calendar', component: CalendarConfigView },
     { path: '/versions', name: 'versions', component: ScheduleVersionsView },
+    { path: '/periods', name: 'periods', component: SchedulePeriodsView },
     { path: '/', redirect: '/imports' },
     { path: '/:pathMatch(.*)*', redirect: '/imports' },
   ],

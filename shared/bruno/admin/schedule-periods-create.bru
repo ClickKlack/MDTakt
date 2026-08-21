@@ -1,0 +1,57 @@
+meta {
+  name: Schedule Periods (Anlegen)
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/schedule-periods
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "label": "Jahresfahrplan 2026/27",
+    "valid_from": "2026-12-13"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.label: eq Jahresfahrplan 2026/27
+  res.body.data.created_via: eq admin
+  res.body.data.line_version_count: eq 0
+}
+
+docs {
+  # Fahrplanperiode anlegen (Admin)
+
+  Legt eine Periode an und rechnet die Kette neu — der Vorgänger endet am Vortag.
+  `valid_to` wird nicht mitgeschickt: Es ergibt sich aus dem Beginn der Folgeperiode.
+
+  Eine neue Periode **setzt die Linien-Versionen zurück**: Jede (Linie, Fahrplantyp)
+  startet darin wieder bei Version 1 (§4.1). Die Versionen der Vorperiode bleiben als
+  Historie erhalten.
+
+  Fehlerfälle:
+
+  | Fall | Status |
+  |---|---|
+  | `valid_from` bereits von einer Periode belegt | 422 |
+  | `label` fehlt oder leer | 422 |
+  | Kein gültiger Admin-Token | 401 |
+
+  `PUT /api/v1/admin/schedule-periods/{id}` ändert Label und Beginn,
+  `DELETE /api/v1/admin/schedule-periods/{id}` löscht — Letzteres nur, solange keine
+  Linien-Versionen an der Periode hängen (sonst 409).
+}

@@ -44,6 +44,13 @@ async function logout(): Promise<void> {
             Versionen
           </RouterLink>
           <RouterLink
+            to="/periods"
+            class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
+            active-class="bg-slate-100 font-medium text-slate-900"
+          >
+            Perioden
+          </RouterLink>
+          <RouterLink
             to="/calendar"
             class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
             active-class="bg-slate-100 font-medium text-slate-900"

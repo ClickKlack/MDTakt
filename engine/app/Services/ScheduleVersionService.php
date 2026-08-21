@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\PeriodOfferStatus;
 use App\Enums\PeriodOrigin;
 use App\Enums\PeriodStatus;
 use App\Models\LineVersion;
 use App\Models\LineVersionInterval;
+use App\Models\PeriodChangeOffer;
 use App\Models\SchedulePeriod;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -27,6 +30,7 @@ final class ScheduleVersionService
     public function __construct(
         private readonly ServiceDayResolver $serviceDays,
         private readonly FahrplanTypClassifier $classifier,
+        private readonly SchedulePeriodService $periods,
     ) {}
 
     /**
@@ -42,38 +46,70 @@ final class ScheduleVersionService
             return ['signatures' => 0, 'versions_created' => 0, 'intervals_written' => 0, 'lines_changed' => 0];
         }
 
-        $periode = $this->currentPeriod($window['from']);
-        $fingerprints = $this->fingerprintsPerDay($window['from'], $window['to']);
+        $kette = $this->periodChain($window['from']);
+        $auswertung = $this->fingerprintsPerDay($window['from'], $window['to']);
+        $fingerprints = $auswertung['per_line'];
 
         $versionenNeu = 0;
         $intervalle = 0;
         $geaenderteLinien = [];
+        $wechselProTag = [];
 
         foreach ($fingerprints as $key => $tage) {
             [$line, $dayType] = explode("\0", $key);
 
-            foreach ($this->foldIntoIntervals($tage) as $abschnitt) {
-                $version = $this->findOrCreateVersion($periode, $line, $dayType, $abschnitt['fingerprint'], $neu);
+            // Ein Feed-Fenster kann eine Perioden-Grenze überspannen (23 Tage Fenster,
+            // Fahrplanwechsel mittendrin). Deshalb wird die Periode **je Tag** bestimmt und
+            // erst danach gebündelt — so endet ein Abschnitt am letzten wirklich beobachteten
+            // Tag vor der Grenze, nicht am Kalendertag davor.
+            foreach ($this->groupByPeriod($tage, $kette) as $lauf) {
+                $abschnitte = $this->foldIntoIntervals($lauf['tage']);
 
-                if ($neu) {
-                    $versionenNeu++;
-                    $geaenderteLinien[$line] = true;
+                if ($abschnitte === []) {
+                    continue;
                 }
 
-                $this->mergeInterval($version, $abschnitt);
-                $intervalle++;
+                // Eine Perioden-Grenze ist ein exakt bekanntes Datum — anders als eine
+                // Fensterkante ist sie keine bloße Untergrenze.
+                if ($lauf['cut_before']) {
+                    $abschnitte[0]['from_confirmed'] = true;
+                }
+                if ($lauf['cut_after']) {
+                    $abschnitte[array_key_last($abschnitte)]['to_confirmed'] = true;
+                }
+
+                foreach ($abschnitte as $abschnitt) {
+                    $version = $this->findOrCreateVersion(
+                        $lauf['period'], $line, $dayType, $abschnitt['fingerprint'], $neu
+                    );
+
+                    if ($neu) {
+                        $versionenNeu++;
+                        $geaenderteLinien[$line] = true;
+
+                        // Nur ein **beobachteter** Wechsel zählt für den Periodenvorschlag.
+                        // Beginnt die Version an der Fensterkante, ist ihr Anfang bloß eine
+                        // Untergrenze — daraus lässt sich kein Wechseltag ableiten (§5.4 b).
+                        if ($abschnitt['from_confirmed']) {
+                            $wechselProTag[$abschnitt['from']][$line] = true;
+                        }
+                    }
+
+                    $this->mergeInterval($version, $abschnitt);
+                    $intervalle++;
+                }
             }
         }
 
-        // Viele Linien gleichzeitig geändert → Indiz für einen echten Fahrplanwechsel (§4.3).
-        // Der Vorschlag selbst (Admin nimmt an/ab) folgt mit der Admin-Ansicht.
         if (count($geaenderteLinien) > 0) {
             Log::info('Line versions changed in this import', [
-                'period_id' => $periode->id,
-                'lines' => array_keys($geaenderteLinien),
+                'lines' => array_map(strval(...), array_keys($geaenderteLinien)),
                 'count' => count($geaenderteLinien),
             ]);
         }
+
+        // Viele Linien am selben Tag geändert → Indiz für einen echten Fahrplanwechsel (§4.3).
+        $this->offerPeriodChanges($wechselProTag, $auswertung['active_lines_per_day']);
 
         return [
             'signatures' => DB::table('trip_signatures')->count(),
@@ -84,17 +120,79 @@ final class ScheduleVersionService
     }
 
     /**
-     * Laufende Periode; legt beim allerersten Lauf eine an, weil die Konsolidierung eine
-     * braucht, bevor ein Admin eine anlegen konnte (als `bootstrap` markiert).
+     * Die Perioden-Kette, aufsteigend nach `valid_from`. Beim allerersten Lauf entsteht eine
+     * `bootstrap`-Periode, weil die Konsolidierung eine braucht, bevor ein Admin eine anlegen
+     * konnte.
+     *
+     * @return Collection<int, SchedulePeriod>
      */
-    private function currentPeriod(CarbonImmutable $from): SchedulePeriod
+    private function periodChain(CarbonImmutable $from): Collection
     {
-        $periode = SchedulePeriod::query()->where('status', PeriodStatus::Current)->first();
+        $kette = SchedulePeriod::query()->orderBy('valid_from')->get();
 
-        if ($periode !== null) {
-            return $periode;
+        if ($kette->isNotEmpty()) {
+            return $kette;
         }
 
+        return collect([$this->bootstrapPeriod($from)]);
+    }
+
+    /**
+     * Gruppiert die Tage einer (Linie, Fahrplantyp) in Läufe je Fahrplanperiode.
+     *
+     * @param  array<int, array{date: string, fingerprint: string|null}>  $tage
+     * @param  Collection<int, SchedulePeriod>  $kette
+     * @return array<int, array{period: SchedulePeriod, tage: array<int, array{date: string, fingerprint: string|null}>, cut_before: bool, cut_after: bool}>
+     */
+    private function groupByPeriod(array $tage, Collection $kette): array
+    {
+        usort($tage, static fn (array $a, array $b): int => $a['date'] <=> $b['date']);
+
+        $laeufe = [];
+        foreach ($tage as $tag) {
+            $periode = $this->periodForDay($tag['date'], $kette);
+            $letzter = $laeufe === [] ? null : array_key_last($laeufe);
+
+            if ($letzter !== null && $laeufe[$letzter]['period']->id === $periode->id) {
+                $laeufe[$letzter]['tage'][] = $tag;
+
+                continue;
+            }
+
+            $laeufe[] = ['period' => $periode, 'tage' => [$tag], 'cut_before' => false, 'cut_after' => false];
+        }
+
+        foreach (array_keys($laeufe) as $i) {
+            $laeufe[$i]['cut_before'] = $i > 0;
+            $laeufe[$i]['cut_after'] = $i < count($laeufe) - 1;
+        }
+
+        return $laeufe;
+    }
+
+    /**
+     * Die Periode, die ein Tag trägt: die jüngste, die nicht nach ihm beginnt. Tage vor der
+     * kuratierten Kette fallen an die erste Periode — ein Import darf nicht daran scheitern,
+     * dass sein Fenster weiter zurückreicht als die Kette.
+     *
+     * @param  Collection<int, SchedulePeriod>  $kette
+     */
+    private function periodForDay(string $datum, Collection $kette): SchedulePeriod
+    {
+        $treffer = null;
+
+        foreach ($kette as $periode) {
+            if ($periode->valid_from->toDateString() <= $datum) {
+                $treffer = $periode;
+            }
+        }
+
+        return $treffer ?? $kette->first();
+    }
+
+    /** Erstlauf-Periode, sichtbar als solche markiert (PeriodOrigin::Bootstrap). */
+    private function bootstrapPeriod(CarbonImmutable $from): SchedulePeriod
+    {
         $periode = SchedulePeriod::query()->create([
             'label' => 'Ausgangsperiode ab '.$from->format('d.m.Y'),
             'valid_from' => $from->toDateString(),
@@ -105,14 +203,21 @@ final class ScheduleVersionService
 
         Log::info('Bootstrap schedule period created', ['period_id' => $periode->id, 'valid_from' => $from->toDateString()]);
 
-        return $periode;
+        // Gültigkeit und Status kommen aus einer Hand — sonst laufen die beiden Stellen,
+        // die die Kette schreiben, beim ersten Verschieben einer Grenze auseinander.
+        $this->periods->rebuildChain();
+
+        return $periode->refresh();
     }
 
     /**
      * Fingerprint je (Linie, Fahrplantyp) und Tag: SHA über die sortierten Signaturen aller
      * Fahrten, die an diesem Tag auf dieser Linie verkehren.
      *
-     * @return array<string, array<int, array{date: string, fingerprint: string}>> "line\0day_type" => Tage
+     * Nebenbei entsteht die Zahl der Linien, die an einem Tag überhaupt verkehren — Bezugsgröße
+     * für den Periodenwechsel-Vorschlag (§4.3).
+     *
+     * @return array{per_line: array<string, array<int, array{date: string, fingerprint: string|null}>>, active_lines_per_day: array<string, int>}
      */
     private function fingerprintsPerDay(CarbonImmutable $from, CarbonImmutable $to): array
     {
@@ -128,6 +233,7 @@ final class ScheduleVersionService
 
         $alleLinien = DB::table('routes')->distinct()->pluck('route_short_name');
         $result = [];
+        $aktiveLinien = [];
 
         foreach ($proTag as $date => $serviceIds) {
             // Tag ohne jeden Betrieb: eher eine Lücke in der Kalender-Abdeckung als ein
@@ -158,6 +264,7 @@ final class ScheduleVersionService
                     continue;
                 }
 
+                $aktiveLinien[$date] = ($aktiveLinien[$date] ?? 0) + 1;
                 sort($signaturen);
                 $result[$line."\0".$dayType][] = [
                     'date' => $date,
@@ -166,7 +273,58 @@ final class ScheduleVersionService
             }
         }
 
-        return $result;
+        return ['per_line' => $result, 'active_lines_per_day' => $aktiveLinien];
+    }
+
+    /**
+     * Legt Periodenwechsel-Vorschläge an (§4.3): Ändern sich an einem Tag mindestens
+     * `mdtakt.consolidation.period_offer_min_share` der dort verkehrenden Linien, ist das ein
+     * Indiz für einen echten Fahrplanwechsel statt für einzelne Baustellen.
+     *
+     * Das System legt die Periode **nicht** selbst an — der Admin entscheidet. Ein bereits
+     * beschiedener Tag wird nicht erneut vorgeschlagen (unique auf `suggested_from`).
+     *
+     * @param  array<string, array<string, bool>>  $wechselProTag  Datum => betroffene Linien
+     * @param  array<string, int>  $aktiveLinien  Datum => Zahl der an dem Tag verkehrenden Linien
+     */
+    private function offerPeriodChanges(array $wechselProTag, array $aktiveLinien): void
+    {
+        $schwelle = (float) config('mdtakt.consolidation.period_offer_min_share');
+
+        foreach ($wechselProTag as $datum => $linien) {
+            $aktiv = $aktiveLinien[$datum] ?? 0;
+            $betroffen = count($linien);
+
+            if ($aktiv === 0 || $betroffen / $aktiv < $schwelle) {
+                continue;
+            }
+
+            // `whereDate` statt Gleichheit: Der `date`-Cast schreibt `Y-m-d H:i:s`; PostgreSQL
+            // wirft die Uhrzeit in der `date`-Spalte weg, SQLite (Testlauf) behält sie.
+            if (PeriodChangeOffer::query()->whereDate('suggested_from', $datum)->exists()) {
+                continue;
+            }
+
+            // Linien-Namen sind Strings, auch wenn sie wie Zahlen aussehen — als Array-Schlüssel
+            // hat PHP sie zu int gemacht. natsort sortiert „1, 2, 10" statt „1, 10, 2".
+            $namen = array_map(strval(...), array_keys($linien));
+            usort($namen, strnatcmp(...));
+
+            PeriodChangeOffer::query()->create([
+                'suggested_from' => $datum,
+                'changed_line_count' => $betroffen,
+                'active_line_count' => $aktiv,
+                'lines' => $namen,
+                'status' => PeriodOfferStatus::Open,
+            ]);
+
+            Log::info('Period change offered', [
+                'suggested_from' => $datum,
+                'changed_lines' => $betroffen,
+                'active_lines' => $aktiv,
+                'share' => round($betroffen / $aktiv, 3),
+            ]);
+        }
     }
 
     /**

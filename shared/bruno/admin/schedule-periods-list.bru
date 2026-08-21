@@ -1,0 +1,63 @@
+meta {
+  name: Schedule Periods (Liste)
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/schedule-periods
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+}
+
+docs {
+  # Fahrplanperioden auflisten (Admin)
+
+  Liefert die netzweiten Perioden (FAHRPLANPERIODEN §4.1), jüngste zuerst.
+
+  Beispiel-Response:
+
+  ```json
+  {
+    "data": [
+      {
+        "id": 2,
+        "label": "Jahresfahrplan 2026/27",
+        "valid_from": "2026-12-13",
+        "valid_to": null,
+        "status": "frozen",
+        "created_via": "admin",
+        "line_version_count": 0,
+        "is_deletable": true
+      },
+      {
+        "id": 1,
+        "label": "Ausgangsperiode ab 15.08.2026",
+        "valid_from": "2026-08-15",
+        "valid_to": "2026-12-12",
+        "status": "current",
+        "created_via": "bootstrap",
+        "line_version_count": 154,
+        "is_deletable": false
+      }
+    ]
+  }
+  ```
+
+  `valid_to` ist immer **abgeleitet**: der Vortag des Nachfolgers, bei der jüngsten Periode `null`.
+  `status: current` trägt die Periode, die den heutigen Tag abdeckt — eine künftig beginnende
+  Periode ist deshalb noch `frozen`.
+}

@@ -57,6 +57,7 @@ Bevor du eigenständig entscheidest, **halte an und frage**, wenn:
 | Logging | Monolog via Laravel `Log`-Facade, strukturiertes Kontext-Array |
 | Schema-Änderungen | Immer als Laravel-Migration — kein manuelles DDL |
 | Neue API-Endpunkte | Zuerst `shared/openapi.yaml` + Bruno-Datei, dann implementieren |
+| Vergleiche auf `date`-Spalten | Immer `whereDate()`, nie Gleichheit. Tests laufen auf **SQLite**, Produktion auf **PostgreSQL**: Der `date`-Cast schreibt `Y-m-d H:i:s`; PostgreSQL wirft die Uhrzeit in der `date`-Spalte weg, SQLite behält sie als Text. Ein `where('valid_from', '2026-12-13')` findet dort nichts — und Duplikat- oder Unique-Prüfungen laufen still ins Leere |
 
 ---
 

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\AuthController;
+use App\Http\Controllers\Admin\CoverageController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
 use App\Http\Controllers\Admin\LineColorController;
@@ -43,6 +44,9 @@ Route::prefix('v1')->group(function (): void {
 
             // Fahrplan-Konsolidat: Änderungshistorie je Linie und Betriebstag-Typ (I-13)
             Route::get('line-versions', [LineVersionController::class, 'index'])->name('admin.line-versions.index');
+
+            // Abdeckung des Konsolidats: welche Zeiträume sind abrufbar, wo sind Lücken
+            Route::get('coverage', [CoverageController::class, 'index'])->name('admin.coverage.index');
 
             // Fahrplanperioden — netzweit, kuratiert (FAHRPLANPERIODEN §4.1)
             Route::get('schedule-periods', [SchedulePeriodController::class, 'index'])->name('admin.schedule-periods.index');

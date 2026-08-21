@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use App\Enums\FahrplanTyp;
+use App\Enums\ScheduleSource;
 use Illuminate\Validation\Rule;
 
 /**
@@ -19,6 +20,7 @@ final class LineTripsRequest extends ApiFormRequest
     {
         return [
             'day_type' => ['nullable', Rule::enum(FahrplanTyp::class)],
+            'source' => ['nullable', Rule::enum(ScheduleSource::class)],
         ];
     }
 
@@ -30,5 +32,15 @@ final class LineTripsRequest extends ApiFormRequest
         $value = $this->query('day_type');
 
         return is_string($value) && $value !== '' ? FahrplanTyp::from($value) : null;
+    }
+
+    /** Bestand, aus dem geantwortet wird — Vorgabe ist das Konsolidat. */
+    public function source(): ScheduleSource
+    {
+        $value = $this->query('source');
+
+        return is_string($value) && $value !== ''
+            ? ScheduleSource::from($value)
+            : ScheduleSource::Consolidated;
     }
 }

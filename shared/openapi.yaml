@@ -487,6 +487,128 @@ components:
           description: Bezeichnung der neuen Periode. Ihr Beginn steht bereits fest (`suggested_from`).
           example: Jahresfahrplan 2026/27
 
+    CoverageRange:
+      type: object
+      required: [from, to, from_confirmed, to_confirmed]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        from_confirmed:
+          type: boolean
+          description: '`false` = die Grenze lag an einer Feed-Fensterkante und ist nur eine Untergrenze (§5.4 b).'
+        to_confirmed: { type: boolean }
+
+    CoverageGap:
+      type: object
+      required: [from, to, days]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        days:
+          type: integer
+          description: Zahl der fehlenden Tage **dieses Fahrplantyps** — Wochenenden zählen für `mo_fr` nicht mit.
+
+    CoverageDayType:
+      type: object
+      required: [day_type, day_type_label, ranges, gaps, versions_total, versions_without_content]
+      properties:
+        day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+        day_type_label: { type: string }
+        ranges:
+          type: array
+          items: { $ref: '#/components/schemas/CoverageRange' }
+        gaps:
+          type: array
+          items: { $ref: '#/components/schemas/CoverageGap' }
+        versions_total: { type: integer }
+        versions_without_content:
+          type: integer
+          description: Versionen, für die zwar ein Zeitraum bekannt ist, aber keine Fahrten konsolidiert wurden.
+
+    CoverageResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [window, totals, lines]
+          properties:
+            window:
+              type: object
+              nullable: true
+              properties:
+                from: { type: string, format: date }
+                to: { type: string, format: date }
+            totals:
+              type: object
+              properties:
+                lines: { type: integer }
+                versions: { type: integer }
+                versions_without_content: { type: integer }
+                consolidated_trips: { type: integer }
+            lines:
+              type: array
+              items:
+                type: object
+                required: [line, day_types]
+                properties:
+                  line: { type: string }
+                  day_types:
+                    type: array
+                    items: { $ref: '#/components/schemas/CoverageDayType' }
+
+    ScheduleSource:
+      type: string
+      enum: [consolidated, raw]
+      default: consolidated
+      description: >
+        Aus welchem Bestand geantwortet wird. `consolidated` (Vorgabe) ist der dauerhafte
+        Bestand, der über viele Importe zusammenwächst und **jedes je beobachtete Datum**
+        kennt. `raw` ist der importierte GTFS-Bestand — nur das aktuelle Feed-Fenster von rund
+        drei Wochen, bei jedem Import ersetzt.
+
+
+        Die Admin-Schaltzentrale kann umschalten (der Roh-Bestand bleibt der Kontrollblick auf
+        das, was der letzte Import wirklich lieferte); der öffentliche Viewer sieht
+        ausschließlich das Konsolidat.
+
+    SourceMeta:
+      type: object
+      required: [source]
+      properties:
+        source: { $ref: '#/components/schemas/ScheduleSource' }
+
+    ConsolidatedTrip:
+      type: object
+      required: [id, signature, route_short_name, route_type, mode, day_type, version_no]
+      description: >
+        Eine Fahrt aus dem Konsolidat. Bewusst **ohne** `trip_id`, `service_id` und `block_id`:
+        Das sind Begriffe des Roh-Bestands, die gtfs.de pro Build neu vergibt. Dauerhaft sind
+        die `signature` und die Version, in der die Fahrt steht.
+      properties:
+        id: { type: integer }
+        signature:
+          type: string
+          description: SHA256 über Linie, Fahrplantyp und Abfahrts-Zeitsequenz — stabil über Builds hinweg.
+        route_short_name: { type: string }
+        route_type: { type: integer }
+        mode: { type: string }
+        day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+        version_no: { type: integer }
+        start_stop: { type: string, nullable: true }
+        end_stop: { type: string, nullable: true }
+        departure_time: { type: string, nullable: true, example: '07:00:00' }
+        arrival_time: { type: string, nullable: true, example: '07:25:00' }
+
+    ConsolidatedTripListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ConsolidatedTrip' }
+        meta: { $ref: '#/components/schemas/SourceMeta' }
+
     LineVersionsResponse:
       type: object
       required: [data]
@@ -611,14 +733,31 @@ paths:
     get:
       operationId: listLines
       summary: Alle MVB-Linien (Tram + Bus)
-      description: Öffentliche Stammdaten — kein Auth im MVP.
+      description: >
+        Öffentliche Stammdaten — kein Auth im MVP.
+
+
+        Vorgabe ist das **Konsolidat**: alle Linien, für die dauerhafte Fahrten vorliegen.
+        `route_ids` ist dort leer — GTFS-Route-IDs gehören zum Roh-Bestand und werden pro Build
+        neu vergeben. Mit `?source=raw` antwortet der Endpunkt aus dem letzten Import, samt
+        `route_ids`.
       tags: [Stammdaten]
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ScheduleSource' }
       responses:
         '200':
           description: Liste aller Linien
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LineListResponse' }
+        '422':
+          description: Unbekannte source
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/lines/{line}/trips:
     get:
@@ -648,6 +787,14 @@ paths:
             Gültigkeitsfenster des Feeds (siehe reference_date in der Antwort).
             Deckt der Feed keinen Tag dieses Typs ab, ist groups leer.
           schema: { $ref: '#/components/schemas/FahrplanTyp' }
+        - name: source
+          in: query
+          required: false
+          description: >
+            Aus dem Konsolidat (Vorgabe) trägt jede Fahrt ihre `version_no` und deren beobachtete
+            Gültigkeit (`validity`) statt der Roh-Begriffe `day_pattern`/`service_dates`;
+            `reference_date` ist dann `null`, weil kein Stichtag nötig ist.
+          schema: { $ref: '#/components/schemas/ScheduleSource' }
       responses:
         '200':
           description: Fahrten der Linie, gruppiert
@@ -676,17 +823,31 @@ paths:
   /api/v1/trips:
     get:
       operationId: listTrips
-      summary: GTFS-Trips nach Betriebstag, Linie und Haltestelle filtern
+      summary: Fahrten nach Betriebstag, Linie und Haltestelle filtern
       description: >
-        Liefert gefilterte Trips als Matching-Vorbereitung (SPEC §3.2, Stufen 1–3).
+        Liefert gefilterte Fahrten als Matching-Vorbereitung (SPEC §3.2, Stufen 1–3).
         Alle Filter sind optional und werden mit UND verknüpft. Der zeitliche
         Feinfilter (time=, ±Zeitfenster) folgt erst in I-05.
+
+
+        **Die Quelle bestimmt Reichweite und Antwortform.** Aus dem Konsolidat (Vorgabe) ist
+        jedes je beobachtete Datum abfragbar — auch ein Baustellenfahrplan, den der aktuelle
+        Feed längst nicht mehr enthält; die Fahrten tragen `signature` und `version_no`. Aus
+        dem Roh-Bestand (`source=raw`) sind nur Tage des aktuellen Feed-Fensters beantwortbar;
+        die Fahrten tragen `trip_id`, `service_id` und `block_id`. `meta.source` sagt, was
+        geliefert wurde.
+
+
+        Ein Datum, das in keinem beobachteten Intervall liegt, liefert eine **leere** Liste —
+        nicht den zuletzt bekannten Fahrplan.
       tags: [Stammdaten]
       parameters:
         - name: date
           in: query
           required: false
-          description: Betriebstag im Format YYYY-MM-DD. Filtert auf an diesem Tag gültige service_ids.
+          description: >
+            Betriebstag im Format YYYY-MM-DD. Im Konsolidat bestimmt er Fahrplantyp und gültige
+            Version, im Roh-Bestand die an diesem Tag gültigen `service_id`s.
           schema: { type: string, format: date }
         - name: line
           in: query
@@ -696,14 +857,23 @@ paths:
         - name: stop
           in: query
           required: false
-          description: stop_id einer Haltestelle, die der Trip bedienen muss.
+          description: >
+            Haltestelle, die die Fahrt bedienen muss. **Achtung:** im Konsolidat eine
+            `consolidated_stops.id` (Ganzzahl), im Roh-Bestand eine GTFS-`stop_id`.
           schema: { type: string }
+        - name: source
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ScheduleSource' }
       responses:
         '200':
-          description: Gefilterte Trip-Liste
+          description: Gefilterte Fahrten-Liste — Form je nach `source`
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/TripListResponse' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ConsolidatedTripListResponse'
+                  - $ref: '#/components/schemas/TripListResponse'
         '422':
           description: Ungültiger Filter (z.B. falsches Datumsformat)
           content:
@@ -804,6 +974,39 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LineVersionsResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/coverage:
+    get:
+      operationId: getCoverage
+      summary: Abdeckung des Konsolidats
+      description: >
+        Für welche Zeiträume gibt das Konsolidat den Fahrplan wirklich her — und wo klaffen
+        Lücken (FAHRPLANPERIODEN Phase C)?
+
+
+        **Abgedeckt heißt: mit Inhalt.** Eine Linien-Version belegt nur, *dass* an diesen Tagen
+        ein bestimmter Fahrplan galt; abrufbar ist er erst mit konsolidierten Fahrten. Versionen
+        ohne Inhalt zählen deshalb nicht als Abdeckung, sondern werden als
+        `versions_without_content` ausgewiesen.
+
+
+        Abschnitte und Lücken sind **fahrplantyp-bezogen**: Zwischen zwei Samstagen liegen sechs
+        Tage ohne Samstag — für den `sa`-Strang ist das lückenlose Abdeckung, keine Unterbrechung.
+        Eine Lücke wird nur gemeldet, wenn dort tatsächlich Tage dieses Typs fehlen, etwa nach
+        einem ausgefallenen Import.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Abdeckung je Linie und Fahrplantyp
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CoverageResponse' }
         '401':
           description: Nicht authentifiziert
           content:

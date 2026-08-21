@@ -24,7 +24,7 @@ final class StammdatenApiTest extends TestCase
         Route::factory()->tram()->create(['route_id' => 'R1', 'route_short_name' => '1']);
         Route::factory()->bus()->create(['route_id' => 'R73', 'route_short_name' => '73']);
 
-        $response = $this->getJson('/api/v1/lines');
+        $response = $this->getJson('/api/v1/lines?source=raw');
 
         $response->assertOk()
             ->assertJsonCount(2, 'data')
@@ -49,7 +49,7 @@ final class StammdatenApiTest extends TestCase
             ['trip_id' => 'T-BUS-2'],
         )->create(['route_id' => $bus->route_id]);
 
-        $response = $this->getJson('/api/v1/lines');
+        $response = $this->getJson('/api/v1/lines?source=raw');
 
         $response->assertOk()
             ->assertJsonCount(1, 'data')
@@ -85,7 +85,7 @@ final class StammdatenApiTest extends TestCase
         $otherTrip = Trip::factory()->create(['trip_id' => 'T2', 'service_id' => 'WD', 'route_id' => $other->route_id]);
         StopTime::factory()->create(['trip_id' => 'T2', 'stop_id' => 'S1', 'stop_sequence' => 1]);
 
-        $response = $this->getJson('/api/v1/trips?date='.self::MONDAY.'&line=1&stop=S1');
+        $response = $this->getJson('/api/v1/trips?date='.self::MONDAY.'&line=1&stop=S1&source=raw');
 
         $response->assertOk()
             ->assertJsonCount(1, 'data')
@@ -97,7 +97,7 @@ final class StammdatenApiTest extends TestCase
 
     public function test_trips_endpoint_rejects_invalid_date_format(): void
     {
-        $response = $this->getJson('/api/v1/trips?date=22.06.2026');
+        $response = $this->getJson('/api/v1/trips?date=22.06.2026&source=raw');
 
         $response->assertStatus(422)
             ->assertJsonPath('error.code', 422);
@@ -107,7 +107,7 @@ final class StammdatenApiTest extends TestCase
     {
         Trip::factory()->count(2)->create();
 
-        $response = $this->getJson('/api/v1/trips');
+        $response = $this->getJson('/api/v1/trips?source=raw');
 
         $response->assertOk()->assertJsonCount(2, 'data');
     }

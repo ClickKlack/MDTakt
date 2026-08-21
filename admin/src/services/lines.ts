@@ -1,6 +1,26 @@
 import api from './api'
 
 /**
+ * Bestand, aus dem geantwortet wird. `consolidated` (Vorgabe der API) ist der dauerhafte
+ * Bestand über viele Importe hinweg, `raw` der letzte GTFS-Import — nur das aktuelle
+ * Feed-Fenster. Die Schaltzentrale zeigt beides, der öffentliche Viewer nur das Konsolidat.
+ */
+export type ScheduleSource = 'consolidated' | 'raw'
+
+export const QUELLEN: { value: ScheduleSource; label: string; hint: string }[] = [
+  {
+    value: 'consolidated',
+    label: 'Konsolidat',
+    hint: 'Dauerhafter Bestand über alle Importe — kennt auch Fahrpläne, die der aktuelle Feed nicht mehr enthält.',
+  },
+  {
+    value: 'raw',
+    label: 'Roh-Bestand',
+    hint: 'Was der letzte Import geliefert hat — nur das aktuelle Feed-Fenster von rund drei Wochen.',
+  },
+]
+
+/**
  * Eine MVB-Linie — identifiziert über `route_short_name`. Mehrere GTFS-Routen unter
  * derselben Bezeichnung (z. B. Schienenersatzverkehr als Bus) ergeben einen Eintrag;
  * `route_type`/`mode` beschreiben die prägende Route, `modes` alle beteiligten.
@@ -35,17 +55,39 @@ export const FAHRPLAN_TYPEN: { value: FahrplanTyp; label: string }[] = [
   { value: 'so_feiertag', label: 'So + Feiertage' },
 ]
 
+/** Beobachtete Gültigkeit einer Linien-Version (nur im Konsolidat). */
+export interface Validity {
+  valid_from: string
+  valid_to: string
+  // false = die Grenze lag an einer Feed-Fensterkante und ist nur eine Untergrenze.
+  from_confirmed: boolean
+  to_confirmed: boolean
+}
+
+/**
+ * Eine Fahrt. Die Felder unterscheiden sich nach Quelle: Der Roh-Bestand trägt die
+ * GTFS-Begriffe (`trip_id`, `service_id`, Wochenmuster), das Konsolidat die dauerhafte
+ * Signatur mit Version und beobachteter Gültigkeit.
+ */
 export interface LineTripItem {
-  trip_id: string
-  service_id: string
   departure_time: string | null
   arrival_time: string | null
-  // Wöchentliches Verkehrsmuster („Mo-Fr", „So", „täglich"); null = kein Wochenmuster.
-  day_pattern: string | null
-  // Einzeltermine (YYYY-MM-DD) — nur gefüllt, wenn day_pattern null ist.
-  service_dates: string[]
   // Verkehrsmittel dieser Fahrt — unterscheidet Routen gleicher Linienbezeichnung.
   mode: 'tram' | 'bus' | 'other'
+
+  // --- nur Roh-Bestand ---
+  trip_id?: string
+  service_id?: string
+  // Wöchentliches Verkehrsmuster („Mo-Fr", „So", „täglich"); null = kein Wochenmuster.
+  day_pattern?: string | null
+  // Einzeltermine (YYYY-MM-DD) — nur gefüllt, wenn day_pattern null ist.
+  service_dates?: string[]
+
+  // --- nur Konsolidat ---
+  id?: number
+  signature?: string
+  version_no?: number
+  validity?: Validity[]
 }
 
 export interface LineTripGroup {
@@ -68,9 +110,9 @@ export interface LineTrips {
   groups: LineTripGroup[]
 }
 
-/** Alle MVB-Linien. */
-export async function fetchLines(): Promise<Line[]> {
-  const { data } = await api.get('/api/v1/lines')
+/** Alle MVB-Linien aus der gewählten Quelle. */
+export async function fetchLines(source: ScheduleSource = 'consolidated'): Promise<Line[]> {
+  const { data } = await api.get('/api/v1/lines', { params: { source } })
   return data.data
 }
 
@@ -78,9 +120,13 @@ export async function fetchLines(): Promise<Line[]> {
  * Fahrten einer Linie, gruppiert nach Start → Ziel. Ohne `dayType` enthält das
  * Ergebnis alle Betriebstage — dieselbe Abfahrtszeit kann dann mehrfach vorkommen.
  */
-export async function fetchLineTrips(line: string, dayType?: FahrplanTyp | null): Promise<LineTrips> {
+export async function fetchLineTrips(
+  line: string,
+  dayType?: FahrplanTyp | null,
+  source: ScheduleSource = 'consolidated',
+): Promise<LineTrips> {
   const { data } = await api.get(`/api/v1/lines/${encodeURIComponent(line)}/trips`, {
-    params: dayType ? { day_type: dayType } : {},
+    params: dayType ? { day_type: dayType, source } : { source },
   })
   return data.data
 }

@@ -43,6 +43,14 @@ final class LineVersion extends Model
     }
 
     /**
+     * @return HasMany<ConsolidatedTrip, $this>
+     */
+    public function consolidatedTrips(): HasMany
+    {
+        return $this->hasMany(ConsolidatedTrip::class, 'line_version_id');
+    }
+
+    /**
      * @return BelongsTo<SchedulePeriod, $this>
      */
     public function period(): BelongsTo

@@ -60,7 +60,7 @@ final class LineColorsTest extends TestCase
         Route::factory()->tram()->create(['route_id' => 'R1', 'route_short_name' => '1']);
         LineColor::query()->create(['route_short_name' => '1', 'color' => '#c9346c']);
 
-        $this->getJson('/api/v1/lines')
+        $this->getJson('/api/v1/lines?source=raw')
             ->assertOk()
             ->assertJsonPath('data.0.color', '#c9346c');
     }

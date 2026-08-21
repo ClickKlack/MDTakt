@@ -51,7 +51,7 @@ final class LineTripsTest extends TestCase
         $this->stopTime('T2', 'C', 1, '06:30:00');
         $this->stopTime('T2', 'A', 2, '06:40:00');
 
-        $response = $this->getJson('/api/v1/lines/1/trips');
+        $response = $this->getJson('/api/v1/lines/1/trips?source=raw');
 
         $response->assertOk()
             ->assertJsonPath('data.line', '1')
@@ -68,7 +68,7 @@ final class LineTripsTest extends TestCase
 
     public function test_unknown_line_returns_empty_groups(): void
     {
-        $this->getJson('/api/v1/lines/999/trips')
+        $this->getJson('/api/v1/lines/999/trips?source=raw')
             ->assertOk()
             ->assertJsonPath('data.trip_count', 0)
             ->assertJsonCount(0, 'data.groups');
@@ -112,7 +112,7 @@ final class LineTripsTest extends TestCase
     {
         $this->seedWerktagUndSonntag();
 
-        $response = $this->getJson('/api/v1/lines/6/trips');
+        $response = $this->getJson('/api/v1/lines/6/trips?source=raw');
 
         // Ungefiltert stehen beide Fahrten nebeneinander — unterscheidbar am Muster.
         $response->assertOk()
@@ -132,7 +132,7 @@ final class LineTripsTest extends TestCase
         $this->seedWerktagUndSonntag();
 
         // So + Feiertage → Stichtag ist der erste Sonntag im Feed-Fenster (16.08.2026).
-        $response = $this->getJson('/api/v1/lines/6/trips?day_type=so_feiertag');
+        $response = $this->getJson('/api/v1/lines/6/trips?day_type=so_feiertag&source=raw');
 
         $response->assertOk()
             ->assertJsonPath('data.day_type', 'so_feiertag')
@@ -143,7 +143,7 @@ final class LineTripsTest extends TestCase
             ->assertJsonPath('data.groups.0.trips.0.day_pattern', 'So');
 
         // Der Werktagsfahrplan liefert spiegelbildlich nur die andere Fahrt.
-        $this->getJson('/api/v1/lines/6/trips?day_type=mo_fr')
+        $this->getJson('/api/v1/lines/6/trips?day_type=mo_fr&source=raw')
             ->assertOk()
             ->assertJsonPath('data.reference_date', '2026-08-17')
             ->assertJsonPath('data.trip_count', 1)
@@ -155,7 +155,7 @@ final class LineTripsTest extends TestCase
         $this->seedWerktagUndSonntag();
 
         // Ohne gepflegte Schulferien ist kein Tag des Feeds ein Ferien-Werktag.
-        $this->getJson('/api/v1/lines/6/trips?day_type=mo_fr_ferien')
+        $this->getJson('/api/v1/lines/6/trips?day_type=mo_fr_ferien&source=raw')
             ->assertOk()
             ->assertJsonPath('data.day_type', 'mo_fr_ferien')
             ->assertJsonPath('data.reference_date', null)
@@ -174,14 +174,14 @@ final class LineTripsTest extends TestCase
             'end_date' => '2026-09-30',
         ]);
 
-        $this->getJson('/api/v1/lines/6/trips?day_type=mo_fr_ferien')
+        $this->getJson('/api/v1/lines/6/trips?day_type=mo_fr_ferien&source=raw')
             ->assertOk()
             ->assertJsonPath('data.reference_date', '2026-08-17')
             ->assertJsonPath('data.trip_count', 1)
             ->assertJsonPath('data.groups.0.trips.0.trip_id', 'T-WT');
 
         // Derselbe Tag kann nicht zugleich normaler Werktag sein.
-        $this->getJson('/api/v1/lines/6/trips?day_type=mo_fr')
+        $this->getJson('/api/v1/lines/6/trips?day_type=mo_fr&source=raw')
             ->assertOk()
             ->assertJsonPath('data.reference_date', null)
             ->assertJsonPath('data.trip_count', 0);
@@ -213,13 +213,13 @@ final class LineTripsTest extends TestCase
         $this->stopTime('T-EINZEL', 'K', 1, '20:55:00');
         $this->stopTime('T-EINZEL', 'L', 2, '21:12:00');
 
-        $this->getJson('/api/v1/lines/1/trips')
+        $this->getJson('/api/v1/lines/1/trips?source=raw')
             ->assertOk()
             ->assertJsonPath('data.groups.0.trips.0.day_pattern', null)
             ->assertJsonPath('data.groups.0.trips.0.service_dates', ['2026-08-16']);
 
         // Und er wird korrekt dem Fahrplantyp des Einzeltermins zugeordnet (16.08. = Sonntag).
-        $this->getJson('/api/v1/lines/1/trips?day_type=so_feiertag')
+        $this->getJson('/api/v1/lines/1/trips?day_type=so_feiertag&source=raw')
             ->assertOk()
             ->assertJsonPath('data.trip_count', 1)
             ->assertJsonPath('data.groups.0.trips.0.trip_id', 'T-EINZEL');
@@ -243,7 +243,7 @@ final class LineTripsTest extends TestCase
             $this->stopTime($tripId, 'WH', 2, '00:45:00');
         }
 
-        $response = $this->getJson('/api/v1/lines/N2/trips');
+        $response = $this->getJson('/api/v1/lines/N2/trips?source=raw');
 
         // Gleiche Uhrzeit, gleiche Strecke — unterscheidbar allein am Verkehrsmittel.
         $response->assertOk()
@@ -265,7 +265,7 @@ final class LineTripsTest extends TestCase
         $this->stopTime('T1', 'B', 2, '06:10:00');
 
         // Nur ein Verkehrsmittel → das Frontend blendet die Spalte aus.
-        $this->getJson('/api/v1/lines/1/trips')
+        $this->getJson('/api/v1/lines/1/trips?source=raw')
             ->assertOk()
             ->assertJsonPath('data.modes', ['tram'])
             ->assertJsonPath('data.groups.0.trips.0.mode', 'tram');
@@ -315,7 +315,7 @@ final class LineTripsTest extends TestCase
 
         // Vier Sonntage im Fenster: 16.08. (Sonderfahrplan) und 23./30.08. + 06.09. (regulär).
         // Die Mehrheit gewinnt — Stichtag ist der erste Tag der häufigsten Variante.
-        $this->getJson('/api/v1/lines/1/trips?day_type=so_feiertag')
+        $this->getJson('/api/v1/lines/1/trips?day_type=so_feiertag&source=raw')
             ->assertOk()
             ->assertJsonPath('data.reference_date', '2026-08-23')
             ->assertJsonPath('data.trip_count', 1)
@@ -324,7 +324,7 @@ final class LineTripsTest extends TestCase
 
     public function test_unknown_day_type_is_rejected_with_422_envelope(): void
     {
-        $this->getJson('/api/v1/lines/6/trips?day_type=montags')
+        $this->getJson('/api/v1/lines/6/trips?day_type=montags&source=raw')
             ->assertStatus(422)
             ->assertJsonPath('error.code', 422);
     }

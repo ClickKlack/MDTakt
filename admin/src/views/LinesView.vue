@@ -4,17 +4,20 @@ import { RouterLink } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import LineBadge from '../components/LineBadge.vue'
 import LineTripsPanel from '../components/LineTripsPanel.vue'
-import { fetchLines, type Line } from '../services/lines'
+import { fetchLines, QUELLEN, type Line, type ScheduleSource } from '../services/lines'
 import { lineSortKey, lineTypeOrder } from '../utils/lineStyle'
 
 const lines = ref<Line[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
 const selected = ref<Line | null>(null)
+const source = ref<ScheduleSource>('consolidated')
 
-onMounted(async () => {
+async function load(): Promise<void> {
+  loading.value = true
+  error.value = null
   try {
-    const data = await fetchLines()
+    const data = await fetchLines(source.value)
     // Primär nach Typ (Tram→Bus→Nacht), dann nach Nummer (Buchstaben ignoriert), dann Name.
     lines.value = data
       .slice()
@@ -24,12 +27,24 @@ onMounted(async () => {
           lineSortKey(a) - lineSortKey(b) ||
           a.route_short_name.localeCompare(b.route_short_name),
       )
+
+    // Die gewählte Linie kann es in der anderen Quelle nicht geben.
+    if (selected.value && !lines.value.some((l) => l.route_short_name === selected.value?.route_short_name)) {
+      selected.value = null
+    }
   } catch {
     error.value = 'Linien konnten nicht geladen werden.'
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(load)
+
+function selectSource(wert: ScheduleSource): void {
+  source.value = wert
+  void load()
+}
 
 function select(line: Line): void {
   selected.value = line
@@ -47,6 +62,25 @@ function select(line: Line): void {
           <p class="mt-1 text-sm text-slate-500">Linie wählen — die Fahrten erscheinen darunter.</p>
         </div>
         <RouterLink to="/lines/colors" class="text-sm text-slate-500 hover:text-slate-800">Farben verwalten</RouterLink>
+      </div>
+
+      <!-- Quellenwahl: Konsolidat oder das, was der letzte Import wirklich lieferte. -->
+      <div class="mt-4 flex flex-wrap items-center gap-3">
+        <div class="flex gap-1 rounded-lg bg-slate-200/60 p-1">
+          <button
+            v-for="quelle in QUELLEN"
+            :key="quelle.value"
+            class="rounded-md px-3 py-1.5 text-sm transition"
+            :class="source === quelle.value ? 'bg-white font-medium text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/60'"
+            :title="quelle.hint"
+            @click="selectSource(quelle.value)"
+          >
+            {{ quelle.label }}
+          </button>
+        </div>
+        <p class="text-xs text-slate-500">
+          {{ QUELLEN.find((q) => q.value === source)?.hint }}
+        </p>
       </div>
 
       <div v-if="loading" class="mt-4 text-slate-500">Lädt…</div>
@@ -73,7 +107,7 @@ function select(line: Line): void {
             <h3 class="text-base font-semibold text-slate-900">Linie {{ selected.route_short_name }}</h3>
           </div>
           <div class="mt-4">
-            <LineTripsPanel :line="selected.route_short_name" />
+            <LineTripsPanel :line="selected.route_short_name" :source="source" />
           </div>
         </section>
         <p v-else class="mt-8 text-sm text-slate-400">Noch keine Linie ausgewählt.</p>

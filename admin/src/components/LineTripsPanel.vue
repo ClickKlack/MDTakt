@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { fetchLineTrips, FAHRPLAN_TYPEN, type FahrplanTyp, type LineTripItem, type LineTrips } from '../services/lines'
+import {
+  fetchLineTrips,
+  FAHRPLAN_TYPEN,
+  type FahrplanTyp,
+  type LineTripItem,
+  type LineTrips,
+  type ScheduleSource,
+} from '../services/lines'
 import { formatClock, formatDate } from '../utils/timezone'
 
 /**
@@ -11,7 +18,7 @@ function verkehrstage(trip: LineTripItem): string | null {
   if (trip.day_pattern) {
     return trip.day_pattern
   }
-  const tage = trip.service_dates
+  const tage = trip.service_dates ?? []
   if (tage.length === 0) {
     return null
   }
@@ -22,12 +29,40 @@ function verkehrstage(trip: LineTripItem): string | null {
 
 /** Vollständige Terminliste als Tooltip, wenn die Kurzform sie nicht alle zeigt. */
 function verkehrstageDetail(trip: LineTripItem): string | undefined {
-  return !trip.day_pattern && trip.service_dates.length > 2
-    ? trip.service_dates.map(formatDate).join(', ')
+  const tage = trip.service_dates ?? []
+
+  return !trip.day_pattern && tage.length > 2 ? tage.map(formatDate).join(', ') : undefined
+}
+
+/**
+ * Im Konsolidat gibt es keine Wochenmuster — dort trägt die Fahrt ihre beobachtete
+ * Gültigkeit. Ein „ab"/„bis" markiert eine Grenze, die an der Feed-Fensterkante lag und
+ * damit nur eine Untergrenze ist (FAHRPLANPERIODEN §5.4 b).
+ */
+function gueltigkeit(trip: LineTripItem): string | null {
+  const intervalle = trip.validity ?? []
+  if (intervalle.length === 0) {
+    return null
+  }
+
+  return intervalle
+    .map((i) => {
+      const von = `${i.from_confirmed ? '' : 'ab '}${formatDate(i.valid_from)}`
+      const bis = `${i.to_confirmed ? '' : 'mind. '}${formatDate(i.valid_to)}`
+      return `${von} – ${bis}`
+    })
+    .join(', ')
+}
+
+function gueltigkeitDetail(trip: LineTripItem): string | undefined {
+  const offen = (trip.validity ?? []).some((i) => !i.from_confirmed || !i.to_confirmed)
+
+  return offen
+    ? 'Eine Grenze lag an der Feed-Fensterkante — sie ist nur eine Untergrenze, kein beobachteter Fahrplanwechsel.'
     : undefined
 }
 
-const props = defineProps<{ line: string }>()
+const props = defineProps<{ line: string; source?: ScheduleSource }>()
 
 const data = ref<LineTrips | null>(null)
 const loading = ref(true)
@@ -41,7 +76,7 @@ async function load(): Promise<void> {
   error.value = null
   expanded.value = {}
   try {
-    data.value = await fetchLineTrips(props.line, dayType.value)
+    data.value = await fetchLineTrips(props.line, dayType.value, props.source ?? 'consolidated')
   } catch {
     error.value = 'Fahrten konnten nicht geladen werden.'
   } finally {
@@ -64,9 +99,11 @@ function select(typ: FahrplanTyp | null): void {
   void load()
 }
 
-// Linienwechsel setzt den Filter zurück — sonst steht ein Typ ohne Abdeckung im Weg.
+const istKonsolidat = computed<boolean>(() => (props.source ?? 'consolidated') === 'consolidated')
+
+// Linien- oder Quellenwechsel setzt den Filter zurück — sonst steht ein Typ ohne Abdeckung im Weg.
 watch(
-  () => props.line,
+  () => [props.line, props.source],
   () => {
     dayType.value = null
     void load()
@@ -125,10 +162,18 @@ watch(
         v-if="data.day_type !== null && data.trip_count === 0"
         class="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800"
       >
-        Der aktuelle Feed enthält keinen Tag vom Typ „{{ data.day_type_label }}“.
-        Der GTFS-Feed deckt nur ein rollierendes Zeitfenster ab — für diesen Fahrplantyp
-        liegen darin keine Daten. Er füllt sich erst mit einem Import, dessen Zeitraum
-        solche Tage enthält.
+        <template v-if="istKonsolidat">
+          Für den Typ „{{ data.day_type_label }}“ ist bei dieser Linie noch nichts
+          konsolidiert. Das Konsolidat wächst über viele Importe zusammen — solange kein
+          Feed-Fenster einen Tag dieses Typs enthielt, gibt es dafür keinen Fahrplan.
+          Der Reiter „Abdeckung“ zeigt, welche Zeiträume schon vorliegen.
+        </template>
+        <template v-else>
+          Der aktuelle Feed enthält keinen Tag vom Typ „{{ data.day_type_label }}“.
+          Der GTFS-Feed deckt nur ein rollierendes Zeitfenster ab — für diesen Fahrplantyp
+          liegen darin keine Daten. Er füllt sich erst mit einem Import, dessen Zeitraum
+          solche Tage enthält.
+        </template>
       </div>
 
       <div class="mt-3 space-y-2">
@@ -162,25 +207,41 @@ watch(
                 <tr>
                   <th class="px-4 py-2">Abfahrt</th>
                   <th class="px-4 py-2">Ankunft</th>
-                  <th class="px-4 py-2">Verkehrt</th>
+                  <th class="px-4 py-2">{{ istKonsolidat ? 'Gültig' : 'Verkehrt' }}</th>
                   <th v-if="zeigeVerkehrsmittel" class="px-4 py-2">Mittel</th>
-                  <th class="px-4 py-2">Dienst</th>
+                  <th class="px-4 py-2">{{ istKonsolidat ? 'Version' : 'Dienst' }}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="trip in group.trips" :key="trip.trip_id" class="border-b border-slate-50 last:border-0">
+                <tr
+                  v-for="trip in group.trips"
+                  :key="trip.trip_id ?? trip.id"
+                  class="border-b border-slate-50 last:border-0"
+                >
                   <td class="px-4 py-1.5 tabular-nums text-slate-700">{{ formatClock(trip.departure_time) }}</td>
                   <td class="px-4 py-1.5 tabular-nums text-slate-500">{{ formatClock(trip.arrival_time) }}</td>
                   <td class="px-4 py-1.5">
-                    <span
-                      v-if="verkehrstage(trip)"
-                      class="rounded px-1.5 py-0.5 text-xs"
-                      :class="trip.day_pattern ? 'bg-slate-100 text-slate-600' : 'bg-sky-50 text-sky-700'"
-                      :title="verkehrstageDetail(trip)"
-                    >
-                      {{ verkehrstage(trip) }}
-                    </span>
-                    <span v-else class="text-xs text-slate-300">—</span>
+                    <template v-if="istKonsolidat">
+                      <span
+                        v-if="gueltigkeit(trip)"
+                        class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
+                        :title="gueltigkeitDetail(trip)"
+                      >
+                        {{ gueltigkeit(trip) }}
+                      </span>
+                      <span v-else class="text-xs text-slate-300">—</span>
+                    </template>
+                    <template v-else>
+                      <span
+                        v-if="verkehrstage(trip)"
+                        class="rounded px-1.5 py-0.5 text-xs"
+                        :class="trip.day_pattern ? 'bg-slate-100 text-slate-600' : 'bg-sky-50 text-sky-700'"
+                        :title="verkehrstageDetail(trip)"
+                      >
+                        {{ verkehrstage(trip) }}
+                      </span>
+                      <span v-else class="text-xs text-slate-300">—</span>
+                    </template>
                   </td>
                   <td v-if="zeigeVerkehrsmittel" class="px-4 py-1.5">
                     <span
@@ -190,7 +251,10 @@ watch(
                       {{ VERKEHRSMITTEL[trip.mode] ?? trip.mode }}
                     </span>
                   </td>
-                  <td class="px-4 py-1.5 text-slate-400">{{ trip.service_id }}</td>
+                  <td class="px-4 py-1.5 text-slate-400">
+                    <span v-if="istKonsolidat" :title="trip.signature">V{{ trip.version_no }}</span>
+                    <span v-else>{{ trip.service_id }}</span>
+                  </td>
                 </tr>
               </tbody>
             </table>

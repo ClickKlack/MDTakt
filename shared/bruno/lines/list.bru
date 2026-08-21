@@ -20,6 +20,16 @@ assert {
 }
 
 docs {
+  # Quelle: Konsolidat (Vorgabe) oder Roh-Bestand
+
+  Ohne Parameter antwortet der Endpunkt aus dem **Konsolidat** — alle Linien, fuer die
+  dauerhafte Fahrten vorliegen. `route_ids` ist dort leer, weil GTFS-Route-IDs zum
+  Roh-Bestand gehoeren und pro Build neu vergeben werden. `meta.source` nennt die Quelle.
+
+  Mit `?source=raw` kommt die Antwort aus dem letzten Import, samt `route_ids`.
+  Die Admin-Schaltzentrale schaltet darueber um; der oeffentliche Viewer nutzt
+  ausschliesslich das Konsolidat.
+
   # Alle MVB-Linien (Tram + Bus)
 
   Öffentliche Stammdaten, kein Auth im MVP. **Eine Zeile je Linienbezeichnung**

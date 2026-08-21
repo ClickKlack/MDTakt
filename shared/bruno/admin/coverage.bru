@@ -1,0 +1,75 @@
+meta {
+  name: Coverage
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/coverage
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.lines: isArray
+}
+
+docs {
+  # Abdeckung des Konsolidats (Admin)
+
+  Für welche Zeiträume gibt das Konsolidat den Fahrplan wirklich her, und wo klaffen Lücken?
+
+  Beispiel-Response (gekürzt, Stand nach dem Import vom 19.08.2026):
+
+  ```json
+  {
+    "data": {
+      "window": { "from": "2026-08-15", "to": "2026-09-06" },
+      "totals": {
+        "lines": 36,
+        "versions": 154,
+        "versions_without_content": 0,
+        "consolidated_trips": 12320
+      },
+      "lines": [
+        {
+          "line": "1",
+          "day_types": [
+            {
+              "day_type": "mo_fr",
+              "day_type_label": "Mo-Fr",
+              "ranges": [
+                { "from": "2026-08-17", "to": "2026-09-04",
+                  "from_confirmed": false, "to_confirmed": false }
+              ],
+              "gaps": [],
+              "versions_total": 1,
+              "versions_without_content": 0
+            }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+  **Abgedeckt heißt: mit Inhalt.** Eine Linien-Version belegt nur, *dass* an diesen Tagen ein
+  bestimmter Fahrplan galt — abrufbar ist er erst mit konsolidierten Fahrten. Versionen ohne
+  Inhalt zählen nicht als Abdeckung, sondern erscheinen als `versions_without_content`.
+
+  **Abschnitte und Lücken sind fahrplantyp-bezogen.** Zwischen zwei Samstagen liegen sechs Tage
+  ohne Samstag; für den `sa`-Strang ist das lückenlose Abdeckung. Eine Lücke erscheint nur, wenn
+  dort wirklich Tage dieses Typs fehlen — der typische Fall ist ein ausgefallener Import.
+
+  `from_confirmed: false` heißt: Die Grenze lag an einer Feed-Fensterkante und ist nur eine
+  Untergrenze (§5.4 b), kein beobachteter Fahrplanwechsel.
+}

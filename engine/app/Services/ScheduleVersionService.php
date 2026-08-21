@@ -31,10 +31,12 @@ final class ScheduleVersionService
         private readonly ServiceDayResolver $serviceDays,
         private readonly FahrplanTypClassifier $classifier,
         private readonly SchedulePeriodService $periods,
+        private readonly StopConsolidationService $stops,
+        private readonly TripConsolidationService $trips,
     ) {}
 
     /**
-     * @return array{signatures: int, versions_created: int, intervals_written: int, lines_changed: int}
+     * @return array{signatures: int, versions_created: int, intervals_written: int, lines_changed: int, consolidated_stops: int, consolidated_trips: int}
      */
     public function updateFromCurrentImport(): array
     {
@@ -43,7 +45,10 @@ final class ScheduleVersionService
         if ($window === null) {
             Log::warning('Version update without imported calendar');
 
-            return ['signatures' => 0, 'versions_created' => 0, 'intervals_written' => 0, 'lines_changed' => 0];
+            return [
+                'signatures' => 0, 'versions_created' => 0, 'intervals_written' => 0,
+                'lines_changed' => 0, 'consolidated_stops' => 0, 'consolidated_trips' => 0,
+            ];
         }
 
         $kette = $this->periodChain($window['from']);
@@ -54,6 +59,7 @@ final class ScheduleVersionService
         $intervalle = 0;
         $geaenderteLinien = [];
         $wechselProTag = [];
+        $repraesentativeTage = [];
 
         foreach ($fingerprints as $key => $tage) {
             [$line, $dayType] = explode("\0", $key);
@@ -97,6 +103,11 @@ final class ScheduleVersionService
 
                     $this->mergeInterval($version, $abschnitt);
                     $intervalle++;
+
+                    // Ein Tag aus dem beobachteten Intervall genügt, um die Fahrten dieser
+                    // Version zu greifen — innerhalb der Version ist der Fahrplan definitionsgemäß
+                    // derselbe.
+                    $repraesentativeTage[$version->id] ??= $abschnitt['from'];
                 }
             }
         }
@@ -111,11 +122,18 @@ final class ScheduleVersionService
         // Viele Linien am selben Tag geändert → Indiz für einen echten Fahrplanwechsel (§4.3).
         $this->offerPeriodChanges($wechselProTag, $auswertung['active_lines_per_day']);
 
+        // Phase C: erst hier überleben die Fahrplan-**Inhalte** den nächsten Import. Bis
+        // dahin hielt das Konsolidat nur fest, dass und wann sich etwas geändert hat.
+        $stopMap = $this->stops->consolidate($window['from'], $window['to']);
+        $fahrten = $this->trips->consolidate($repraesentativeTage, $stopMap);
+
         return [
             'signatures' => DB::table('trip_signatures')->count(),
             'versions_created' => $versionenNeu,
             'intervals_written' => $intervalle,
             'lines_changed' => count($geaenderteLinien),
+            'consolidated_stops' => count($stopMap),
+            'consolidated_trips' => $fahrten['consolidated_trips'],
         ];
     }
 

@@ -20,7 +20,7 @@
 | **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen | ⬜ |
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
 | **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f |
-| **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | 🟡 (B) fertig, (C) offen |
+| **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ✅ |
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -42,7 +42,7 @@ Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung
 |---|---|---|---|
 | 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** | ✅ |
 | 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten | ✅ |
-| 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | 🟡 Phase B fertig; **(C) Konsolidat-Datenbestand als Nächstes** |
+| 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | ✅ Phasen B und C |
 | 4 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬜ |
 | 5 | **I-05** Matching-Logik | Engine-Kern fürs Matching — setzt stabile Fahrt-Identität aus I-13 voraus | ⬜ |
 | 6 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
@@ -480,11 +480,23 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
 - [x] Admin-Ansichten „Fahrplanperioden" (CRUD + Vorschlags-Banner) und „Versionen" (Historie je Linie/Typ)
 
 ### (C) Konsolidat-Datenbestand
-- [ ] `consolidated_stops` (Dedup per Koordinaten), `consolidated_trips`, `consolidated_stop_times`
-- [ ] `dated_exceptions` (§5.4) — datierte Überschreibungen je Linie und Kalendertag
-- [ ] Merge je (Linie, Fahrplantyp) beim Import-`finish` nach §5.3 — neuer Lauf gewinnt, ältere füllen Ränder
-- [ ] Abdeckungs-Anzeige im Admin: welche Zeiträume/Typen sind konsolidiert, wo sind Lücken
-- [ ] App-Endpunkte (Linien, Fahrplan) auf das Konsolidat umstellen — berührt I-03 und später I-05/I-06
+- [x] `consolidated_stops` + `consolidated_stop_versions` (Dedup: ≤ 12 m + normalisierter Name),
+      `consolidated_trips`, `consolidated_stop_times`. Am Realbestand: **730 Roh-Halte → 614 Identitäten**,
+      12.320 Fahrten, 230.254 Haltzeiten; Erstlauf ~11 s, Folgelauf ~2 s
+- [x] Merge beim Import-`finish` nach §5.3 — idempotent ohne Vergleichslogik: Der Fingerprint einer Version
+      **ist** die sortierte Menge ihrer Fahrt-Signaturen, also schreibt ein Folge-Import nur neue Versionen
+- [x] ~~`dated_exceptions`~~ — **entfällt** (folgt aus der Entscheidung vom 18.08.2026, FAHRPLANPERIODEN §5.4:
+      kurze Änderungen sind eigene Linien-Versionen, ein Ausnahme-Mechanismus daneben wäre ein zweiter Weg
+      zum selben Ziel)
+- [x] Abdeckungs-Anzeige im Admin (`GET /api/v1/admin/coverage`, Ansicht „Abdeckung“): je Linie und
+      Fahrplantyp die abgedeckten Zeiträume, die Lücken und die offenen Grenzen. Abschnitte und Lücken sind
+      **fahrplantyp-bezogen** — zwischen zwei Samstagen liegt für den `sa`-Strang keine Lücke. Abgedeckt heißt
+      **mit Inhalt**: Versionen ohne konsolidierte Fahrten zählen nicht mit, sondern werden ausgewiesen
+- [x] App-Endpunkte auf das Konsolidat umgestellt (`GET /lines`, `/lines/{line}/trips`, `/trips`) — mit
+      `?source=raw|consolidated`. **Vorgabe ist das Konsolidat**; der Roh-Bestand bleibt für die
+      Schaltzentrale erreichbar (Kontrollblick auf den letzten Import), der öffentliche Viewer bekommt später
+      ausschließlich das Konsolidat. `meta.source` nennt die gelieferte Quelle. Admin: Umschalter in der
+      Linien-Ansicht, Fahrten zeigen dort statt Wochenmuster ihre Version samt beobachteter Gültigkeit
 
 ### Abnahmekriterium
 Nach mehreren Importen über einen Zeitraum, der eine Fahrplanänderung enthält, liefert die Engine für **jedes Datum

@@ -321,7 +321,7 @@ hielte der Collector ihn fälschlich für den zuletzt geladenen Feed. Derselbe W
 |---|---|
 | GTFS-Import, Audit, Konsolidierung (Versionen/Intervalle) | ✅ produktiv nutzbar |
 | Admin: Imports, Linien, Kalender, Versionen | ✅ |
-| Fahrplan-**Inhalte** historisch (Phase C) | ⬜ — bis dahin rettet nur das ZIP-Archiv |
+| Fahrplan-**Inhalte** historisch (Phase C) | ✅ — Konsolidat trägt Halte, Fahrten und Haltzeiten dauerhaft; `GET /api/v1/trips` beantwortet jedes beobachtete Datum |
 | Sichtungen, Matching, Umläufe (I-04 – I-06) | ⬜ |
 | Öffentlicher Viewer (I-07/I-08) | ⬜ |
 | Perioden-CRUD, Periodenwechsel-Vorschlag | ✅ — Admin „Perioden"; der erste Lauf legt weiterhin automatisch eine `bootstrap`-Periode an |

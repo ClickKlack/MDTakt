@@ -133,6 +133,32 @@ Das Image bringt PHP 8.4 und `ext-zip` mit; auf dem Host wird kein PHP gebraucht
 Zielsystem bauen** (`docker compose build`), damit die Architektur passt — ein auf einem
 Entwicklungsrechner gebautes arm64-Image läuft nicht auf einem x86-NAS und umgekehrt.
 
+**Aktualisieren.** `scripts/deploy-collector.sh` überträgt den Quellstand und erkennt, ob das
+Image dazu noch passt:
+
+```bash
+cp scripts/deploy-collector.local.env.example scripts/deploy-collector.local.env  # einmalig
+
+./scripts/deploy-collector.sh            # übertragen, bei Bedarf zum Rebuild auffordern
+./scripts/deploy-collector.sh --build    # ohne Rückfrage neu bauen
+./scripts/deploy-collector.sh --no-build # nur übertragen
+./scripts/deploy-collector.sh --dry-run  # nur zeigen, was übertragen würde
+```
+
+Ob ein Rebuild nötig ist, entscheidet ein Hash über die Pfade, die tatsächlich ins Image gehen
+(`Dockerfile`, `.dockerignore`, `composer.json`, `composer.lock`, `src/`, `bin/`). Er wird nach
+jedem erfolgreichen Bau als `.build-stamp` im Zielverzeichnis hinterlegt und beim nächsten Deploy
+verglichen. Eine Änderung an Dokumentation oder `docker-compose.yml` löst damit **keinen** Neubau
+aus, eine Änderung am Quelltext dagegen schon. Der Stempel wird erst **nach** erfolgreichem Bau
+geschrieben — ein gescheiterter Lauf gilt nicht als erledigt.
+
+`.env` und `storage/` gehören dem Zielhost und werden nie überschrieben.
+
+> **Kein rsync für den Transfer.** Auf Synology ist `/usr/bin/rsync` setuid root und verlangt beim
+> Aufruf über SSH eine zusätzliche Authentifizierung — der Transfer bleibt an einer Passwortabfrage
+> hängen, obwohl der SSH-Login per Schlüssel längst erfolgreich war. Das Skript nutzt deshalb `tar`
+> über SSH; bei rund 300 KB Quelltext ist der Verzicht auf inkrementelle Übertragung belanglos.
+
 ### 3b. Ohne Docker
 
 ```bash

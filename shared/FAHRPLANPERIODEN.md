@@ -115,7 +115,13 @@ Zwei Ebenen: **Perioden** (kuratiert, netzweit) und **Linien-Versionen** (automa
 - **Nimmt der Admin an:** die soeben angelegten Linien-Versionen werden **zurückgenommen** und durch den
   **Periodenwechsel ersetzt** (neue Periode, alle Linien Version 1). So bleibt die alte Periode frei von Versions-Wildwuchs.
 - **Lehnt er ab / wenige Linien betroffen:** die Änderungen bleiben als Linien-Versionen in der laufenden Periode.
-- Schwelle „viele Linien" = Parameter (TBD).
+- **Schwelle festgelegt 21.08.2026: ≥ 33 % der Linien, die an dem Tag überhaupt verkehren.** Anteilig statt
+  absolut, damit sie nicht kippt, wenn das Netz wächst oder an einem Sonntag weniger Linien fahren. Konfigurierbar
+  über `PERIOD_OFFER_MIN_SHARE` (`config/mdtakt.php`). Der empfindlichere Wert nimmt lieber einen abzulehnenden
+  Vorschlag in Kauf, als einen realen Fahrplanwechsel zu übersehen — ein echter Wechsel fasst nahezu alle Linien
+  gleichzeitig an, eine einzelne Baustelle drei bis sechs.
+- **Gezählt werden nur beobachtete Wechsel:** Eine Version, die an der Feed-Fensterkante beginnt, ist bloß eine
+  Untergrenze (§5.4 b) und ergibt keinen Wechseltag. Der erste Import löst deshalb keinen Vorschlag aus.
 
 ### 4.4 Bezug Matching
 Versions- und Periodenwechsel → betroffene Kurszuordnungen als *stale / neu zu bestätigen* markieren
@@ -134,10 +140,28 @@ bleiben **eingefroren** erhalten. **Die App (Linien, Fahrplan, Umläufe, Matchin
 
 ### 5.1 Stabile Schlüssel
 - **Linie** = `route_short_name`
-- **Halt** = gerundete **Koordinaten** (Dedup per Nearest-Neighbor); Name „latest wins" (Namen können sich ändern).
-  **Schwelle offen:** die in INTEGRATION §4.2 genannten „~≤ 20 m" sind für das MVB-Netz zu grob — **338 von 730**
-  Halten haben einen eigenständigen anderen Halt näher als 20 m (10 m: 188, 5 m: 66). Zu weit verschmilzt Steige
-  (Hasselbachplatz: 9 Steige, ein Name), zu eng erkennt denselben Halt zwischen zwei Builds nicht wieder.
+- **Halt** = ein physischer Punkt; Identität = gerundete **Koordinaten**, Name „latest wins" (Namen ändern sich).
+  **Dedup-Regel entschieden 21.08.2026:** verschmelzen genau dann, wenn **Abstand ≤ 12 m *und* normalisierter Name
+  gleich**. Normalisierung: Kleinschreibung, Ortspräfix „Magdeburg," entfernt, `Str.`→`Straße`, Umlaute/ß entfaltet,
+  Satzzeichen und Leerraum entfernt.
+
+  Gemessen am Live-Bestand (730 Halte, Build 15.08.2026, Haversine): Bis **15 m** verschmelzen **ausschließlich**
+  namensgleiche Halte — 149 Paare, **keine** Fehlverschmelzung. Die erste echte Fehlverschmelzung liegt bei
+  **17,1 m** (`City Carré` ↔ `City Carré / Ersatzh.`); die weiteren kritischen Fälle bis 50 m tragen alle einen
+  unterscheidenden Zusatz (`(Schleife)`, `(Quittenweg)`, `Wendeschl.`, `ZOB Hst. 2`). **12 m** hält Sicherheitsabstand
+  nach oben, die Namensbedingung sichert zusätzlich gegen künftige Netzänderungen ab.
+
+  Damit ist auch die alte Sorge ausgeräumt: Die „**338 von 730** bei 20 m" waren falsch gruppiert — 181 der 190 Paare
+  heißen **identisch**, 7 weitere sind reine Schreibvarianten (`Listemannstr.` ↔ `Listemannstraße`,
+  `Magdeburg, Zoo` ↔ `Zoo`). Deren Verschmelzung ist genau das Gewollte, nicht der Schaden.
+- **Steige verschmelzen — bewusst** (entschieden 21.08.2026). **9 Paare (18 Halte) liegen auf exakt identischen
+  Koordinaten** und tragen dort die beiden Fahrtrichtungen: `Maybachstraße` etwa als zwei `stop_id`s, beide Linie 59,
+  mit 18 bzw. 19 Fahrten. **Keine** Koordinaten-Schwelle trennt die, auch 0 m nicht — und `trips.direction_id` ist im
+  **gesamten** Feed `NULL`, die Richtung steckt einzig in der Wahl der `stop_id`. Konsequenz: **ein Konsolidat-Halt je
+  physischem Punkt**; die Richtung ergibt sich aus der Position in der Fahrt-Sequenz, nicht aus dem Halt. Preis: an
+  diesen 18 Halten ist „Steig A/B" nicht mehr darstellbar. Dasselbe Muster tritt für Nachtlinien auf (`N8` mit eigener
+  `stop_id` 0,7 m neben dem Tagesbahnsteig) und für Tram/Bus am selben Punkt (`Bördepark Ost`, 0,0 m) — dort ist das
+  Verschmelzen ohnehin erwünscht.
 - **Fahrt** = **Signatur** = SHA(`route_short_name` + `day_type` + geordnete `(Halt, HH:MM)`-Sequenz)
 - **Version** = identifiziert durch den **(Linie, Fahrplantyp)-Fingerprint** innerhalb einer Periode
 
@@ -351,6 +375,12 @@ Ferien-Werktag), entstehen für diesen Typ schlicht keine Intervalle — die bes
 - **Schwelle „viele Linien"** für den Periodenwechsel-Vorschlag (absolute Zahl oder Anteil? konfigurierbar?).
 - Genaue **Versions-Grenz-Erkennung**: ein einzelner Feed kann schon eine künftige Linien-Version enthalten (Zeitsub-Bereiche) — Algorithmus festzurren.
 - ~~`consolidated_stops` global vs. je Periode~~ — entschieden 18.08.2026: **global mit versionierten Attributen** (§6.1).
+- ~~Dedup-Schwelle für Haltestellen-Koordinaten~~ — entschieden 21.08.2026: **≤ 12 m + normalisierter Name** (§5.1).
+- ~~Steig-Trennung im Konsolidat~~ — entschieden 21.08.2026: **ein Halt je Punkt**, Richtung aus der Fahrt-Sequenz (§5.1).
+- **Noch ungemessen: die Drift zwischen zwei Builds.** Der eigentliche Grund für die Koordinaten-Dedup ist, denselben
+  Halt über Builds hinweg wiederzuerkennen — bislang existiert aber nur **ein** Build (15.08.2026). Offen bleibt damit,
+  ob gtfs.de die `stop_id`s überhaupt neu vergibt und wie weit die Koordinaten wandern. Beides ist mit dem zweiten
+  Import zu messen; fällt die Drift größer als 12 m aus, ist die Schwelle nachzuziehen.
 - **GTFS-`service_id` → Fahrplantyp:** repräsentativer Tag je Typ; Umgang mit Trips, deren Service mehrere Typen mischt.
 - Rollierendes ~2-Wochen-Fenster deckt evtl. nicht alle 4 Typen gleichzeitig ab → Versionen/Konsolidat füllen sich über mehrere Importe.
 - Wann **Roh-GTFS löschen** (sofort nach erfolgreicher Konsolidierung im `finish`, oder erst beim nächsten Import).

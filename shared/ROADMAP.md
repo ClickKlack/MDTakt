@@ -20,7 +20,7 @@
 | **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen | ⬜ |
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
 | **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f |
-| **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ⬅️ **als Nächstes** |
+| **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | 🟡 (B) fertig, (C) offen |
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -42,7 +42,7 @@ Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung
 |---|---|---|---|
 | 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** | ✅ |
 | 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten | ✅ |
-| 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | ⬅️ **als Nächstes** |
+| 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | 🟡 Phase B fertig; **(C) Konsolidat-Datenbestand als Nächstes** |
 | 4 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬜ |
 | 5 | **I-05** Matching-Logik | Engine-Kern fürs Matching — setzt stabile Fahrt-Identität aus I-13 voraus | ⬜ |
 | 6 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
@@ -446,16 +446,23 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
       `consolidated_stop_versions`. Historisch treue Anzeige ohne vervielfachte Identität
 - [x] **Import-Takt: wöchentlich** (entschieden 18.08.2026) — die Quelle wird selbst nur wöchentlich aktualisiert.
       Bei 23 Tagen Fenster überlappen aufeinanderfolgende Läufe um gut zwei Wochen, das genügt für lückenlose Abdeckung
-- [ ] **Dedup-Schwelle für Halte festlegen.** INTEGRATION §4.2 nennt „~≤ 20 m" — im MVB-Netz zu grob: **338 von 730**
-      Halten haben einen eigenständigen anderen Halt näher als 20 m (bei 10 m noch 188, bei 5 m 66). Eine zu weite
-      Schwelle verschmilzt Steige, eine zu enge erkennt denselben Halt über Builds nicht wieder
+- [x] **Dedup-Schwelle für Halte festgelegt** (entschieden 21.08.2026): **≤ 12 m *und* normalisierter Name gleich**.
+      Am Live-Bestand gemessen — bis 15 m verschmelzen ausschließlich namensgleiche Halte (149 Paare, null
+      Fehlverschmelzungen); die erste echte liegt bei 17,1 m. Die „338 von 730" waren falsch gruppiert: 181 der 190
+      Paare heißen identisch
+- [x] **Steige verschmelzen bewusst** (entschieden 21.08.2026): 9 Paare liegen auf **exakt identischen** Koordinaten
+      und tragen die Richtungen; keine Schwelle trennt sie, `trips.direction_id` ist im Feed durchgehend `NULL`.
+      Ein Konsolidat-Halt je Punkt, Richtung aus der Fahrt-Sequenz (FAHRPLANPERIODEN §5.1)
 
 > 📐 **Datenmodell-Entwurf liegt vor:** FAHRPLANPERIODEN §6.1 (Tabellen) und §6.2 (Fortschreibung beim Import).
 
 ### (B) Versionierung & stabile Identität
 - [x] Fahrt-**Signatur** je **(Trip, Fahrplantyp)** berechnen: `SHA(route_short_name + day_type + HH:MM-Sequenz)`
       → Tabelle `trip_signatures`; die volatile `trip_id` wird nur noch Zeiger (§6.1)
-- [ ] `schedule_periods` (Admin-CRUD: anlegen/aktiv setzen) + `line_versions` je (Linie, Fahrplantyp)
+- [x] `schedule_periods` (Admin-CRUD) + `line_versions` je (Linie, Fahrplantyp) — Perioden bilden eine
+      lückenlose Kette; `valid_to` und `status` sind daraus abgeleitet, nur `valid_from` wird gepflegt.
+      Überspannt ein Feed-Fenster eine Periodengrenze, wird die Periode **je Tag** bestimmt und der Abschnitt
+      geteilt — in der neuen Periode startet jede Linie wieder bei Version 1
 - [x] **Tagesweise** Fingerprint-Auswertung beim Import-`finish` (§6.2) statt „repräsentativer Tag" — nur so
       entstehen echte Intervalle und die Unterscheidung gesichert/offen
 - [x] **Version über Fingerprint identifizieren, Gültigkeit als Intervall-Menge** (§5.4 a) — Rückkehr zum alten
@@ -466,8 +473,11 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
       Ferien-Werktag), darf das den Versions-Strang nicht einfrieren
 - [x] **Ausfalltag unterbricht die Gültigkeit:** Fährt eine Linie an einem Tag nicht, während andere fahren, ist das
       eine Beobachtung — die Gültigkeit läuft nicht darüber hinweg
-- [ ] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3); Schwelle festlegen
-- [ ] Admin-Ansichten „Fahrplanperioden" + „Linien-Versionen" (Historie je Linie/Typ)
+- [x] Periodenwechsel **vorschlagen**, wenn viele Linien gleichzeitig betroffen sind (§4.3) — Schwelle
+      **≥ 33 %** der an dem Tag verkehrenden Linien (entschieden 21.08.2026, `PERIOD_OFFER_MIN_SHARE`).
+      Annehmen legt die Periode an und nimmt die Versionen ab dem Wechseltag zurück; Ablehnen belässt sie
+      als gewöhnliche Linien-Versionen
+- [x] Admin-Ansichten „Fahrplanperioden" (CRUD + Vorschlags-Banner) und „Versionen" (Historie je Linie/Typ)
 
 ### (C) Konsolidat-Datenbestand
 - [ ] `consolidated_stops` (Dedup per Koordinaten), `consolidated_trips`, `consolidated_stop_times`
@@ -500,7 +510,9 @@ Lücken aus, statt sie zu verschweigen.
 | `day_type` in der Fahrt-Signatur | I-13 | ✅ entschieden 18.08.2026: **vier Werte** wie `FahrplanTyp`; Tracker-Seite braucht sie nicht zu kennen (`service_date` genügt) |
 | Fahrt-Signatur mit oder ohne Halte | I-13 | ✅ entschieden 18.08.2026: **ohne** — sonst systemübergreifend nicht vergleichbar |
 | Linien-Schlüssel im Konsolidat | I-13 | ✅ entschieden 18.08.2026: **`route_short_name` allein**; Verkehrsmittel ist Fahrt-Attribut, N2 wird zu zwei Versionen einer Linie |
-| Dedup-Schwelle für Haltestellen-Koordinaten | I-13 | ❓ offen — die „~20 m" aus INTEGRATION §4.2 träfen 338 von 730 Halten und verschmölzen Steige |
+| Dedup-Schwelle für Haltestellen-Koordinaten | I-13 | ✅ entschieden 21.08.2026: **≤ 12 m + normalisierter Name**; am Live-Bestand gemessen, erste Fehlverschmelzung erst bei 17,1 m |
+| Steig-Trennung im Konsolidat | I-13 | ✅ entschieden 21.08.2026: **ein Halt je physischem Punkt** — 18 Halte liegen auf exakt identischen Koordinaten, `direction_id` ist im Feed `NULL`; Richtung kommt aus der Fahrt-Sequenz |
+| Koordinaten-Drift zwischen zwei Builds | I-13 | ❓ offen — mangels zweitem Build ungemessen; mit dem Import am 24.08.2026 nachzuholen (Sind `stop_id`s stabil? Wandern die Koordinaten?) |
 | Import-Takt | I-13 | ✅ entschieden 18.08.2026: **wöchentlich** — die Quelle aktualisiert selbst nur wöchentlich |
 | Rückwirkende Zuordnung von Alt-Sichtungen | I-09 | ✅ entschieden 18.08.2026: **kein Ziel** — es geht um den Fahrplan-Bestand |
 | Nachtlinien: Betriebstag ≠ Kalendertag (N1 fährt montags anders als Di–Fr) | I-13 | ❓ offen — nicht dringend, siehe FAHRPLANPERIODEN §8 |

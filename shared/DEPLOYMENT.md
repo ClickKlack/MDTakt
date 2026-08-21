@@ -324,7 +324,7 @@ hielte der Collector ihn fälschlich für den zuletzt geladenen Feed. Derselbe W
 | Fahrplan-**Inhalte** historisch (Phase C) | ⬜ — bis dahin rettet nur das ZIP-Archiv |
 | Sichtungen, Matching, Umläufe (I-04 – I-06) | ⬜ |
 | Öffentlicher Viewer (I-07/I-08) | ⬜ |
-| Perioden-CRUD, Periodenwechsel-Vorschlag | ⬜ — der erste Lauf legt automatisch eine `bootstrap`-Periode an |
+| Perioden-CRUD, Periodenwechsel-Vorschlag | ✅ — Admin „Perioden"; der erste Lauf legt weiterhin automatisch eine `bootstrap`-Periode an |
 
 **Offene Entscheidung:** Subdomain-Zuschnitt (z. B. `api.` und `admin.strassenbahn-magdeburg.de`) — siehe
 ROADMAP, offene Punkte.

@@ -128,9 +128,16 @@ deploy_engine() {
         # idempotent und überspringt sich selbst, wenn ADMIN_EMAIL/ADMIN_PASSWORD leer sind.
         $PHP_BIN artisan db:seed --class=AdminSeeder --force
 
+        # Konsolidat aus dem vorhandenen Roh-Bestand fortschreiben. Ohne das antworten die
+        # öffentlichen Endpunkte nach einem Deployment, das die Konsolidat-Tabellen neu
+        # anlegt, bis zum nächsten Import leer — sie beziehen sich per Vorgabe aufs
+        # Konsolidat. Idempotent: Unveränderte Versionen werden nicht neu geschrieben.
+        # Über die CLI greift zudem kein max_execution_time, anders als im Import-Request.
+        $PHP_BIN artisan schedule:consolidate
+
         $PHP_BIN artisan optimize
     "
-    ok "Abhängigkeiten, Migrationen, Admin-Seed und Caches erledigt"
+    ok "Abhängigkeiten, Migrationen, Admin-Seed, Konsolidierung und Caches erledigt"
 }
 
 # ── Admin ────────────────────────────────────────────────────────────────────

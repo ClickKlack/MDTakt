@@ -356,6 +356,7 @@ cp scripts/deploy.local.env.example scripts/deploy.local.env   # einmalig, Werte
 | `artisan key:generate --force` | nur wenn `APP_KEY` in der Server-`.env` noch leer ist |
 | `artisan migrate --force` | |
 | `artisan db:seed --class=AdminSeeder --force` | idempotent; die `.env` ist die Quelle der Wahrheit für den Single-Admin. Bei leeren `ADMIN_*`-Werten überspringt der Seeder sich selbst |
+| `artisan schedule:consolidate` | schreibt das Konsolidat aus dem vorhandenen Roh-Bestand fort. **Nötig**, weil die öffentlichen Endpunkte per Vorgabe aus dem Konsolidat antworten: Nach einem Deployment, das die Konsolidat-Tabellen neu anlegt, sähen sie sonst bis zum nächsten Import leer aus. Idempotent; über die CLI greift kein `max_execution_time` |
 | `artisan optimize` | Config-, Route- und View-Cache |
 | Admin-Build | `VITE_API_BASE_URL` wird ins Bundle kompiliert, danach `rsync` von `dist/` |
 | Abschlussprüfung | `/up` muss 200 liefern, `/.env` darf **nicht** abrufbar sein |

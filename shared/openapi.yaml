@@ -459,6 +459,18 @@ components:
         lines:
           type: array
           items: { type: string }
+        observed_until:
+          type: string
+          format: date
+          description: Bis wohin die Beobachtung hinter dem Wechseltag reicht.
+        single_day_observation:
+          type: boolean
+          description: >
+            `true`, wenn `observed_until` dem Wechseltag entspricht — der Wechsel liegt dann am
+            Rand des Feed-Fensters und ruht auf einer **einzigen** Beobachtung. Ein Fensterrand
+            ist kein Fahrplanwechsel (§5.4 b); erst der nächste Import entscheidet. Der Wert wird
+            zur Lesezeit berechnet und verschwindet von selbst, sobald ein späterer Import den
+            Zeitraum dahinter abdeckt.
         status: { type: string, enum: [open, accepted, declined] }
         status_label: { type: string }
         decided_at: { type: string, format: date-time, nullable: true }

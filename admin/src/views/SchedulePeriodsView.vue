@@ -176,6 +176,21 @@ async function remove(period: SchedulePeriod): Promise<void> {
           </p>
           <p class="mt-2 text-xs text-amber-800">Betroffen: {{ offer.lines.join(', ') }}</p>
 
+          <!-- Ein Wechseltag am Rand des Feed-Fensters ruht auf einer einzigen Beobachtung.
+               Ihn als Fahrplanwechsel festzuschreiben, wäre verfrüht (§5.4 b). -->
+          <p
+            v-if="offer.single_day_observation"
+            class="mt-3 rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-xs text-amber-900"
+          >
+            <strong>Nur ein beobachteter Tag.</strong> Der Wechsel liegt am Rand des
+            Feed-Fensters — dahinter reichen die Daten nicht. Ob das ein echter Fahrplanwechsel
+            ist oder ein Randeffekt, zeigt erst der nächste Import. Bis dahin besser abwarten.
+          </p>
+          <p v-else class="mt-3 text-xs text-amber-800">
+            Beobachtet bis {{ formatDate(offer.observed_until) }} — der neue Fahrplan hat sich
+            über den Wechseltag hinaus bestätigt.
+          </p>
+
           <div class="mt-4 flex flex-wrap items-end gap-3">
             <label class="flex-1 min-w-64 text-sm">
               <span class="mb-1 block font-medium text-amber-900">Bezeichnung der neuen Periode</span>
@@ -190,7 +205,11 @@ async function remove(period: SchedulePeriod): Promise<void> {
             <button
               type="button"
               :disabled="decidingId === offer.id"
-              class="rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+              class="rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
+              :class="offer.single_day_observation
+                ? 'border border-amber-400 text-amber-900 hover:bg-amber-100'
+                : 'bg-amber-700 text-white hover:bg-amber-800'"
+              :title="offer.single_day_observation ? 'Beleglage dünn — nur ein beobachteter Tag' : undefined"
               @click="acceptOffer(offer)"
             >
               Periodenwechsel anlegen

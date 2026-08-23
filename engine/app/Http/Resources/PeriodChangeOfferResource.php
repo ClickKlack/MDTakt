@@ -29,6 +29,10 @@ final class PeriodChangeOfferResource extends JsonResource
                 ? round($this->changed_line_count / $this->active_line_count, 3)
                 : null,
             'lines' => $this->lines,
+            // Wie gut ist der Wechsel belegt? Ein Wechseltag am Rand des Feed-Fensters ruht auf
+            // einer einzigen Beobachtung (§5.4 b) — das muss die Anzeige sagen können.
+            'observed_until' => $this->observed_until,
+            'single_day_observation' => (bool) $this->single_day_observation,
             'status' => $this->status->value,
             'status_label' => $this->status->label(),
             'decided_at' => $this->decided_at?->toIso8601String(),

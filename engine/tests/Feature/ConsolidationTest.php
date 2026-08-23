@@ -124,6 +124,38 @@ final class ConsolidationTest extends TestCase
         $this->assertSame(0, ConsolidatedStopVersion::query()->whereColumn('valid_to', '<', 'valid_from')->count());
     }
 
+    public function test_merged_platforms_keep_their_attributes_when_stop_ids_are_reshuffled(): void
+    {
+        // Zwei Steige, 9 m auseinander, gleicher Name — sie verschmelzen zu einer Identitaet.
+        Stop::factory()->create(['stop_id' => 'A-1', 'stop_name' => 'Hasselbachplatz', 'lat' => 52.1209000, 'lon' => 11.6273520]);
+        Stop::factory()->create(['stop_id' => 'A-2', 'stop_name' => 'Hasselbachplatz', 'lat' => 52.1209680, 'lon' => 11.6274650]);
+        Stop::factory()->create(['stop_id' => 'B-1', 'stop_name' => 'Beta', 'lat' => 52.1500000, 'lon' => 11.6400000]);
+        $this->minimalerFahrplan('A-1', 'B-1');
+        $this->konsolidieren();
+
+        $halt = ConsolidatedStop::query()->where('name_key', 'hasselbachplatz')->sole();
+        $this->assertCount(1, $halt->versions);
+
+        // Folge-Import: gtfs.de vergibt alle stop_ids neu, und der zweite Steig traegt jetzt
+        // die kleinere ID. Am Ort hat sich nichts geaendert.
+        StopTime::query()->delete();
+        Trip::query()->delete();
+        Stop::query()->delete();
+        Stop::factory()->create(['stop_id' => 'X-1', 'stop_name' => 'Hasselbachplatz', 'lat' => 52.1209680, 'lon' => 11.6274650]);
+        Stop::factory()->create(['stop_id' => 'X-2', 'stop_name' => 'Hasselbachplatz', 'lat' => 52.1209000, 'lon' => 11.6273520]);
+        Stop::factory()->create(['stop_id' => 'Y-1', 'stop_name' => 'Beta', 'lat' => 52.1500000, 'lon' => 11.6400000]);
+        $this->minimalerFahrplan('X-1', 'Y-1');
+        $this->konsolidieren();
+
+        // Ohne ankerbasierte Wahl haette hier der andere Steig gewonnen und die Historie
+        // eine Verlegung um 9 m behauptet, die nie stattgefunden hat.
+        $this->assertCount(
+            1,
+            $halt->refresh()->versions,
+            'Neu gewuerfelte stop_ids duerfen keine Schein-Verlegung erzeugen',
+        );
+    }
+
     public function test_stop_identity_survives_a_reimport_with_new_stop_ids(): void
     {
         Stop::factory()->create(['stop_id' => 'ALT-1', 'stop_name' => 'Alpha', 'lat' => 52.1400000, 'lon' => 11.6300000]);

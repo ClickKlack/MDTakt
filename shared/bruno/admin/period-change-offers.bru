@@ -43,6 +43,8 @@ docs {
         "active_line_count": 36,
         "share": 0.861,
         "lines": ["1", "2", "3", "4", "5", "6", "8", "9", "10"],
+        "observed_until": "2026-12-20",
+        "single_day_observation": false,
         "status": "open",
         "status_label": "offen",
         "decided_at": null
@@ -60,6 +62,13 @@ docs {
 
   Ein bereits beschiedener Vorschlag liefert bei erneutem Zugriff 409; derselbe Tag wird
   bei Folge-Importen nicht noch einmal vorgeschlagen.
+
+  `single_day_observation: true` heisst: `observed_until` entspricht dem Wechseltag, der
+  Wechsel liegt also am Rand des Feed-Fensters und ruht auf einer einzigen Beobachtung.
+  Real aufgetreten beim Folge-Import am 23.08.2026 — 15 Linien aenderten sich zum 21.09.,
+  dem letzten Tag des Fensters. Ob echter Fahrplanwechsel oder Randeffekt, entscheidet erst
+  der naechste Lauf. Der Wert wird zur Lesezeit berechnet und verschwindet von selbst,
+  sobald ein spaeterer Import den Zeitraum dahinter abdeckt.
 
   Gezählt werden nur **beobachtete** Wechsel: Eine Version, die an der Feed-Fensterkante
   beginnt, ist bloß eine Untergrenze (§5.4 b) und ergibt keinen Wechseltag — der erste

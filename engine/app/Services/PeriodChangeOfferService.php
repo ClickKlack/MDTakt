@@ -30,16 +30,49 @@ final class PeriodChangeOfferService
     ) {}
 
     /**
-     * Offene Vorschläge, ältester Wechseltag zuerst.
+     * Offene Vorschläge, ältester Wechseltag zuerst — angereichert um die Frage, wie gut der
+     * vorgeschlagene Wechsel eigentlich belegt ist.
      *
      * @return Collection<int, PeriodChangeOffer>
      */
     public function open(): Collection
     {
-        return PeriodChangeOffer::query()
+        $vorschlaege = PeriodChangeOffer::query()
             ->where('status', PeriodOfferStatus::Open)
             ->orderBy('suggested_from')
             ->get();
+
+        foreach ($vorschlaege as $vorschlag) {
+            $this->addEvidence($vorschlag);
+        }
+
+        return $vorschlaege;
+    }
+
+    /**
+     * Wie weit reicht die Beobachtung hinter dem Wechseltag?
+     *
+     * Fällt ein Wechsel auf den **letzten Tag des Feed-Fensters**, ist er durch genau einen Tag
+     * belegt — und ein Fensterrand ist kein Fahrplanwechsel (FAHRPLANPERIODEN §5.4 b). Der erste
+     * Folge-Import am 23.08.2026 zeigte das an einem realen Fall: 15 Linien änderten sich zum
+     * 21.09., dem letzten Tag des Fensters. Ob das ein echter Fahrplanwechsel ist oder ein
+     * Randeffekt, entscheidet erst der nächste Lauf.
+     *
+     * Bewusst zur Lesezeit berechnet statt beim Anlegen gespeichert: Deckt ein späterer Import
+     * den Zeitraum hinter dem Wechseltag ab, verschwindet der Hinweis von selbst.
+     */
+    private function addEvidence(PeriodChangeOffer $vorschlag): void
+    {
+        $tag = $vorschlag->suggested_from->toDateString();
+
+        $beobachtetBis = LineVersionInterval::query()
+            ->whereDate('valid_from', $tag)
+            ->max('valid_to');
+
+        $bis = $beobachtetBis === null ? $tag : CarbonImmutable::parse($beobachtetBis)->toDateString();
+
+        $vorschlag->setAttribute('observed_until', $bis);
+        $vorschlag->setAttribute('single_day_observation', $bis === $tag);
     }
 
     /**

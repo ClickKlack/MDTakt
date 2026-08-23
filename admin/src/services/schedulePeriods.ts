@@ -44,6 +44,10 @@ export interface PeriodChangeOffer {
   active_line_count: number
   share: number | null
   lines: string[]
+  // Bis wohin reicht die Beobachtung hinter dem Wechseltag? Gleich dem Wechseltag heißt:
+  // ein einziger beobachteter Tag, meist der Rand des Feed-Fensters.
+  observed_until: string
+  single_day_observation: boolean
   status: 'open' | 'accepted' | 'declined'
   status_label: string
   decided_at: string | null

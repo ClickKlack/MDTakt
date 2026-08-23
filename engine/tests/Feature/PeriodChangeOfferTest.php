@@ -219,6 +219,51 @@ final class PeriodChangeOfferTest extends TestCase
             ->assertJsonPath('error.code', 409);
     }
 
+    public function test_a_change_on_the_last_window_day_is_marked_as_a_single_observation(): void
+    {
+        // 4 von 10 Linien wechseln am 28.08. — dem letzten Werktag des Fensters. Dahinter
+        // reichen die Daten nicht; ein Fensterrand ist kein Fahrplanwechsel (§5.4 b).
+        for ($i = 1; $i <= 10; $i++) {
+            $route = Route::factory()->create(['route_id' => "R{$i}", 'route_short_name' => (string) $i]);
+            $minute = str_pad((string) $i, 2, '0', STR_PAD_LEFT);
+
+            if ($i <= 4) {
+                $this->werktagsService("ALT{$i}", '2026-08-17', '2026-08-27');
+                $this->fahrt("T-ALT{$i}", "ALT{$i}", $route->route_id, ["07:{$minute}:00", "07:{$minute}:00"]);
+                $this->werktagsService("NEU{$i}", '2026-08-28', '2026-08-28');
+                $this->fahrt("T-NEU{$i}", "NEU{$i}", $route->route_id, ["08:{$minute}:00", "08:{$minute}:00"]);
+
+                continue;
+            }
+
+            $this->werktagsService("S{$i}", '2026-08-17', '2026-08-28');
+            $this->fahrt("T{$i}", "S{$i}", $route->route_id, ["09:{$minute}:00", "09:{$minute}:00"]);
+        }
+
+        $this->konsolidieren();
+
+        $this->withToken($this->adminToken())
+            ->getJson('/api/v1/admin/period-change-offers')
+            ->assertOk()
+            ->assertJsonPath('data.0.suggested_from', '2026-08-28')
+            ->assertJsonPath('data.0.observed_until', '2026-08-28')
+            ->assertJsonPath('data.0.single_day_observation', true);
+    }
+
+    public function test_a_change_confirmed_beyond_its_first_day_is_not_flagged(): void
+    {
+        // Hier laeuft der neue Fahrplan noch eine Woche weiter — die Beobachtung traegt.
+        $this->netz(10, 4);
+        $this->konsolidieren();
+
+        $this->withToken($this->adminToken())
+            ->getJson('/api/v1/admin/period-change-offers')
+            ->assertOk()
+            ->assertJsonPath('data.0.suggested_from', '2026-08-24')
+            ->assertJsonPath('data.0.observed_until', '2026-08-28')
+            ->assertJsonPath('data.0.single_day_observation', false);
+    }
+
     public function test_open_offers_are_listed_and_require_auth(): void
     {
         $this->getJson('/api/v1/admin/period-change-offers')->assertStatus(401);

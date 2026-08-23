@@ -47,7 +47,7 @@ final class StopConsolidationService
         $jetzt = CarbonImmutable::now();
         $zuordnung = [];
         $neue = 0;
-        $erfasst = [];
+        $kandidaten = [];
 
         // Nach Name gruppiert laden: Die Kandidatensuche läuft ohnehin je Namensschlüssel,
         // und so bleibt der Speicherbedarf bei 730 Halten trivial.
@@ -80,17 +80,25 @@ final class StopConsolidationService
                 $halt->update(['last_seen_at' => $jetzt]);
             }
 
-            // Mehrere Roh-Halte fallen auf dieselbe Identität — im MVB-Netz sind das 116 von
-            // 730, überwiegend Steige und Schreibvarianten. Ihre Attribute dürfen sich nicht
-            // gegenseitig überschreiben: Sonst sähe jeder Import wie eine Umbenennung aus und
-            // die Historie füllte sich mit Schein-Wechseln. Der zuerst gesehene Halt (nach
-            // stop_id) bestimmt Name und Lage der Identität in diesem Lauf.
-            if (! isset($erfasst[$halt->id])) {
-                $this->recordAttributes($halt, $roh->stop_name, $lat, $lon, $windowFrom, $windowTo);
-                $erfasst[$halt->id] = true;
+            // Mehrere Roh-Halte fallen auf dieselbe Identität — im MVB-Netz sind das gut 110
+            // von 730, überwiegend Steige und Schreibvarianten. Welcher davon Name und Lage
+            // bestimmt, wird erst im zweiten Durchgang entschieden: Der Sieger muss über
+            // Builds hinweg derselbe sein, sonst erfindet jeder Import eine Verlegung.
+            $kandidaten[$halt->id][] = ['name' => $roh->stop_name, 'lat' => $lat, 'lon' => $lon];
+            $zuordnung[$roh->stop_id] = $halt->id;
+        }
+
+        foreach ($kandidaten as $haltId => $rohHalte) {
+            $halt = ConsolidatedStop::query()->find($haltId);
+
+            if ($halt === null) {
+                continue;
             }
 
-            $zuordnung[$roh->stop_id] = $halt->id;
+            $vertreter = $this->representative($halt, $rohHalte);
+            $this->recordAttributes(
+                $halt, $vertreter['name'], $vertreter['lat'], $vertreter['lon'], $windowFrom, $windowTo
+            );
         }
 
         Log::info('Stops consolidated', [
@@ -100,6 +108,37 @@ final class StopConsolidationService
         ]);
 
         return $zuordnung;
+    }
+
+    /**
+     * Wählt den Roh-Halt, der Name und Lage der Identität bestimmt: den **ankernächsten**.
+     *
+     * Naheliegend wäre „der zuerst gesehene", aber die Reihenfolge hängt an der `stop_id` —
+     * und die vergibt gtfs.de pro Build vollständig neu (gemessen 23.08.2026: **null** von 730
+     * IDs überlebte den Folge-Build). Bei verschmolzenen Steigen gewänne dann mal der eine,
+     * mal der andere Bahnsteig, und die Attribut-Historie füllte sich mit Verlegungen um
+     * wenige Meter, die nie stattgefunden haben — im ersten Folge-Import waren das 53 Stück.
+     *
+     * Der Anker liegt seit der ersten Sichtung fest. Damit gewinnt immer derselbe physische
+     * Bahnsteig, egal wie der Feed seine IDs würfelt. Bei exakter Gleichheit entscheidet der
+     * Name, damit auch das reproduzierbar bleibt.
+     *
+     * @param  array<int, array{name: string, lat: float, lon: float}>  $rohHalte
+     * @return array{name: string, lat: float, lon: float}
+     */
+    private function representative(ConsolidatedStop $halt, array $rohHalte): array
+    {
+        $ankerLat = (float) $halt->anchor_lat;
+        $ankerLon = (float) $halt->anchor_lon;
+
+        usort($rohHalte, function (array $a, array $b) use ($ankerLat, $ankerLon): int {
+            $distanzA = $this->distance($ankerLat, $ankerLon, $a['lat'], $a['lon']);
+            $distanzB = $this->distance($ankerLat, $ankerLon, $b['lat'], $b['lon']);
+
+            return $distanzA <=> $distanzB ?: strcmp($a['name'], $b['name']);
+        });
+
+        return $rohHalte[0];
     }
 
     /**

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import { fetchLineVersions, type LineVersions } from '../services/scheduleVersions'
 import { FAHRPLAN_TYPEN } from '../services/lines'
@@ -118,6 +119,7 @@ onMounted(load)
                   <th class="px-4 py-2">Version</th>
                   <th class="px-4 py-2">Fahrten</th>
                   <th class="px-4 py-2">Gültig</th>
+                  <th class="px-4 py-2"></th>
                 </tr>
               </thead>
               <tbody>
@@ -136,6 +138,22 @@ onMounted(load)
                       {{ formatDate(i.valid_from) }}–{{ formatDate(i.valid_to) }}
                       <span :class="i.to_confirmed ? 'text-slate-400' : 'text-amber-600'">{{ i.to_confirmed ? '|' : '~' }}</span>
                     </span>
+                  </td>
+                  <td class="px-4 py-1.5 text-right whitespace-nowrap">
+                    <!-- Von „hier hat sich etwas geändert" direkt in den Fahrplan dieser Version. -->
+                    <RouterLink
+                      :to="{
+                        name: 'timetable',
+                        query: {
+                          line: linie.line,
+                          day_type: version.day_type,
+                          version: String(version.id),
+                        },
+                      }"
+                      class="text-slate-500 hover:text-slate-900"
+                    >
+                      Fahrplan →
+                    </RouterLink>
                   </td>
                 </tr>
               </tbody>

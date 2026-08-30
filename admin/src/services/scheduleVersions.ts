@@ -44,9 +44,18 @@ export interface LineVersions {
 }
 
 /** Fahrplan-Änderungshistorie der laufenden Periode (Admin/Sanctum). */
-export async function fetchLineVersions(dayType?: string | null): Promise<LineVersions> {
-  const { data } = await api.get('/api/v1/admin/line-versions', {
-    params: dayType ? { day_type: dayType } : {},
-  })
+export async function fetchLineVersions(
+  dayType?: string | null,
+  line?: string | null,
+): Promise<LineVersions> {
+  const params: Record<string, string> = {}
+  if (dayType) {
+    params.day_type = dayType
+  }
+  if (line) {
+    params.line = line
+  }
+
+  const { data } = await api.get('/api/v1/admin/line-versions', { params })
   return data.data
 }

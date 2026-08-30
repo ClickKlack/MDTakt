@@ -1,0 +1,85 @@
+meta {
+  name: Timetable (Fahrplan-Matrix)
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/line-versions/174/timetable
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.directions: isArray
+}
+
+docs {
+  # Fahrplan einer Linien-Version (Admin)
+
+  Der vollstaendige Fahrplan im Fahrplanbuch-Format: Halte als Zeilen, Fahrten als Spalten.
+  Die ID im Pfad ist eine `line_versions.id` — zu bekommen ueber
+  `GET /api/v1/admin/line-versions`.
+
+  Beispiel-Response (stark gekuerzt, Linie 1 Mo-Fr):
+
+  ```json
+  {
+    "data": {
+      "line_version": {
+        "id": 174, "line": "1", "day_type": "mo_fr", "day_type_label": "Mo-Fr",
+        "version_no": 2, "trip_count": 393,
+        "intervals": [{ "valid_from": "2026-09-21", "valid_to": "2026-09-28",
+                        "from_confirmed": true, "to_confirmed": false }]
+      },
+      "period": { "id": 1, "label": "Ausgangsperiode ab 15.08.2026", "status": "current" },
+      "directions": [
+        {
+          "key": "42>117",
+          "start_stop": "Kannenstieg", "end_stop": "Listemannstr.",
+          "trip_count": 94, "variant_count": 1, "alignment_warning": false,
+          "rows": [
+            { "position": 0, "stop_id": 42,  "stop_name": "Kannenstieg",          "repeat_index": 0 },
+            { "position": 1, "stop_id": 55,  "stop_name": "Pablo-Picasso-Straße", "repeat_index": 0 }
+          ],
+          "trips": [
+            { "id": 9835, "signature": "3f2a…", "mode": "tram",
+              "departure_time": "04:42:00", "arrival_time": "05:00:00",
+              "cells": ["04:42", "04:43"] }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **`cells` ist positionsgleich zu `rows`.** `null` heisst: Diese Fahrt bedient die Zeile nicht.
+  So stehen Kurzlaeufer in derselben Tabelle wie die durchgehenden Fahrten, mit leeren Zellen
+  am Rand — das Bild eines gedruckten Fahrplans.
+
+  **Eine Zeile ist eine Position, keine Halt-Identitaet.** 1.022 der 18.193 Fahrten beruehren
+  denselben Halt zweimal (Wendeschleifen, Stichabstecher). Derselbe `stop_id` kommt dann
+  mehrfach vor, unterschieden ueber `repeat_index`.
+
+  **Zeiten sind Netz-Lokalzeit und werden nicht umgerechnet.** Stunden ueber 24 bleiben stehen
+  (`25:10`) — GTFS-Zeiten beziehen sich auf den Betriebstag, nicht auf die Uhr.
+
+  **`variant_count > 1`** heisst, dass mehrere Haltefolgen auf eine Achse ausgerichtet wurden.
+  Netzweit betrifft das 58 von 965 Richtungen (bis zu sieben Varianten). `alignment_warning`
+  meldet, wenn die Achse dabei ueber das 1,5-fache der laengsten Einzelvariante waechst — am
+  Produktivbestand tritt das derzeit nirgends auf (schlechtester Wert 1,29).
+
+  **Kein Periodenfilter:** Auch eingefrorene Perioden bleiben abrufbar; `period.status` sagt,
+  ob es sich um Historie handelt.
+}

@@ -621,6 +621,91 @@ components:
           items: { $ref: '#/components/schemas/ConsolidatedTrip' }
         meta: { $ref: '#/components/schemas/SourceMeta' }
 
+    TimetableRow:
+      type: object
+      required: [position, stop_id, stop_name, repeat_index]
+      description: >
+        Eine Zeile der Fahrplan-Matrix. Die Zeile ist eine **Position in der Haltefolge**, nicht
+        eine Halt-Identität: 1.022 der 18.193 Fahrten berühren denselben Halt zweimal
+        (Wendeschleifen, Stichabstecher — die Steige sind im Konsolidat verschmolzen,
+        FAHRPLANPERIODEN §5.1). Derselbe `stop_id` kann deshalb mehrfach vorkommen,
+        unterschieden über `repeat_index`.
+      properties:
+        position: { type: integer, description: Nullbasierter Zeilenindex. }
+        stop_id: { type: integer, description: '`consolidated_stops.id`' }
+        stop_name: { type: string }
+        repeat_index:
+          type: integer
+          description: 0 beim ersten Vorkommen dieses Halts auf dem Laufweg, 1 beim zweiten.
+
+    TimetableTrip:
+      type: object
+      required: [id, signature, mode, cells]
+      properties:
+        id: { type: integer }
+        signature:
+          type: string
+          description: SHA256 über Linie, Fahrplantyp und Abfahrts-Zeitsequenz — stabil über Feed-Builds hinweg.
+        mode: { type: string }
+        departure_time: { type: string, nullable: true, example: '07:00:00' }
+        arrival_time: { type: string, nullable: true, example: '07:25:00' }
+        cells:
+          type: array
+          description: >
+            Zeiten als `HH:MM`, **positionsgleich zu `rows`**. `null` heißt: Diese Fahrt bedient
+            die Zeile nicht (Kurzläufer, abweichende Variante). Stunden über 24 bleiben erhalten
+            (`25:10`) — GTFS-Zeiten sind Netz-Lokalzeit relativ zum Betriebstag und werden **nicht**
+            in eine Zeitzone umgerechnet.
+          items: { type: string, nullable: true }
+
+    TimetableDirection:
+      type: object
+      required: [key, start_stop, end_stop, trip_count, variant_count, alignment_warning, rows, trips]
+      properties:
+        key: { type: string, description: 'Stabiler Schlüssel `<first_stop_id>>><last_stop_id>`.' }
+        start_stop: { type: string }
+        end_stop: { type: string }
+        trip_count: { type: integer }
+        variant_count:
+          type: integer
+          description: >
+            Zahl verschiedener Haltefolgen in dieser Richtung. Über 1 heißt: Kurzläufer oder
+            Umleitungen wurden auf eine gemeinsame Zeilenachse ausgerichtet. Netzweit trifft das
+            58 von 965 Richtungen, mit bis zu sieben Varianten.
+        alignment_warning:
+          type: boolean
+          description: >
+            `true`, wenn die ausgerichtete Achse mehr als das 1,5-fache der längsten Einzelvariante
+            umfasst — dann sind die Varianten so verschieden, dass eine gemeinsame Tabelle in die
+            Irre führen kann. Am Produktivbestand tritt das derzeit **nirgends** auf (schlechtester
+            Wert 1,29).
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/TimetableRow' }
+        trips:
+          type: array
+          items: { $ref: '#/components/schemas/TimetableTrip' }
+
+    TimetableResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [line_version, period, directions]
+          properties:
+            line_version:
+              allOf:
+                - $ref: '#/components/schemas/LineVersion'
+                - type: object
+                  properties:
+                    trip_count: { type: integer }
+            period: { $ref: '#/components/schemas/SchedulePeriod' }
+            directions:
+              type: array
+              description: Nach Fahrtenzahl absteigend.
+              items: { $ref: '#/components/schemas/TimetableDirection' }
+
     LineVersionsResponse:
       type: object
       required: [data]
@@ -1021,6 +1106,54 @@ paths:
               schema: { $ref: '#/components/schemas/CoverageResponse' }
         '401':
           description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/line-versions/{lineVersion}/timetable:
+    parameters:
+      - name: lineVersion
+        in: path
+        required: true
+        description: '`line_versions.id` — die Fahrplan-Version, deren Inhalt gezeigt wird.'
+        schema: { type: integer }
+    get:
+      operationId: getTimetable
+      summary: Fahrplan einer Linien-Version als Matrix
+      description: >
+        Der vollständige Fahrplan einer Linien-Version im Fahrplanbuch-Format: Halte als Zeilen,
+        Fahrten als Spalten. Gruppiert nach Richtung (erster und letzter Halt), innerhalb einer
+        Richtung nach Abfahrtszeit sortiert.
+
+
+        **Warum an der Version und nicht an (Linie, Fahrplantyp):** Für ein Paar können mehrere
+        Versionen nebeneinander bestehen — eine für den Zeitraum bis zum Fahrplanwechsel, eine
+        danach. Ein Endpunkt, der implizit „die neueste" wählte, verschluckte diese Unterscheidung.
+        Die IDs liefert `GET /api/v1/admin/line-versions`.
+
+
+        **Kein Periodenfilter:** Auch die Fahrpläne eingefrorener Perioden bleiben abrufbar — genau
+        dafür gibt es das Konsolidat. `period.status` sagt, ob es sich um Historie handelt.
+
+
+        Innerhalb einer Richtung können mehrere Haltefolgen vorkommen (Kurzläufer, Umleitungen).
+        Sie werden auf **eine** Zeilenachse ausgerichtet; eine Fahrt, die eine Zeile nicht bedient,
+        trägt dort `null`. Siehe `variant_count` und `alignment_warning`.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Fahrplan der Version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimetableResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannte Linien-Version
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

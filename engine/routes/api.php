@@ -11,6 +11,7 @@ use App\Http\Controllers\Admin\LineVersionController;
 use App\Http\Controllers\Admin\PeriodChangeOfferController;
 use App\Http\Controllers\Admin\SchedulePeriodController;
 use App\Http\Controllers\Admin\SchoolHolidayController;
+use App\Http\Controllers\Admin\TimetableController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\StopController;
@@ -47,6 +48,10 @@ Route::prefix('v1')->group(function (): void {
 
             // Abdeckung des Konsolidats: welche Zeiträume sind abrufbar, wo sind Lücken
             Route::get('coverage', [CoverageController::class, 'index'])->name('admin.coverage.index');
+
+            // Fahrplan einer Version als Matrix: Halte als Zeilen, Fahrten als Spalten
+            Route::get('line-versions/{lineVersion}/timetable', [TimetableController::class, 'show'])
+                ->name('admin.line-versions.timetable');
 
             // Fahrplanperioden — netzweit, kuratiert (FAHRPLANPERIODEN §4.1)
             Route::get('schedule-periods', [SchedulePeriodController::class, 'index'])->name('admin.schedule-periods.index');

@@ -8,6 +8,7 @@ import CalendarConfigView from '../views/CalendarConfigView.vue'
 import ScheduleVersionsView from '../views/ScheduleVersionsView.vue'
 import SchedulePeriodsView from '../views/SchedulePeriodsView.vue'
 import CoverageView from '../views/CoverageView.vue'
+import TimetableView from '../views/TimetableView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -18,6 +19,8 @@ export const router = createRouter({
     { path: '/lines/colors', name: 'line-colors', component: LineColorsView },
     { path: '/calendar', name: 'calendar', component: CalendarConfigView },
     { path: '/versions', name: 'versions', component: ScheduleVersionsView },
+    // Erste Route mit Query-Auswahl: Ein Fahrplan soll verlinkbar sein.
+    { path: '/fahrplan', name: 'timetable', component: TimetableView },
     { path: '/periods', name: 'periods', component: SchedulePeriodsView },
     { path: '/coverage', name: 'coverage', component: CoverageView },
     { path: '/', redirect: '/imports' },

@@ -706,6 +706,89 @@ components:
               description: Nach Fahrtenzahl absteigend.
               items: { $ref: '#/components/schemas/TimetableDirection' }
 
+    DiffTrip:
+      type: object
+      required: [id, signature, start_stop, end_stop, stop_count]
+      properties:
+        id: { type: integer }
+        signature: { type: string }
+        start_stop: { type: string }
+        end_stop: { type: string }
+        departure_time: { type: string, nullable: true }
+        arrival_time: { type: string, nullable: true }
+        stop_count: { type: integer }
+
+    DiffStopRow:
+      type: object
+      required: [stop_name, status]
+      description: Eine Zeile des Halt-für-Halt-Vergleichs zweier gepaarter Fahrten.
+      properties:
+        stop_id: { type: integer, nullable: true }
+        stop_name: { type: string }
+        from_time: { type: string, nullable: true }
+        to_time: { type: string, nullable: true }
+        delta_seconds:
+          type: integer
+          nullable: true
+          description: '`to` minus `from`; nur gesetzt, wenn beide Seiten den Halt bedienen.'
+        status:
+          type: string
+          enum: [equal, shifted, only_from, only_to]
+
+    DiffPair:
+      type: object
+      required: [reason, uniform_shift, from_trip, to_trip]
+      properties:
+        reason:
+          type: string
+          enum: [time, route, time_and_route]
+          description: >
+            `time` = nur die Zeiten haben sich verschoben, `route` = der Laufweg hat sich geändert,
+            `time_and_route` = beides.
+          
+        shift_seconds:
+          type: integer
+          nullable: true
+          description: Versatz am ersten gemeinsamen Halt — das, was man als „fährt eine Minute später" liest.
+        uniform_shift:
+          type: boolean
+          description: Alle gemeinsamen Halte sind um denselben Betrag verschoben (der häufige Fall).
+        from_trip: { $ref: '#/components/schemas/DiffTrip' }
+        to_trip: { $ref: '#/components/schemas/DiffTrip' }
+        stops:
+          type: array
+          description: Nur bei `include=stops`.
+          items: { $ref: '#/components/schemas/DiffStopRow' }
+
+    LineVersionDiffResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [from, to, summary, changed, added, removed]
+          properties:
+            from: { $ref: '#/components/schemas/LineVersion' }
+            to: { $ref: '#/components/schemas/LineVersion' }
+            summary:
+              type: object
+              properties:
+                unchanged: { type: integer }
+                changed: { type: integer }
+                added: { type: integer }
+                removed: { type: integer }
+                from_trip_count: { type: integer }
+                to_trip_count: { type: integer }
+            changed:
+              type: array
+              items: { $ref: '#/components/schemas/DiffPair' }
+            added:
+              type: array
+              items: { $ref: '#/components/schemas/DiffTrip' }
+            removed:
+              type: array
+              items: { $ref: '#/components/schemas/DiffTrip' }
+
     LineVersionsResponse:
       type: object
       required: [data]
@@ -1106,6 +1189,69 @@ paths:
               schema: { $ref: '#/components/schemas/CoverageResponse' }
         '401':
           description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/line-version-diff:
+    get:
+      operationId: getLineVersionDiff
+      summary: Zwei Linien-Versionen vergleichen
+      description: >
+        Was unterscheidet zwei Fahrplan-Versionen derselben Linie und desselben Fahrplantyps?
+        Die Versionen-Ansicht zeigt, **dass** ein Wechsel stattfand; dieser Endpunkt zeigt, **welche
+        Fahrten** betroffen sind.
+
+
+        **Verfahren.** Eine Version ist definiert als die sortierte Menge ihrer Fahrt-Signaturen —
+        der Vergleich beginnt deshalb als Multiset-Abgleich dieser Signaturen. Fahrten mit gleicher
+        Signatur gelten als unverändert.
+
+
+        Die Signatur enthält allerdings **keine Halte** und nur Minuten
+        (`SHA(Linie | Fahrplantyp | HH:MM-Abfahrtssequenz)`). Ein reiner Laufweg-Wechsel bei
+        gleichen Zeiten erschiene damit als „unverändert" — deshalb werden gepaarte Signaturen
+        zusätzlich auf gleiche Haltefolge geprüft und bei Abweichung zu *geändert* herabgestuft
+        (`reason: route`).
+
+
+        Was danach übrig bleibt, wird nach Start- und Zielhalt gebündelt und innerhalb dieser
+        Bündel nach nächstgelegener Abfahrtszeit gepaart. Über einer Stunde Abstand wird nicht mehr
+        gepaart — dann sind es eine entfallene und eine neue Fahrt, keine verschobene. Der am
+        Produktivbestand gemessene Extremfall liegt bei 43 Minuten.
+
+
+        Beide Versionen müssen dieselbe Periode, Linie und denselben Fahrplantyp tragen; sonst 422.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: '`line_versions.id` der älteren Version.'
+          schema: { type: integer }
+        - name: to
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: include
+          in: query
+          required: false
+          description: '`stops` ergänzt je geänderter Fahrt den Halt-für-Halt-Vergleich.'
+          schema: { type: string, enum: [stops] }
+      responses:
+        '200':
+          description: Unterschied der beiden Versionen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineVersionDiffResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannte Version, identische IDs, oder verschiedene Linie/Fahrplantyp/Periode
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

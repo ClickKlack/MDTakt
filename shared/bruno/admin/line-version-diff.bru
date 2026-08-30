@@ -1,0 +1,96 @@
+meta {
+  name: Line Version Diff
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/line-version-diff?from=145&to=174&include=stops
+  body: none
+  auth: bearer
+}
+
+params:query {
+  from: 145
+  to: 174
+  include: stops
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.summary.unchanged: isNumber
+}
+
+docs {
+  # Zwei Linien-Versionen vergleichen (Admin)
+
+  Die Versionen-Ansicht zeigt, *dass* ein Fahrplanwechsel stattfand. Dieser Endpunkt zeigt,
+  *welche Fahrten* betroffen sind. Die IDs stammen aus `GET /api/v1/admin/line-versions`.
+
+  Beispiel-Response (Linie 1 Mo-Fr, v1 gegen v2 — der reale Wechsel zum 21.09.2026):
+
+  ```json
+  {
+    "data": {
+      "summary": {
+        "unchanged": 390, "changed": 3, "added": 0, "removed": 0,
+        "from_trip_count": 393, "to_trip_count": 393
+      },
+      "changed": [
+        {
+          "reason": "time",
+          "shift_seconds": 60,
+          "uniform_shift": true,
+          "from_trip": { "start_stop": "Sudenburg (Kroatenweg)",
+                         "end_stop": "Westerhüsen (Betriebshof)",
+                         "departure_time": "18:39:00", "stop_count": 25 },
+          "to_trip":   { "departure_time": "18:40:00", "stop_count": 25 },
+          "stops": [
+            { "stop_name": "Sudenburg (Kroatenweg)", "from_time": "18:39",
+              "to_time": "18:40", "delta_seconds": 60, "status": "shifted" }
+          ]
+        }
+      ],
+      "added": [],
+      "removed": []
+    }
+  }
+  ```
+
+  ## Wie der Vergleich arbeitet
+
+  Eine Version *ist* die sortierte Menge ihrer Fahrt-Signaturen — der Abgleich beginnt deshalb
+  als **Multiset-Vergleich** dieser Signaturen. Als Menge zu vergleichen waere falsch: Das Schema
+  laesst mehrere Fahrten mit derselben Signatur je Version zu.
+
+  **Die Signatur hat eine Blindstelle.** Sie lautet `SHA(Linie | Fahrplantyp | HH:MM-Sequenz)` —
+  **ohne Halte** und nur minutengenau. Ein reiner Laufweg-Wechsel bei gleichen Zeiten erschiene
+  als "unveraendert". Gepaarte Signaturen werden deshalb zusaetzlich auf gleiche Haltefolge
+  geprueft und bei Abweichung zu *geaendert* herabgestuft (`reason: route`). Ein Versatz unter
+  einer Minute bleibt prinzipbedingt unsichtbar.
+
+  **Der Rest wird gepaart**, nicht als neu+entfallen ausgegeben: gebuendelt nach Start- und
+  Zielhalt, darin nach naechstgelegener Abfahrtszeit. Ueber **einer Stunde** Abstand wird nicht
+  mehr gepaart — dann sind es zwei verschiedene Fahrten. Der real gemessene Extremfall liegt bei
+  43 Minuten (20:15 → 20:58), bei einer Toleranz von 30 Minuten waere er zerbrochen.
+
+  `uniform_shift: true` heisst, dass alle gemeinsamen Halte um denselben Betrag verschoben sind —
+  die Fahrt faehrt schlicht spaeter. Sonst lohnt der Blick in `stops`.
+
+  Ohne `include=stops` bleibt der Halt-fuer-Halt-Vergleich weg und die Antwort klein.
+
+  | Fehlerfall | Status |
+  |---|---|
+  | `from` oder `to` unbekannt | 422 |
+  | `from` gleich `to` | 422 |
+  | verschiedene Linie, Fahrplantyp oder Periode | 422 |
+  | kein gueltiger Admin-Token | 401 |
+}

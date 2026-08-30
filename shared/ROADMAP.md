@@ -19,7 +19,7 @@
 | **I-09** | Collector-Integration | Collector | Automatischer GTFS-Import & Sichtungs-Sync vom NAS | ⬜ |
 | **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen | ⬜ |
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
-| **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f |
+| **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f, Fahrplan + Diff |
 | **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ✅ |
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
@@ -478,6 +478,30 @@ Fahrplanwechsel) — der aus vielen rollierenden Importen zusammenwächst und Fe
       Annehmen legt die Periode an und nimmt die Versionen ab dem Wechseltag zurück; Ablehnen belässt sie
       als gewöhnliche Linien-Versionen
 - [x] Admin-Ansichten „Fahrplanperioden" (CRUD + Vorschlags-Banner) und „Versionen" (Historie je Linie/Typ)
+
+### (D) Fahrplan-Ansicht und Versions-Diff (ergänzt 30.08.2026)
+
+Nicht ursprünglich geplant, sondern aus dem Bedarf entstanden, den konsolidierten Fahrplan
+überhaupt sehen zu können. Gehört zu I-12 (b), nicht zu einer eigenen Iteration.
+
+- [x] `GET /api/v1/admin/line-versions/{id}/timetable` — Halte als Zeilen, Fahrten als Spalten,
+      gruppiert nach Richtung. An der `line_version` verankert, nicht an (Linie, Fahrplantyp):
+      Für ein Paar bestehen mehrere Versionen nebeneinander
+- [x] **Zeilenachse = Position in der Haltefolge**, nicht Halt-Identität. 1.022 von 18.193 Fahrten
+      berühren denselben Halt zweimal (Wendeschleifen, Stichabstecher)
+- [x] `StopSequenceAligner` bringt abweichende Laufwege einer Richtung auf eine gemeinsame Achse
+      (progressive Verschmelzung über die längste gemeinsame Teilfolge). Am Realbestand: 937 von
+      965 Richtungen ergeben die Achse in Länge der längsten Variante, keine überschreitet die
+      1,5-fach-Warnschwelle, schlechtester Quotient 1,29
+- [x] `GET /api/v1/admin/line-version-diff` — Unterschied zweier Versionen auf Fahrt-Ebene.
+      Multiset-Abgleich der Signaturen, Gegenprüfung der Haltefolge (die Signatur ist haltfrei —
+      ein reiner Laufweg-Wechsel erschiene sonst als „unverändert"), Paarung des Rests über
+      Start/Ziel und nächstgelegene Abfahrt, Toleranz 60 Minuten
+- [x] Admin: Reiter „Fahrplan" mit Auswahl Linie/Typ/Version; A-B-Auswahl und Vergleichsansicht
+      in „Versionen"
+- [ ] **Kurs je Fahrt anzeigen** — setzt I-04 bis I-06 voraus. Es gibt heute keine Sichtungen, kein
+      `Sighting`-Model, und `block_id`/`direction_id` sind im gesamten Feed NULL. Die
+      Kurs↔Signatur-Zuordnung ist Stopp-Regel (INTEGRATION §6.4)
 
 ### (C) Konsolidat-Datenbestand
 - [x] `consolidated_stops` + `consolidated_stop_versions` (Dedup: ≤ 12 m + normalisierter Name),

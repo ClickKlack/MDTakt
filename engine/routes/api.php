@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
 use App\Http\Controllers\Admin\LineColorController;
 use App\Http\Controllers\Admin\LineVersionController;
+use App\Http\Controllers\Admin\LineVersionDiffController;
 use App\Http\Controllers\Admin\PeriodChangeOfferController;
 use App\Http\Controllers\Admin\SchedulePeriodController;
 use App\Http\Controllers\Admin\SchoolHolidayController;
@@ -48,6 +49,10 @@ Route::prefix('v1')->group(function (): void {
 
             // Abdeckung des Konsolidats: welche Zeiträume sind abrufbar, wo sind Lücken
             Route::get('coverage', [CoverageController::class, 'index'])->name('admin.coverage.index');
+
+            // Unterschied zweier Versionen auf Fahrt-Ebene
+            Route::get('line-version-diff', [LineVersionDiffController::class, 'show'])
+                ->name('admin.line-version-diff');
 
             // Fahrplan einer Version als Matrix: Halte als Zeilen, Fahrten als Spalten
             Route::get('line-versions/{lineVersion}/timetable', [TimetableController::class, 'show'])

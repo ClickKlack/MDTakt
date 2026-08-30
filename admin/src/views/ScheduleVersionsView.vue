@@ -28,6 +28,52 @@ function select(typ: string | null): void {
   void load()
 }
 
+/**
+ * Auswahl für den Vergleich. Zwei Versionen sind nur vergleichbar, wenn sie zu derselben Linie
+ * und demselben Fahrplantyp gehören — die Auswahl setzt das durch, statt den Nutzer in einen
+ * 422-Fehler laufen zu lassen.
+ */
+const vergleichA = ref<{ id: number; line: string; day_type: string; version_no: number } | null>(null)
+const vergleichB = ref<{ id: number; line: string; day_type: string; version_no: number } | null>(null)
+
+function waehlbar(version: { line: string; day_type: string; id: number }): boolean {
+  const gesetzt = vergleichA.value ?? vergleichB.value
+  if (!gesetzt) return true
+  return gesetzt.line === version.line && gesetzt.day_type === version.day_type
+}
+
+function markiere(version: { id: number; line: string; day_type: string; version_no: number }): void {
+  if (vergleichA.value?.id === version.id) {
+    vergleichA.value = null
+    return
+  }
+  if (vergleichB.value?.id === version.id) {
+    vergleichB.value = null
+    return
+  }
+  if (!waehlbar(version)) {
+    // Andere Linie oder anderer Typ: Auswahl neu beginnen statt eine unmögliche zu bilden.
+    vergleichA.value = version
+    vergleichB.value = null
+    return
+  }
+  if (!vergleichA.value) {
+    vergleichA.value = version
+  } else if (!vergleichB.value) {
+    vergleichB.value = version
+  } else {
+    vergleichA.value = version
+    vergleichB.value = null
+  }
+}
+
+/** Die ältere Version steht links — sonst läse sich der Vergleich rückwärts. */
+const vergleichZiel = computed(() => {
+  if (!vergleichA.value || !vergleichB.value) return null
+  const [von, nach] = [vergleichA.value, vergleichB.value].sort((x, y) => x.version_no - y.version_no)
+  return { name: 'versions-diff', query: { from: String(von.id), to: String(nach.id) } }
+})
+
 /** Linien mit mehr als einer Version je Typ — dort hat sich der Fahrplan geändert. */
 const geaenderteLinien = computed<number>(() => {
   if (!data.value) return 0
@@ -79,6 +125,34 @@ onMounted(load)
             </div>
             <div class="text-xs text-slate-400">offen = am Rand des Feed-Fensters, wahre Grenze unbekannt</div>
           </div>
+        </div>
+
+        <!-- Vergleichsleiste — erscheint, sobald eine Version markiert ist -->
+        <div
+          v-if="vergleichA"
+          class="mt-6 flex flex-wrap items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3"
+        >
+          <span class="text-sm text-slate-700">
+            Vergleich: Linie {{ vergleichA.line }} ·
+            <strong>v{{ vergleichA.version_no }}</strong>
+            <template v-if="vergleichB"> gegen <strong>v{{ vergleichB.version_no }}</strong></template>
+            <span v-else class="text-slate-500"> — zweite Version wählen</span>
+          </span>
+
+          <RouterLink
+            v-if="vergleichZiel"
+            :to="vergleichZiel"
+            class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
+          >
+            Unterschiede zeigen
+          </RouterLink>
+
+          <button
+            class="text-sm text-slate-500 hover:text-slate-800"
+            @click="vergleichA = null; vergleichB = null"
+          >
+            Auswahl aufheben
+          </button>
         </div>
 
         <!-- Typ-Filter -->
@@ -140,6 +214,32 @@ onMounted(load)
                     </span>
                   </td>
                   <td class="px-4 py-1.5 text-right whitespace-nowrap">
+                    <!-- Vergleichsauswahl: A und B müssen dieselbe Linie und denselben Typ haben. -->
+                    <button
+                      class="mr-3 rounded border px-2 py-0.5 text-xs transition"
+                      :class="
+                        vergleichA?.id === version.id || vergleichB?.id === version.id
+                          ? 'border-slate-800 bg-slate-800 text-white'
+                          : waehlbar({ line: linie.line, day_type: version.day_type, id: version.id })
+                            ? 'border-slate-300 text-slate-500 hover:bg-slate-100'
+                            : 'border-slate-200 text-slate-300'
+                      "
+                      :title="
+                        waehlbar({ line: linie.line, day_type: version.day_type, id: version.id })
+                          ? 'Für den Vergleich auswählen'
+                          : 'Nur Versionen derselben Linie und desselben Fahrplantyps sind vergleichbar'
+                      "
+                      @click="markiere({ id: version.id, line: linie.line, day_type: version.day_type, version_no: version.version_no })"
+                    >
+                      {{
+                        vergleichA?.id === version.id
+                          ? 'A'
+                          : vergleichB?.id === version.id
+                            ? 'B'
+                            : 'vergleichen'
+                      }}
+                    </button>
+
                     <!-- Von „hier hat sich etwas geändert" direkt in den Fahrplan dieser Version. -->
                     <RouterLink
                       :to="{

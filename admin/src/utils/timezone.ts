@@ -82,3 +82,22 @@ export function formatFeedVersion(value: string | null | undefined): string {
   }
   return value
 }
+
+/**
+ * Zeitversatz zwischen zwei Fahrplan-Versionen, z. B. „+1 Min", „−43 Min", „±0".
+ * Reine Dauer, keine Uhrzeit — deshalb keine Zeitzonen-Umrechnung.
+ */
+export function formatClockDelta(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) {
+    return '—'
+  }
+  if (seconds === 0) {
+    return '±0'
+  }
+
+  const minuten = Math.round(Math.abs(seconds) / 60)
+  const vorzeichen = seconds > 0 ? '+' : '−'
+
+  // Unter einer Minute wuerde „+0 Min" stehen — die Sekunden sind dann die ehrlichere Angabe.
+  return minuten === 0 ? `${vorzeichen}${Math.abs(seconds)} Sek` : `${vorzeichen}${minuten} Min`
+}

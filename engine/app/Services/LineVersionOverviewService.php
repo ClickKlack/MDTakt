@@ -17,8 +17,6 @@ use Illuminate\Support\Facades\DB;
  */
 final class LineVersionOverviewService
 {
-    public function __construct(private readonly ServiceDayResolver $serviceDays) {}
-
     /**
      * @return array{period: SchedulePeriod|null, coverage: array<string, mixed>|null, lines: array<int, array<string, mixed>>}
      */
@@ -75,45 +73,33 @@ final class LineVersionOverviewService
     }
 
     /**
-     * Fahrten je Version — gezählt am ersten Tag ihres ersten Intervalls.
+     * Fahrten je Version — aus dem Konsolidat.
      *
-     * Null, wenn dieser Tag außerhalb des aktuellen Roh-Bestands liegt: Das Konsolidat hält
-     * die Historie, der Roh-Feed nur das letzte Fenster. Eine Zahl zu erfinden wäre schlechter
-     * als sie wegzulassen.
+     * Bis Phase C wurde hier am Roh-Bestand gezählt, am ersten Tag des ersten Intervalls; lag
+     * dieser Tag außerhalb des Feed-Fensters, blieb die Spalte leer. Das war damals ehrlich,
+     * weil es die Fahrten schlicht nicht mehr gab — heute ist es falsch: Genau diese Historie
+     * hält das Konsolidat, und eine Version von August erschien als „keine Fahrten", obwohl
+     * ihre 393 Fahrten dauerhaft gespeichert sind.
+     *
+     * Leer bleibt die Angabe jetzt nur noch, wenn eine Version wirklich keinen Inhalt trägt —
+     * dieselbe Aussage, die die Abdeckungs-Anzeige als `versions_without_content` führt.
      *
      * @param  Collection<int, LineVersion>  $versionen
      * @return array<int, int>
      */
     private function tripCounts(Collection $versionen): array
     {
-        $window = $this->serviceDays->feedWindow();
-
-        if ($window === null) {
+        if ($versionen->isEmpty()) {
             return [];
         }
 
-        $proTag = $this->serviceDays->activeServiceIdsForRange(
-            $window['from']->toDateString(),
-            $window['to']->toDateString(),
-        );
-
-        $result = [];
-
-        foreach ($versionen as $version) {
-            $stichtag = $version->intervals->first()?->valid_from->toDateString();
-
-            if ($stichtag === null || ! isset($proTag[$stichtag])) {
-                continue;
-            }
-
-            $result[$version->id] = DB::table('trips')
-                ->join('routes', 'routes.route_id', '=', 'trips.route_id')
-                ->where('routes.route_short_name', $version->line)
-                ->whereIn('trips.service_id', $proTag[$stichtag])
-                ->count();
-        }
-
-        return $result;
+        return DB::table('consolidated_trips')
+            ->whereIn('line_version_id', $versionen->pluck('id'))
+            ->select('line_version_id', DB::raw('count(*) as anzahl'))
+            ->groupBy('line_version_id')
+            ->pluck('anzahl', 'line_version_id')
+            ->map(static fn ($anzahl): int => (int) $anzahl)
+            ->all();
     }
 
     /**

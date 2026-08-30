@@ -6,6 +6,8 @@ namespace Tests\Feature;
 
 use App\Enums\PeriodOrigin;
 use App\Enums\PeriodStatus;
+use App\Models\ConsolidatedStop;
+use App\Models\ConsolidatedTrip;
 use App\Models\LineVersion;
 use App\Models\LineVersionInterval;
 use App\Models\SchedulePeriod;
@@ -54,6 +56,54 @@ final class AdminLineVersionsTest extends TestCase
         ]);
 
         return $periode;
+    }
+
+    public function test_trip_count_comes_from_the_consolidate_not_the_raw_feed(): void
+    {
+        $this->periodeMitVersionen();
+        $alt = LineVersion::query()->where('version_no', 1)->sole();
+        $neu = LineVersion::query()->where('version_no', 2)->sole();
+
+        // Beide Versionen tragen konsolidierte Fahrten. Version 1 liegt im August und damit
+        // laengst ausserhalb des aktuellen Feed-Fensters — im Roh-Bestand gibt es sie nicht
+        // mehr. Genau dafuer existiert das Konsolidat.
+        $halt = ConsolidatedStop::query()->create([
+            'anchor_lat' => '52.1400000', 'anchor_lon' => '11.6300000',
+            'name_key' => 'alpha', 'first_seen_at' => now(), 'last_seen_at' => now(),
+        ]);
+        foreach ([[$alt, 3], [$neu, 5]] as [$version, $anzahl]) {
+            for ($i = 0; $i < $anzahl; $i++) {
+                ConsolidatedTrip::query()->create([
+                    'line_version_id' => $version->id,
+                    'signature' => str_pad((string) $version->id.$i, 64, '0'),
+                    'route_type' => 0,
+                    'first_stop_id' => $halt->id, 'last_stop_id' => $halt->id,
+                ]);
+            }
+        }
+
+        $daten = $this->withToken($this->token())
+            ->getJson('/api/v1/admin/line-versions')
+            ->assertOk()
+            ->json('data.lines.0.versions');
+
+        // Vorher stand hier null ("—"), weil am Roh-Bestand gezaehlt wurde.
+        $this->assertSame(3, $daten[0]['trip_count'], 'Version ausserhalb des Feed-Fensters muss ihre Fahrten zeigen');
+        $this->assertSame(5, $daten[1]['trip_count']);
+    }
+
+    public function test_a_version_without_consolidated_content_reports_no_count(): void
+    {
+        $this->periodeMitVersionen();
+
+        $daten = $this->withToken($this->token())
+            ->getJson('/api/v1/admin/line-versions')
+            ->assertOk()
+            ->json('data.lines.0.versions');
+
+        // Kein Inhalt konsolidiert — dann ist "keine Angabe" die richtige Aussage,
+        // dieselbe, die die Abdeckungs-Anzeige als versions_without_content fuehrt.
+        $this->assertNull($daten[0]['trip_count']);
     }
 
     public function test_endpoint_requires_auth(): void

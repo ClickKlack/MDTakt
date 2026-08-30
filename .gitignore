@@ -39,3 +39,4 @@ shared/bruno/environments/local.bru
 *.local.md
 scripts/*.local.env
 scripts/backup.local.env
+scripts/*.local.sh

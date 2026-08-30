@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\FahrplanTyp;
+use Database\Factories\LineVersionFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -25,6 +27,9 @@ use Illuminate\Support\Carbon;
  */
 final class LineVersion extends Model
 {
+    /** @use HasFactory<LineVersionFactory> */
+    use HasFactory;
+
     public $timestamps = false;
 
     protected $fillable = ['period_id', 'line', 'day_type', 'version_no', 'fingerprint', 'first_seen_at', 'last_seen_at'];

@@ -28,7 +28,10 @@ use Illuminate\Support\Facades\Log;
  */
 final class ConsolidatedScheduleService
 {
-    public function __construct(private readonly FahrplanTypClassifier $classifier) {}
+    public function __construct(
+        private readonly FahrplanTypClassifier $classifier,
+        private readonly ConsolidatedStopNameResolver $stopNames,
+    ) {}
 
     /**
      * Linienverzeichnis aus dem Konsolidat — gleiche Form wie {@see LineDirectoryService},
@@ -293,13 +296,7 @@ final class ConsolidatedScheduleService
      */
     private function stopNames(): array
     {
-        return DB::table('consolidated_stop_versions as v')
-            ->orderBy('v.consolidated_stop_id')
-            ->orderBy('v.valid_to')
-            ->get(['v.consolidated_stop_id', 'v.name'])
-            ->keyBy('consolidated_stop_id')
-            ->map(static fn (object $r): string => $r->name)
-            ->all();
+        return $this->stopNames->namesForAll();
     }
 
     /**

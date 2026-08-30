@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Database\Factories\ConsolidatedStopFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
@@ -20,6 +22,9 @@ use Illuminate\Support\Carbon;
  */
 final class ConsolidatedStop extends Model
 {
+    /** @use HasFactory<ConsolidatedStopFactory> */
+    use HasFactory;
+
     public $timestamps = false;
 
     protected $fillable = ['anchor_lat', 'anchor_lon', 'name_key', 'first_seen_at', 'last_seen_at'];

@@ -6,6 +6,8 @@ namespace App\Models;
 
 use App\Enums\PeriodOrigin;
 use App\Enums\PeriodStatus;
+use Database\Factories\SchedulePeriodFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
@@ -22,6 +24,9 @@ use Illuminate\Support\Carbon;
  */
 final class SchedulePeriod extends Model
 {
+    /** @use HasFactory<SchedulePeriodFactory> */
+    use HasFactory;
+
     protected $fillable = ['label', 'valid_from', 'valid_to', 'status', 'created_via'];
 
     /**

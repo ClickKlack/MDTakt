@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Database\Factories\LineVersionIntervalFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
@@ -21,6 +23,9 @@ use Illuminate\Support\Carbon;
  */
 final class LineVersionInterval extends Model
 {
+    /** @use HasFactory<LineVersionIntervalFactory> */
+    use HasFactory;
+
     protected $fillable = ['line_version_id', 'valid_from', 'valid_to', 'from_confirmed', 'to_confirmed'];
 
     /**

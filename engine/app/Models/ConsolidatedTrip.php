@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Database\Factories\ConsolidatedTripFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -20,6 +22,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 final class ConsolidatedTrip extends Model
 {
+    /** @use HasFactory<ConsolidatedTripFactory> */
+    use HasFactory;
+
     public $timestamps = false;
 
     protected $fillable = ['line_version_id', 'signature', 'route_type', 'first_stop_id', 'last_stop_id'];

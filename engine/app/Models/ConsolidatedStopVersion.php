@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Database\Factories\ConsolidatedStopVersionFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
@@ -23,6 +25,9 @@ use Illuminate\Support\Carbon;
  */
 final class ConsolidatedStopVersion extends Model
 {
+    /** @use HasFactory<ConsolidatedStopVersionFactory> */
+    use HasFactory;
+
     public $timestamps = false;
 
     protected $fillable = [

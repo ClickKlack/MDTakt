@@ -483,5 +483,97 @@ final class ScheduleVersionService
             'from_confirmed' => $vonBestaetigt,
             'to_confirmed' => $bisBestaetigt,
         ]);
+
+        $this->displaceOtherVersions($version, $von, $bis);
+    }
+
+    /**
+     * Verdrängt andere Versionen desselben Strangs aus den soeben belegten Tagen.
+     *
+     * Ein Tag trägt genau einen Fahrplan. Beobachtet ein Lauf für einen Tag einen anderen
+     * Fingerprint als ein früherer, gewinnt der neue Lauf (FAHRPLANPERIODEN §5.3) — das
+     * ältere Intervall muss weichen, sonst beanspruchen zwei Versionen denselben Tag und
+     * datumsbezogene Abfragen liefern die Fahrten doppelt.
+     *
+     * Das kommt vor: Ein späterer Feed-Build revidiert den Fahrplan rückwirkend. Real
+     * gemessen am 20.09.2026 — Linie 4, Mo-Fr, 31.08.–18.09., eine Fahrt weniger als eine
+     * Woche zuvor.
+     *
+     * Die entstehenden Schnittkanten gelten als **offen**: Dass an diesem Tag ein anderer
+     * Fahrplan gilt, wissen wir aus zwei verschiedenen Läufen — beobachtet wurde der Wechsel
+     * damit nicht, und eine Bestätigung wäre eine Behauptung (§5.4 b).
+     */
+    private function displaceOtherVersions(LineVersion $version, CarbonImmutable $von, CarbonImmutable $bis): void
+    {
+        // Perioden sind zeitlich disjunkt — ein Konflikt kann nur innerhalb einer entstehen.
+        $fremdeVersionen = LineVersion::query()
+            ->where('period_id', $version->period_id)
+            ->where('line', $version->line)
+            ->where('day_type', $version->day_type)
+            ->whereKeyNot($version->id)
+            ->pluck('id');
+
+        if ($fremdeVersionen->isEmpty()) {
+            return;
+        }
+
+        $betroffen = LineVersionInterval::query()
+            ->whereIn('line_version_id', $fremdeVersionen)
+            ->whereDate('valid_from', '<=', $bis->toDateString())
+            ->whereDate('valid_to', '>=', $von->toDateString())
+            ->get();
+
+        foreach ($betroffen as $fremd) {
+            $fVon = CarbonImmutable::parse($fremd->valid_from->toDateString());
+            $fBis = CarbonImmutable::parse($fremd->valid_to->toDateString());
+            $restLinks = $fVon->lessThan($von);
+            $restRechts = $fBis->greaterThan($bis);
+            $endeBestaetigt = (bool) $fremd->to_confirmed;
+
+            if (! $restLinks && ! $restRechts) {
+                // Vollständig verdrängt. Die Version selbst bleibt mitsamt ihren Fahrten
+                // bestehen — sie hält fest, was der Feed einmal behauptet hat, und ist über
+                // ihre Versions-ID weiterhin abrufbar (entschieden 20.09.2026).
+                $fremd->delete();
+
+                continue;
+            }
+
+            if ($restLinks) {
+                $fremd->update([
+                    'valid_to' => $von->subDay()->toDateString(),
+                    'to_confirmed' => false,
+                ]);
+            }
+
+            if ($restRechts) {
+                if ($restLinks) {
+                    // Der neue Fahrplan schneidet mitten heraus — der rechte Rest wird eigenständig.
+                    LineVersionInterval::query()->create([
+                        'line_version_id' => $fremd->line_version_id,
+                        'valid_from' => $bis->addDay()->toDateString(),
+                        'valid_to' => $fBis->toDateString(),
+                        'from_confirmed' => false,
+                        'to_confirmed' => $endeBestaetigt,
+                    ]);
+                } else {
+                    $fremd->update([
+                        'valid_from' => $bis->addDay()->toDateString(),
+                        'from_confirmed' => false,
+                    ]);
+                }
+            }
+        }
+
+        if ($betroffen->isNotEmpty()) {
+            Log::debug('Older versions displaced from reobserved days', [
+                'line' => $version->line,
+                'day_type' => $version->day_type->value,
+                'winning_version_id' => $version->id,
+                'from' => $von->toDateString(),
+                'to' => $bis->toDateString(),
+                'intervals_touched' => $betroffen->count(),
+            ]);
+        }
     }
 }

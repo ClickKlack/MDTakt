@@ -15,6 +15,7 @@ use App\Models\Stop;
 use App\Models\StopTime;
 use App\Models\Trip;
 use App\Models\TripSignature;
+use App\Services\ConsolidatedScheduleService;
 use App\Services\SchedulePeriodService;
 use App\Services\ScheduleVersionService;
 use App\Services\TripSignatureService;
@@ -313,5 +314,70 @@ final class ScheduleVersionTest extends TestCase
         $intervall = $neueVersion->refresh()->intervals()->orderBy('valid_from')->first();
         $this->assertSame('2026-08-24', $intervall->valid_from->toDateString());
         $this->assertTrue($intervall->from_confirmed, 'Eine gesicherte Grenze darf nicht zurueckfallen');
+    }
+
+    public function test_a_later_run_displaces_an_older_version_from_reobserved_days(): void
+    {
+        $line = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
+
+        // Erster Lauf: ein Fahrplan fuer zwei Wochen.
+        $this->werktagsService('ALT', '2026-08-17', '2026-08-28');
+        $this->fahrt('T-ALT', 'ALT', $line->route_id, ['07:00:00', '07:20:00']);
+        $this->konsolidieren();
+
+        $alteVersion = LineVersion::query()->where('line', '1')->sole();
+        $this->assertSame('2026-08-28', $alteVersion->intervals()->sole()->valid_to->toDateString());
+
+        // Zweiter Lauf: Der Feed revidiert die zweite Woche rueckwirkend.
+        StopTime::query()->delete();
+        Trip::query()->delete();
+        Calendar::query()->delete();
+        $this->werktagsService('NEU', '2026-08-24', '2026-09-04');
+        $this->fahrt('T-NEU', 'NEU', $line->route_id, ['07:05:00', '07:25:00']);
+        $this->konsolidieren();
+
+        // Die alte Version darf die neu beobachteten Tage nicht mehr beanspruchen —
+        // sonst lieferte eine Datumsabfrage fuer den 24.08. beide Fahrplaene.
+        $alt = $alteVersion->refresh()->intervals()->sole();
+        $this->assertSame('2026-08-17', $alt->valid_from->toDateString());
+        $this->assertSame('2026-08-23', $alt->valid_to->toDateString(), 'Der alte Fahrplan endet, wo der neue beginnt');
+
+        $neu = LineVersion::query()->where('line', '1')->where('version_no', 2)->sole();
+        $this->assertSame('2026-08-24', $neu->intervals()->sole()->valid_from->toDateString());
+
+        // Und die Gegenprobe: Kein Tag traegt zwei Fahrplaene.
+        $this->assertSame(
+            1,
+            count(app(ConsolidatedScheduleService::class)->trips(['date' => '2026-08-24', 'line' => '1'])),
+            'Ein Tag darf nur einen Fahrplan liefern',
+        );
+    }
+
+    public function test_a_fully_superseded_version_keeps_its_trips_but_loses_validity(): void
+    {
+        $line = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
+
+        $this->werktagsService('ALT', '2026-08-24', '2026-08-28');
+        $this->fahrt('T-ALT', 'ALT', $line->route_id, ['07:00:00', '07:20:00']);
+        $this->konsolidieren();
+
+        $alteVersion = LineVersion::query()->where('line', '1')->sole();
+        $fahrtenVorher = $alteVersion->consolidatedTrips()->count();
+        $this->assertGreaterThan(0, $fahrtenVorher);
+
+        // Ein spaeterer Lauf ueberdeckt denselben Zeitraum vollstaendig mit anderem Fahrplan.
+        StopTime::query()->delete();
+        Trip::query()->delete();
+        Calendar::query()->delete();
+        $this->werktagsService('NEU', '2026-08-24', '2026-08-28');
+        $this->fahrt('T-NEU', 'NEU', $line->route_id, ['08:00:00', '08:20:00']);
+        $this->konsolidieren();
+
+        // Entschieden am 20.09.2026: Die Version bleibt samt Fahrten bestehen, nur ohne
+        // Gueltigkeit — sie haelt fest, was der Feed einmal behauptet hat.
+        $alteVersion->refresh();
+        $this->assertSame(0, $alteVersion->intervals()->count(), 'Keine Gueltigkeit mehr');
+        $this->assertSame($fahrtenVorher, $alteVersion->consolidatedTrips()->count(), 'Fahrten bleiben erhalten');
+        $this->assertNotNull(LineVersion::query()->find($alteVersion->id), 'Die Version selbst bleibt');
     }
 }

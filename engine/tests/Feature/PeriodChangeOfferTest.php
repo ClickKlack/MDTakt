@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Enums\FahrplanTyp;
 use App\Enums\PeriodOfferStatus;
 use App\Models\Calendar;
+use App\Models\ConsolidatedTrip;
 use App\Models\LineVersion;
 use App\Models\PeriodChangeOffer;
 use App\Models\Route;
@@ -17,6 +19,7 @@ use App\Models\User;
 use App\Services\ScheduleVersionService;
 use App\Services\TripSignatureService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\ConsolidatedFixtures;
 use Tests\TestCase;
 
 /**
@@ -262,6 +265,36 @@ final class PeriodChangeOfferTest extends TestCase
             ->assertJsonPath('data.0.suggested_from', '2026-08-24')
             ->assertJsonPath('data.0.observed_until', '2026-08-28')
             ->assertJsonPath('data.0.single_day_observation', false);
+    }
+
+    public function test_accepting_keeps_a_version_that_lost_its_validity_to_displacement(): void
+    {
+        // Eine Version kann ihre Gueltigkeit auch ohne Periodenwechsel verlieren: Ein spaeterer
+        // Lauf sah an denselben Tagen einen anderen Fahrplan und hat sie verdraengt (§5.3). Sie
+        // haelt fest, was der Feed einmal behauptet hat, und bleibt erhalten — der Rollback darf
+        // sie nicht mitnehmen, sonst haengen ueber cascadeOnDelete auch ihre Fahrten daran.
+        $token = $this->adminToken();
+        $this->netz(10, 4);
+        $this->konsolidieren();
+
+        $offer = PeriodChangeOffer::query()->sole();
+
+        $f = new ConsolidatedFixtures;
+        $verdraengt = $f->version('99', FahrplanTyp::MoFrNormal, 1, SchedulePeriod::query()->sole());
+        $f->fahrt($verdraengt, ['A', 'B'], ['07:00:00', '07:10:00']);
+
+        $this->assertSame(0, $verdraengt->intervals()->count(), 'Aufbau: ohne Gueltigkeit');
+
+        $this->withToken($token)
+            ->postJson("/api/v1/admin/period-change-offers/{$offer->id}/accept", ['label' => 'Neu'])
+            ->assertCreated();
+
+        $this->assertDatabaseHas('line_versions', ['id' => $verdraengt->id]);
+        $this->assertSame(
+            1,
+            ConsolidatedTrip::query()->where('line_version_id', $verdraengt->id)->count(),
+            'Die Fahrten der verdraengten Version bleiben abrufbar',
+        );
     }
 
     public function test_open_offers_are_listed_and_require_auth(): void

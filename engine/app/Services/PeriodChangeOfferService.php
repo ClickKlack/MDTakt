@@ -131,10 +131,25 @@ final class PeriodChangeOfferService
      * Obergrenze ist ein exakt bekanntes Datum und damit gesichert. Versionen, die danach
      * keine Gültigkeit mehr tragen, verschwinden: Sie existierten allein wegen des Wechsels,
      * der jetzt als Periodengrenze geführt wird.
+     *
+     * Entscheidend ist dabei das **allein**: Gelöscht wird nur, was dieser Rollback selbst
+     * verwaist hat. Eine Version kann ihre Gültigkeit auch aus anderem Grund verloren haben —
+     * etwa weil ein späterer Lauf sie aus allen ihren Tagen verdrängt hat (§5.3). Die hält
+     * fest, was der Feed einmal behauptet hat, und bleibt erhalten; über `line_versions`
+     * hinge sonst ein `cascadeOnDelete` auf den konsolidierten Fahrten daran.
      */
     private function rollbackFrom(string $wechseltag): void
     {
         $vortag = CarbonImmutable::parse($wechseltag)->subDay()->toDateString();
+
+        // Vor dem Eingriff merken, wessen Gültigkeit überhaupt berührt wird. Ein Intervall, das
+        // am Wechseltag oder später beginnt, endet auch dort oder später — diese eine Bedingung
+        // deckt beide Fälle ab.
+        $beruehrt = LineVersionInterval::query()
+            ->whereDate('valid_to', '>=', $wechseltag)
+            ->pluck('line_version_id')
+            ->unique()
+            ->all();
 
         LineVersionInterval::query()
             ->whereDate('valid_from', '>=', $wechseltag)
@@ -144,7 +159,10 @@ final class PeriodChangeOfferService
             ->whereDate('valid_to', '>=', $wechseltag)
             ->update(['valid_to' => $vortag, 'to_confirmed' => true]);
 
-        $verwaist = LineVersion::query()->whereDoesntHave('intervals')->get();
+        $verwaist = LineVersion::query()
+            ->whereIn('id', $beruehrt)
+            ->whereDoesntHave('intervals')
+            ->get();
 
         foreach ($verwaist as $version) {
             $version->delete();

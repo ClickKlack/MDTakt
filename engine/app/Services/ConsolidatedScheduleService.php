@@ -8,6 +8,7 @@ use App\Enums\FahrplanTyp;
 use App\Enums\RouteType;
 use App\Models\LineColor;
 use App\Models\LineVersion;
+use App\Support\GtfsTime;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +32,8 @@ final class ConsolidatedScheduleService
     public function __construct(
         private readonly FahrplanTypClassifier $classifier,
         private readonly ConsolidatedStopNameResolver $stopNames,
+        private readonly ConsolidatedTripTimeResolver $tripTimes,
+        private readonly OperatingDayResolver $operatingDay,
     ) {}
 
     /**
@@ -128,7 +131,7 @@ final class ConsolidatedScheduleService
         }
 
         $fahrten = $query->orderBy('lv.line')->orderBy('ct.id')->get();
-        $zeiten = $this->departureAndArrival($fahrten->pluck('id')->all());
+        $zeiten = $this->tripTimes->endpoints($fahrten->pluck('id')->all());
         $namen = $this->stopNames();
 
         Log::debug('Consolidated trip filter executed', [
@@ -184,13 +187,13 @@ final class ConsolidatedScheduleService
             return $this->emptyResult($line, $dayType);
         }
 
-        $zeiten = $this->departureAndArrival($fahrten->pluck('id')->all());
+        $zeiten = $this->tripTimes->endpoints($fahrten->pluck('id')->all());
         $namen = $this->stopNames();
         $versionInfo = $versionen->keyBy('id');
 
         $gruppen = $fahrten
             ->groupBy(static fn (object $f): string => $f->first_stop_id.'>'.$f->last_stop_id)
-            ->map(function (Collection $gruppe) use ($zeiten, $namen, $versionInfo): array {
+            ->map(function (Collection $gruppe) use ($line, $zeiten, $namen, $versionInfo): array {
                 $erste = $gruppe->first();
 
                 return [
@@ -217,7 +220,11 @@ final class ConsolidatedScheduleService
                                 'arrival_time' => $zeiten[$f->id]['arrival'] ?? null,
                             ];
                         })
-                        ->sortBy('departure_time')
+                        // Entlang des Betriebstags sortieren, nicht entlang der Uhr: Auf der
+                        // N1 fährt 22:49 vor 00:19. Und nie lexikalisch — GTFS erlaubt
+                        // "7:00:00" neben "07:00:00", was als String hinter "23:50:00" stünde.
+                        ->sort(fn (array $a, array $b): int => $this->operatingDay->sortKey($line, $a['departure_time'])
+                            <=> $this->operatingDay->sortKey($line, $b['departure_time']))
                         ->values()
                         ->all(),
                 ];
@@ -237,56 +244,6 @@ final class ConsolidatedScheduleService
                 ->unique()->sort()->values()->all(),
             'groups' => $gruppen,
         ];
-    }
-
-    /**
-     * Erste Abfahrt und letzte Ankunft je Fahrt.
-     *
-     * @param  array<int, int>  $tripIds
-     * @return array<int, array{departure: string|null, arrival: string|null}>
-     */
-    private function departureAndArrival(array $tripIds): array
-    {
-        if ($tripIds === []) {
-            return [];
-        }
-
-        $zeiten = [];
-
-        foreach (array_chunk($tripIds, 1000) as $teil) {
-            $rows = DB::table('consolidated_stop_times')
-                ->whereIn('consolidated_trip_id', $teil)
-                ->select(
-                    'consolidated_trip_id',
-                    DB::raw('min(stop_sequence) as first_seq'),
-                    DB::raw('max(stop_sequence) as last_seq'),
-                )
-                ->groupBy('consolidated_trip_id')
-                ->get()
-                ->keyBy('consolidated_trip_id');
-
-            $details = DB::table('consolidated_stop_times')
-                ->whereIn('consolidated_trip_id', $teil)
-                ->select('consolidated_trip_id', 'stop_sequence', 'departure_time', 'arrival_time')
-                ->get();
-
-            foreach ($details as $zeile) {
-                $grenzen = $rows->get($zeile->consolidated_trip_id);
-
-                if ($grenzen === null) {
-                    continue;
-                }
-
-                if ((int) $zeile->stop_sequence === (int) $grenzen->first_seq) {
-                    $zeiten[$zeile->consolidated_trip_id]['departure'] = $zeile->departure_time;
-                }
-                if ((int) $zeile->stop_sequence === (int) $grenzen->last_seq) {
-                    $zeiten[$zeile->consolidated_trip_id]['arrival'] = $zeile->arrival_time;
-                }
-            }
-        }
-
-        return $zeiten;
     }
 
     /**

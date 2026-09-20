@@ -28,6 +28,7 @@ final class TripSignatureService
     public function __construct(
         private readonly ServiceDayResolver $serviceDays,
         private readonly FahrplanTypClassifier $classifier,
+        private readonly OperatingDayResolver $operatingDay,
     ) {}
 
     /**
@@ -49,6 +50,7 @@ final class TripSignatureService
 
         $typenJeService = $this->dayTypesPerService($window['from'], $window['to']);
         $sequenzen = $this->departureSequences();
+        $verschoben = $this->operatingDay->shiftMap();
 
         $rows = [];
         $geschrieben = 0;
@@ -61,7 +63,11 @@ final class TripSignatureService
                 continue;
             }
 
-            foreach ($typenJeService[$trip->service_id] ?? [] as $typ) {
+            // Eine Fahrt vor der Betriebstag-Grenze gehört zum Vortag: Ihr Fahrplantyp ist
+            // der des Vortags, nicht der des Kalendertags, an dem GTFS sie führt.
+            $seite = isset($verschoben[$trip->trip_id]) ? 'previous' : 'same';
+
+            foreach ($typenJeService[$trip->service_id][$seite] ?? [] as $typ) {
                 $rows[] = [
                     'trip_id' => $trip->trip_id,
                     'day_type' => $typ,
@@ -94,22 +100,40 @@ final class TripSignatureService
      * Welche Fahrplantypen bedient eine service_id im Feed-Fenster? Ein Service kann zu
      * mehreren gehören (Mo-So-Muster), ein Typ ohne Tag im Fenster taucht gar nicht auf.
      *
-     * @return array<string, array<int, string>> service_id => day_type-Werte
+     * Getrennt nach den beiden Seiten der Betriebstag-Grenze: Eine Fahrt vor der Grenze
+     * gehört zum Vortag, also gilt für sie der Typ von `date − 1`. Der Service allein
+     * entscheidet den Typ deshalb nicht mehr — erst zusammen mit der Startzeit der Fahrt.
+     *
+     * @return array<string, array{same: array<int, string>, previous: array<int, string>}>
      */
     private function dayTypesPerService(CarbonImmutable $from, CarbonImmutable $to): array
     {
         $proTag = $this->serviceDays->activeServiceIdsForRange($from->toDateString(), $to->toDateString());
 
         $result = [];
+
         foreach ($proTag as $date => $serviceIds) {
-            $typ = $this->classifier->classify(CarbonImmutable::parse($date))->value;
+            $tag = CarbonImmutable::parse($date);
+
+            $typen = [
+                'same' => $this->classifier->classify($tag)->value,
+                'previous' => $this->classifier->classify($tag->subDay())->value,
+            ];
 
             foreach ($serviceIds as $serviceId) {
-                $result[$serviceId][$typ] = true;
+                foreach ($typen as $seite => $typ) {
+                    $result[$serviceId][$seite][$typ] = true;
+                }
             }
         }
 
-        return array_map(static fn (array $typen): array => array_keys($typen), $result);
+        return array_map(
+            static fn (array $seiten): array => [
+                'same' => array_keys($seiten['same'] ?? []),
+                'previous' => array_keys($seiten['previous'] ?? []),
+            ],
+            $result,
+        );
     }
 
     /**

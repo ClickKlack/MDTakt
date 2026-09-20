@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\ConsolidatedTrip;
 use App\Models\LineVersion;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -27,7 +28,10 @@ final class TripConsolidationService
     /** Haltzeiten je Insert — Kompromiss aus Roundtrips und Parametergrenze des Treibers. */
     private const INSERT_CHUNK = 1000;
 
-    public function __construct(private readonly ServiceDayResolver $serviceDays) {}
+    public function __construct(
+        private readonly ServiceDayResolver $serviceDays,
+        private readonly OperatingDayResolver $operatingDay,
+    ) {}
 
     /**
      * @param  array<int, string>  $repraesentativeTage  line_version_id => Tag im beobachteten Intervall
@@ -70,20 +74,43 @@ final class TripConsolidationService
      */
     private function fillVersion(LineVersion $version, string $tag, array $stopMap): int
     {
-        $serviceIds = $this->serviceDays->activeServiceIdsForRange($tag, $tag)[$tag] ?? [];
+        // Der Betriebstag reicht über Mitternacht: Zu ihm gehören die Fahrten dieses
+        // Kalendertags ab der Grenze **und** die Fahrten des Folgetags davor — die Nacht,
+        // die GTFS bereits dem nächsten Tag zuschlägt (siehe OperatingDayResolver).
+        $folgetag = CarbonImmutable::parse($tag)->addDay()->toDateString();
+        $proTag = $this->serviceDays->activeServiceIdsForRange($tag, $folgetag);
 
-        if ($serviceIds === []) {
+        $serviceIds = $proTag[$tag] ?? [];
+        $serviceIdsFolgetag = $proTag[$folgetag] ?? [];
+
+        if ($serviceIds === [] && $serviceIdsFolgetag === []) {
             return 0;
         }
+
+        $verschoben = $this->operatingDay->shiftMap();
 
         $rohFahrten = DB::table('trips')
             ->join('routes', 'routes.route_id', '=', 'trips.route_id')
             ->join('trip_signatures', 'trip_signatures.trip_id', '=', 'trips.trip_id')
             ->where('routes.route_short_name', $version->line)
             ->where('trip_signatures.day_type', $version->day_type->value)
-            ->whereIn('trips.service_id', $serviceIds)
-            ->select('trips.trip_id', 'trip_signatures.signature', 'routes.route_type')
-            ->get();
+            ->where(function ($q) use ($serviceIds, $serviceIdsFolgetag): void {
+                if ($serviceIds !== []) {
+                    $q->whereIn('trips.service_id', $serviceIds);
+                }
+                if ($serviceIdsFolgetag !== []) {
+                    $q->orWhereIn('trips.service_id', $serviceIdsFolgetag);
+                }
+            })
+            ->select('trips.trip_id', 'trips.service_id', 'trip_signatures.signature', 'routes.route_type')
+            ->get()
+            ->filter(function (object $roh) use ($verschoben, $serviceIds, $serviceIdsFolgetag): bool {
+                $gehoertZumVortag = isset($verschoben[$roh->trip_id]);
+                $quelle = $gehoertZumVortag ? $serviceIdsFolgetag : $serviceIds;
+
+                return in_array($roh->service_id, $quelle, true);
+            })
+            ->values();
 
         if ($rohFahrten->isEmpty()) {
             return 0;

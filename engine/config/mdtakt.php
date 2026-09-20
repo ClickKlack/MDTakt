@@ -25,4 +25,32 @@ return [
 
     ],
 
+    'operating_day' => [
+
+        /*
+         * Betriebstag-Wechsel (entschieden 20.09.2026). Eine Fahrt, die vor dieser Uhrzeit
+         * beginnt, gehört zum Betriebstag des **Vortags** — so, wie Verkehrsbetriebe es sonst
+         * mit Zeiten jenseits 24:00 ausdrücken („26:00" für 2 Uhr des Folgetags).
+         *
+         * Der gtfs.de-Feed nutzt diese Konvention **nicht**: Keine einzige Fahrt im Bestand
+         * beginnt jenseits 24:00, alles hängt am Kalendertag. Der Betriebstag muss deshalb
+         * hier rekonstruiert werden.
+         *
+         * **Zwei Grenzen, weil eine nicht reicht.** Am Realbestand gemessen:
+         *   - Taglinien fahren von 03:47 bis 23:5x — davor nichts.
+         *   - Nachtlinien fahren 00:10–06:40 und 22:00–23:59; zwischen 07:00 und 21:59
+         *     verkehrt keine einzige.
+         * Beide Netze überlappen also von 03:45 bis 06:40. Eine gemeinsame Grenze müsste dort
+         * zwangsläufig etwas falsch zuordnen; getrennte Grenzen sind dagegen eindeutig — die
+         * Lücke von 07:00 bis 22:00 macht jeden Wert dazwischen für Nachtlinien wasserdicht.
+         *
+         * Ohne diese Trennung zerfällt der `mo_fr`-Strang der Nachtlinien: Die Nacht von
+         * Sonntag auf Montag ist eine Sonntagnacht, GTFS ordnet sie aber dem Montag zu
+         * (FAHRPLANPERIODEN §8). N1 bekäme montags einen anderen Fahrplan als Di–Fr.
+         */
+        'day_line_boundary' => env('OPERATING_DAY_BOUNDARY', '03:00'),
+        'night_line_boundary' => env('OPERATING_DAY_NIGHT_BOUNDARY', '12:00'),
+
+    ],
+
 ];

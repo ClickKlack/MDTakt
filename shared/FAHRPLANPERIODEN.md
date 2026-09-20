@@ -367,11 +367,7 @@ Ferien-Werktag), entstehen für diesen Typ schlicht keine Intervalle — die bes
 - **Import-Takt:** Das Konsolidat kann nur sammeln, was im Fenster liegt. Bei 23 Tagen Fenster genügt ein Import
   je Woche für lückenlose Abdeckung; **täglich** ist die sichere Wahl (Ausfälle, Feed-Störungen). Cron festlegen —
   hängt mit dem offenen Punkt „Cron-Intervall" in der ROADMAP zusammen.
-- **Nachtlinien: Betriebstag ≠ Kalendertag.** Beim ersten Konsolidierungslauf (18.08.2026) zeigte N1 im Typ `mo_fr`
-  **montags einen anderen Fahrplan als Di–Fr** — die Nacht von Sonntag auf Montag ist eine Sonntagsnacht, GTFS ordnet
-  diese Fahrten aber dem Montag zu. Der Typ `mo_fr` fasst für Nachtlinien also zwei Fahrpläne zusammen. Das Modell
-  verkraftet es (3 Versionen mit 6 Intervallen statt 6 Versionen), aber sauber wäre ein eigener Typ oder eine
-  Betriebstags-Definition, die die Nacht dem Vortag zuschlägt. **Nicht dringend** — die Daten sind korrekt abgebildet.
+- ~~**Nachtlinien: Betriebstag ≠ Kalendertag.**~~ — **gelöst 20.09.2026**, siehe §10.
 - **Schwelle „viele Linien"** für den Periodenwechsel-Vorschlag (absolute Zahl oder Anteil? konfigurierbar?).
 - Genaue **Versions-Grenz-Erkennung**: ein einzelner Feed kann schon eine künftige Linien-Version enthalten (Zeitsub-Bereiche) — Algorithmus festzurren.
 - ~~`consolidated_stops` global vs. je Periode~~ — entschieden 18.08.2026: **global mit versionierten Attributen** (§6.1).
@@ -390,3 +386,72 @@ Ferien-Werktag), entstehen für diesen Typ schlicht keine Intervalle — die bes
 - ROADMAP **I-12 Bereich (e)**; Admin-Schaltzentrale (SPEC §10).
 - Import-Ersetzen (Schicht 1) umgesetzt: `GtfsImportService` (commit `d8afe13`).
 - Periodenwechsel → Re-Match, siehe `INTEGRATION_MDKURSTRACKER.md` §4.2.
+
+---
+
+## 10. Betriebstag ≠ Kalendertag (entschieden 20.09.2026)
+
+Beim ersten Konsolidierungslauf (18.08.2026) zeigte N1 im Typ `mo_fr` **montags einen anderen Fahrplan als Di–Fr**.
+Grund: Die Nacht von Sonntag auf Montag ist eine Sonntagnacht, GTFS ordnet diese Fahrten aber dem Montag zu. Der
+Punkt galt als „nicht dringend" — bis der Haltestellen-Editor (I-14) ihn sichtbar machte: An Herrenkrug entstanden
+dadurch **16 Fahrplanstände über vier Wochen**, je einer pro Montag und pro Di–Fr-Block.
+
+### Der Befund
+
+Verkehrsbetriebe drücken den Betriebstag sonst über Zeiten **jenseits 24:00** aus („26:00" für 2 Uhr des folgenden
+Kalendertags, aber desselben Betriebstags). Der gtfs.de-Feed tut das **nicht**: Im gesamten Bestand beginnt **keine
+einzige Fahrt** jenseits 24:00. Alles hängt am Kalendertag, der Betriebstag muss also rekonstruiert werden.
+
+Gemessen am Realbestand (20.09.2026, 24.319 konsolidierte Fahrten):
+
+| | Taglinien | Nachtlinien |
+|---|---|---|
+| Frühester Start | **03:47** (Linie 5) | 00:10 |
+| Spätester Start | 23:5x | 06:40 (N1) |
+| Fahrten 00:00–03:00 | **keine** | rund 790 |
+| Fahrten 07:00–21:59 | durchgehend | **keine einzige** |
+
+### Die Entscheidung: zwei Grenzen
+
+Tag- und Nachtnetz **überlappen von 03:45 bis 06:40** — eine gemeinsame Grenze müsste dort zwangsläufig etwas falsch
+zuordnen. Die Lücke von 07:00 bis 22:00 macht dagegen jede Grenze dazwischen für Nachtlinien wasserdicht.
+
+| Linienart | Grenze | Begründung |
+|---|---|---|
+| Taglinien (`1`, `73`, …) | **03:00** | Liegt vor der frühesten Fahrt (03:47), ist heute also wirkungslos — aber vorbereitet, falls eine Taglinie je nach Mitternacht verkehrt |
+| Nachtlinien (`N1`–`N9`) | **12:00** | Frei wählbar zwischen 07:00 und 22:00, weil dort keine Nachtlinie fährt |
+
+Konfigurierbar über `OPERATING_DAY_BOUNDARY` und `OPERATING_DAY_NIGHT_BOUNDARY` (`config/mdtakt.php`). Die
+Nachtlinie wird am Buchstaben-Präfix erkannt — dieselbe Regel, nach der die Frontends das Nachtsignet wählen.
+
+### Wirkung
+
+Eine Fahrt vor ihrer Grenze gehört zum Betriebstag des **Vortags**. Das betrifft die Zuordnung Fahrt → Fahrplantyp
+(`TripSignatureService`), die tagesweise Fingerprint-Auswertung (`ScheduleVersionService`) und das Einsammeln der
+Fahrten einer Version (`TripConsolidationService`) — alle drei über `OperatingDayResolver`.
+
+Am Realbestand: **213 Roh-Fahrten** wechseln den Betriebstag, sämtlich auf Nachtlinien. N1 hat im `mo_fr`-Strang
+danach eine durchgehende Version statt wöchentlich wechselnder; die Stände an Herrenkrug fielen von 16 auf 3.
+
+### Rückwirkend angewandt
+
+Die Korrektur wirkt zunächst nur so weit, wie der Roh-Feed reicht — beim Einbau am 20.09.2026 also ab dem 19.09.
+Deshalb wurde das Konsolidat am selben Tag **aus dem Feed-Archiv neu aufgebaut**: sechs archivierte Feeds
+(19.08., 23.08., 30.08., 07.09., 13.09., 20.09.) chronologisch eingespielt, nachdem Linien-Versionen, Fahrten und
+Halte geleert waren. Erhalten blieben die kuratierten Fahrplanperioden.
+
+Damit trägt die **gesamte** Historie ab 15.08.2026 das korrigierte Modell. Belege danach: N1, N2, N3 und N9 haben
+im `mo_fr`-Strang der Ausgangsperiode je **eine** Version statt vier; die Fahrplanstände an Herrenkrug fielen von
+16 auf 2 (Ausgangsperiode) bzw. 3 (Folgeperiode).
+
+Genau dafür ist das Feed-Archiv gebaut (`FeedArchiveService`): *„Aus ihm lässt sich das Konsolidat später
+rückwirkend aufbauen."* Dies war sein erster Einsatz — und er hat getragen. **Wer das Archiv nicht sichert, kann
+eine solche Korrektur nicht nachholen.**
+
+### Was offen bleibt
+
+**Der Betriebstag-Wechsel ist an der Fensterkante unvollständig beobachtbar.** Der letzte Tag eines Feed-Fensters
+sieht nur seine Abendseite; die zugehörige Nacht steht im Feed bereits unter dem Folgetag, der außerhalb liegt.
+Solche Tage erhalten deshalb eine Version mit auffällig wenigen Fahrten (am 16.10.2026: fünf statt achtzehn auf
+der N1). Das ist dieselbe Klasse von Randeffekt wie die offenen Grenzen aus §5.4 b und verschwindet, sobald ein
+späterer Feed den Tag im Inneren abdeckt.

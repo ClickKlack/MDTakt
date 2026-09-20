@@ -33,6 +33,7 @@ final class ScheduleVersionService
         private readonly SchedulePeriodService $periods,
         private readonly StopConsolidationService $stops,
         private readonly TripConsolidationService $trips,
+        private readonly OperatingDayResolver $operatingDay,
     ) {}
 
     /**
@@ -239,21 +240,43 @@ final class ScheduleVersionService
      */
     private function fingerprintsPerDay(CarbonImmutable $from, CarbonImmutable $to): array
     {
-        $proTag = $this->serviceDays->activeServiceIdsForRange($from->toDateString(), $to->toDateString());
+        // Einen Tag über das Fenster hinaus laden: Der Betriebstag `to` endet erst in der
+        // Nacht auf `to + 1`, und deren Fahrten stehen im Feed unter dem Folgetag.
+        $proTag = $this->serviceDays->activeServiceIdsForRange(
+            $from->toDateString(),
+            $to->addDay()->toDateString(),
+        );
+
+        $verschoben = $this->operatingDay->shiftMap();
 
         // Fahrten mit Linie, Service und ihrer typbezogenen Signatur — einmal geladen.
+        // Zusätzlich nach der Seite der Betriebstag-Grenze getrennt: Eine Fahrt vor der
+        // Grenze zählt zum Betriebstag des Vortags, muss also beim Tag davor eingesammelt
+        // werden, nicht bei ihrem Kalendertag.
         $fahrten = DB::table('trips')
             ->join('routes', 'routes.route_id', '=', 'trips.route_id')
             ->join('trip_signatures', 'trip_signatures.trip_id', '=', 'trips.trip_id')
-            ->select('trips.service_id', 'routes.route_short_name as line', 'trip_signatures.day_type', 'trip_signatures.signature')
+            ->select(
+                'trips.trip_id', 'trips.service_id', 'routes.route_short_name as line',
+                'trip_signatures.day_type', 'trip_signatures.signature',
+            )
             ->get()
-            ->groupBy(static fn (object $r): string => $r->service_id."\0".$r->day_type);
+            ->groupBy(static fn (object $r): string => $r->service_id."\0".$r->day_type
+                ."\0".(isset($verschoben[$r->trip_id]) ? 'previous' : 'same'));
 
         $alleLinien = DB::table('routes')->distinct()->pluck('route_short_name');
         $result = [];
         $aktiveLinien = [];
 
+        $letzterTag = $to->toDateString();
+
         foreach ($proTag as $date => $serviceIds) {
+            // Der Zusatztag hinter dem Fenster liefert nur die Nacht des letzten Betriebstags;
+            // als eigener Betriebstag wäre er unvollständig beobachtet.
+            if ($date > $letzterTag) {
+                continue;
+            }
+
             // Tag ohne jeden Betrieb: eher eine Lücke in der Kalender-Abdeckung als ein
             // netzweiter Ausfall — daraus wird keine Beobachtung abgeleitet.
             if ($serviceIds === []) {
@@ -262,10 +285,21 @@ final class ScheduleVersionService
 
             $dayType = $this->classifier->classify(CarbonImmutable::parse($date))->value;
 
-            // Signaturen des Tages je Linie sammeln.
+            // Signaturen des **Betriebstags** je Linie sammeln: die Fahrten dieses
+            // Kalendertags ab der Grenze, dazu die Fahrten des Folgetags davor — das ist die
+            // Nacht, die betrieblich noch zu diesem Tag gehört.
             $jeLinie = [];
+
             foreach ($serviceIds as $serviceId) {
-                foreach ($fahrten->get($serviceId."\0".$dayType, collect()) as $fahrt) {
+                foreach ($fahrten->get($serviceId."\0".$dayType."\0same", collect()) as $fahrt) {
+                    $jeLinie[$fahrt->line][] = $fahrt->signature;
+                }
+            }
+
+            $folgetag = CarbonImmutable::parse($date)->addDay()->toDateString();
+
+            foreach ($proTag[$folgetag] ?? [] as $serviceId) {
+                foreach ($fahrten->get($serviceId."\0".$dayType."\0previous", collect()) as $fahrt) {
                     $jeLinie[$fahrt->line][] = $fahrt->signature;
                 }
             }

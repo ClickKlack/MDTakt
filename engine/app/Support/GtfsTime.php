@@ -13,8 +13,8 @@ namespace App\Support;
  *
  * Zweitens sind sie **nicht garantiert nullgepadded** — die GTFS-Spezifikation erlaubt `7:00:00`
  * neben `07:00:00`. Genau daran scheitert ein lexikalischer Vergleich: `"7:00:00" > "23:50:00"`
- * ist als String wahr, als Zeit falsch. Der Bestand sortiert an einer Stelle noch so
- * (`ConsolidatedScheduleService::groupedByStartEnd()`); neuer Code soll das nicht erben.
+ * ist als String wahr, als Zeit falsch. Jeder Vergleich und jede Sortierung von GTFS-Zeiten
+ * läuft deshalb über diese Klasse.
  */
 final class GtfsTime
 {

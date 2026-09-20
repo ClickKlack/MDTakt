@@ -32,6 +32,7 @@ final class TimetableService
     public function __construct(
         private readonly StopSequenceAligner $aligner,
         private readonly ConsolidatedStopNameResolver $stopNames,
+        private readonly OperatingDayResolver $operatingDay,
     ) {}
 
     /**
@@ -47,7 +48,7 @@ final class TimetableService
             ->get(['id', 'signature', 'route_type', 'first_stop_id', 'last_stop_id']);
 
         $haltefolgen = $this->stopSequences($fahrten->pluck('id')->all());
-        $richtungen = $this->buildDirections($fahrten, $haltefolgen);
+        $richtungen = $this->buildDirections($fahrten, $haltefolgen, $version->line);
 
         Log::debug('Timetable built', [
             'line_version_id' => $version->id,
@@ -118,13 +119,13 @@ final class TimetableService
      * @param  array<int, array<int, array{stop_id: int, arrival: string|null, departure: string|null}>>  $haltefolgen
      * @return array<int, array<string, mixed>>
      */
-    private function buildDirections(Collection $fahrten, array $haltefolgen): array
+    private function buildDirections(Collection $fahrten, array $haltefolgen, string $line): array
     {
         $namen = $this->stopNames->namesFor($this->allStopIds($haltefolgen));
         $richtungen = [];
 
         foreach ($fahrten->groupBy(fn (object $f): string => $f->first_stop_id.'>'.$f->last_stop_id) as $key => $gruppe) {
-            $richtung = $this->buildDirection((string) $key, $gruppe, $haltefolgen, $namen);
+            $richtung = $this->buildDirection((string) $key, $gruppe, $haltefolgen, $namen, $line);
 
             if ($richtung !== null) {
                 $richtungen[] = $richtung;
@@ -144,7 +145,7 @@ final class TimetableService
      * @param  array<int, string>  $namen
      * @return array<string, mixed>|null
      */
-    private function buildDirection(string $key, Collection $gruppe, array $haltefolgen, array $namen): ?array
+    private function buildDirection(string $key, Collection $gruppe, array $haltefolgen, array $namen, string $line): ?array
     {
         // Gleiche Haltefolgen zu Varianten bündeln — der Ausrichter arbeitet auf Varianten,
         // nicht auf Fahrten. Bei 94 Fahrten mit identischem Laufweg spart das die Arbeit.
@@ -192,7 +193,7 @@ final class TimetableService
             'variant_count' => count($varianten),
             'alignment_warning' => $laengste > 0 && count($achse) > $laengste * self::ALIGNMENT_WARNING_RATIO,
             'rows' => $this->buildRows($achse, $namen),
-            'trips' => $this->buildTrips($gruppe, $haltefolgen, $variantePerFahrt, $zuordnung, count($achse)),
+            'trips' => $this->buildTrips($gruppe, $haltefolgen, $variantePerFahrt, $zuordnung, count($achse), $line),
         ];
     }
 
@@ -235,6 +236,7 @@ final class TimetableService
         array $variantePerFahrt,
         array $zuordnung,
         int $zeilenzahl,
+        string $line,
     ): array {
         $spalten = [];
 
@@ -270,8 +272,13 @@ final class TimetableService
         // Nach der ersten belegten Zelle sortieren, nicht nach der Abfahrt am eigenen Starthalt:
         // Ein Kurzläufer, der erst ab Zeile 5 fährt, gehört an seine zeitliche Stelle in der
         // Tabelle — sonst stünde er trotz später Abfahrt ganz vorn.
-        usort($spalten, function (array $a, array $b): int {
-            return GtfsTime::compare($this->firstCell($a['cells']), $this->firstCell($b['cells']))
+        //
+        // Sortiert wird entlang des **Betriebstags**, nicht der Uhr: Auf der N1 fährt 22:49
+        // vor 00:19, obwohl 00:19 als Uhrzeit kleiner ist. Ohne das stünde die halbe Nacht
+        // am Tabellenanfang.
+        usort($spalten, function (array $a, array $b) use ($line): int {
+            return $this->operatingDay->sortKey($line, $this->firstCell($a['cells']))
+                <=> $this->operatingDay->sortKey($line, $this->firstCell($b['cells']))
                 ?: $a['id'] <=> $b['id'];
         });
 

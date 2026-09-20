@@ -42,15 +42,28 @@ export function formatDateTime(utc: string | Date | null | undefined): string {
 }
 
 /**
- * GTFS-Lokalzeit („HH:MM:SS", kann > 24h sein, z. B. „25:10:00") als „HH:MM".
- * Wall-Clock im Betriebs-TZ — KEINE Zeitzonen-Umrechnung.
+ * GTFS-Lokalzeit als Uhrzeit „HH:MM".
+ *
+ * GTFS notiert Zeiten relativ zum **Betriebstag**, also auch jenseits 24 Uhr: „25:10" meint
+ * 1:10 nachts. Angezeigt wird die echte Uhrzeit — eine Uhr zeigt nie 25:10, und „24:13" wäre
+ * für den Leser schlicht falsch.
+ *
+ * Damit geht die Information verloren, ob eine Zeit noch zum selben Betriebstag gehört. Das
+ * ist Absicht: Die **Reihenfolge** trägt sie ohnehin, und die kommt aus der Engine
+ * (`departure_sort`/`arrival_sort`, siehe OperatingDayResolver) — nie aus dieser Darstellung.
+ *
+ * KEINE Zeitzonen-Umrechnung: Der Wert ist Netz-Lokalzeit, kein UTC-Zeitstempel.
  */
 export function formatClock(time: string | null | undefined): string {
   if (!time) {
     return '—'
   }
-  const match = /^(\d{1,2}):(\d{2})/.exec(time)
-  return match ? `${match[1].padStart(2, '0')}:${match[2]}` : time
+  const match = /^(\d{1,3}):(\d{2})/.exec(time)
+  if (!match) {
+    return time
+  }
+  const stunde = Number(match[1]) % 24
+  return `${String(stunde).padStart(2, '0')}:${match[2]}`
 }
 
 /** Reines Kalenderdatum (YYYY-MM-DD) als „DD.MM.YYYY" — OHNE Zeitzonen-Verschiebung. */

@@ -10,6 +10,7 @@ use App\Models\ConsolidatedStopTime;
 use App\Models\ConsolidatedStopVersion;
 use App\Models\ConsolidatedTrip;
 use App\Models\LineVersion;
+use App\Models\LineVersionInterval;
 use App\Models\SchedulePeriod;
 
 /**
@@ -63,6 +64,22 @@ final class ConsolidatedFixtures
         ]);
 
         return $this->halte[$name] = $halt;
+    }
+
+    /**
+     * Beobachtete Gültigkeit einer Version. Ohne sie gilt eine Version an keinem Tag — was
+     * für die Umlauf-Pflege bedeutet, dass sich zwei Versionen nie überschneiden können.
+     */
+    public function gueltigkeit(
+        LineVersion $version,
+        string $von = '2026-08-17',
+        string $bis = '2026-09-18',
+    ): LineVersionInterval {
+        return LineVersionInterval::factory()->create([
+            'line_version_id' => $version->id,
+            'valid_from' => $von,
+            'valid_to' => $bis,
+        ]);
     }
 
     /**

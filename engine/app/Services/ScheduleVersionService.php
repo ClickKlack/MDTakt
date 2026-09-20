@@ -455,14 +455,22 @@ final class ScheduleVersionService
             $nVon = CarbonImmutable::parse($nachbar->valid_from->toDateString());
             $nBis = CarbonImmutable::parse($nachbar->valid_to->toDateString());
 
-            // Die Bestätigung gehört zur Grenze, die nach dem Verschmelzen übrig bleibt.
+            // Die Bestätigung gehört zur Grenze, die nach dem Verschmelzen übrig bleibt —
+            // und sie ist die Aufzeichnung einer Beobachtung, also nie rücknehmbar. Fällt ein
+            // späterer Lauf mit seiner Fensterkante auf einen bereits gesicherten Wechseltag,
+            // darf seine Unkenntnis die frühere Beobachtung nicht überschreiben.
             if ($nVon->lessThan($von)) {
                 $von = $nVon;
                 $vonBestaetigt = $nachbar->from_confirmed;
+            } elseif ($nVon->equalTo($von)) {
+                $vonBestaetigt = $vonBestaetigt || $nachbar->from_confirmed;
             }
+
             if ($nBis->greaterThan($bis)) {
                 $bis = $nBis;
                 $bisBestaetigt = $nachbar->to_confirmed;
+            } elseif ($nBis->equalTo($bis)) {
+                $bisBestaetigt = $bisBestaetigt || $nachbar->to_confirmed;
             }
 
             $nachbar->delete();

@@ -278,4 +278,40 @@ final class ScheduleVersionTest extends TestCase
         $this->assertFalse($davor->from_confirmed);
         $this->assertFalse($danach->to_confirmed);
     }
+
+    public function test_a_confirmed_boundary_survives_a_later_window_edge(): void
+    {
+        $line = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
+
+        // Erster Import: Der Wechsel zum 24.08. wird INNERHALB des Fensters beobachtet —
+        // Freitag 21.08. traegt den alten, Montag 24.08. den neuen Fahrplan.
+        $this->werktagsService('ALT', '2026-08-17', '2026-08-21');
+        $this->fahrt('T-ALT', 'ALT', $line->route_id, ['07:00:00', '07:20:00']);
+        $this->werktagsService('NEU', '2026-08-24', '2026-08-28');
+        $this->fahrt('T-NEU', 'NEU', $line->route_id, ['07:10:00', '07:30:00']);
+
+        $this->konsolidieren();
+
+        $neueVersion = LineVersion::query()->where('line', '1')->where('version_no', 2)->sole();
+        $this->assertTrue(
+            $neueVersion->intervals()->sole()->from_confirmed,
+            'Der Wechsel wurde im Fenster beobachtet',
+        );
+
+        // Folge-Import: Das Fenster beginnt jetzt GENAU am Wechseltag. Aus dieser Sicht ist
+        // der 24.08. bloss eine Fensterkante — der Lauf kann den Wechsel nicht sehen.
+        StopTime::query()->delete();
+        Trip::query()->delete();
+        Calendar::query()->delete();
+        $this->werktagsService('NEU2', '2026-08-24', '2026-09-04');
+        $this->fahrt('T-NEU2', 'NEU2', $line->route_id, ['07:10:00', '07:30:00']);
+
+        $this->konsolidieren();
+
+        // Die frueher gemachte Beobachtung darf dadurch nicht verloren gehen. Sonst
+        // vergaesse das System mit jedem Import, was es einmal wusste.
+        $intervall = $neueVersion->refresh()->intervals()->orderBy('valid_from')->first();
+        $this->assertSame('2026-08-24', $intervall->valid_from->toDateString());
+        $this->assertTrue($intervall->from_confirmed, 'Eine gesicherte Grenze darf nicht zurueckfallen');
+    }
 }

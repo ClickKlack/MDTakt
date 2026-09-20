@@ -7,7 +7,6 @@ namespace App\Services;
 use App\Enums\TripLinkKind;
 use App\Models\ConsolidatedTrip;
 use App\Models\TripLink;
-use App\Support\GtfsTime;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -22,7 +21,6 @@ use Illuminate\Support\Facades\Log;
 final class TripLinkService
 {
     public function __construct(
-        private readonly ConsolidatedTripTimeResolver $tripTimes,
         private readonly ConsolidatedTripInfoResolver $tripInfo,
     ) {}
 
@@ -43,13 +41,7 @@ final class TripLinkService
         $von = $link->from_trip_id === null ? null : ($info[$link->from_trip_id] ?? null);
         $nach = $link->to_trip_id === null ? null : ($info[$link->to_trip_id] ?? null);
 
-        $wendezeit = null;
-
-        if ($von !== null && $nach !== null) {
-            $ankunft = GtfsTime::toSeconds($von['arrival_time']);
-            $abfahrt = GtfsTime::toSeconds($nach['departure_time']);
-            $wendezeit = $ankunft === null || $abfahrt === null ? null : $abfahrt - $ankunft;
-        }
+        $wendezeit = $this->turnaroundFrom($von, $nach);
 
         $hinweise = [];
 
@@ -139,20 +131,41 @@ final class TripLinkService
     }
 
     /**
-     * Wendezeit in Sekunden — über Betriebstag-Sekunden, nie lexikalisch.
+     * Wendezeit in Sekunden, gerechnet **entlang des Betriebstags**.
      *
-     * Eine Ankunft `24:50:00` mit Anschlussabfahrt `25:10:00` ergibt 1200: Beide Zeiten
-     * gehören zum selben Betriebstag, auch wenn die Uhr längst nach Mitternacht steht.
+     * Nicht nach der Uhr: Auf der N1 folgt auf eine Ankunft um 23:20 eine Abfahrt um 00:19 —
+     * als Uhrzeit ein Rücksprung, auf dem Betriebstag aber 59 Minuten Wende. Ohne diese
+     * Rechnung wäre jeder Nachtlinien-Anschluss über Mitternacht als negative Wendezeit
+     * abgewiesen worden.
+     *
+     * Jede Seite trägt die Grenze **ihrer eigenen Linie** (OperatingDayResolver): Beim
+     * Übergang von einer Tag- auf eine Nachtlinie gelten verschiedene Grenzen, und genau das
+     * ist richtig.
+     *
      * `null`, wenn eine der beiden Zeiten fehlt oder unlesbar ist.
      */
     public function turnaroundSeconds(ConsolidatedTrip $from, ConsolidatedTrip $to): ?int
     {
-        $zeiten = $this->tripTimes->endpoints([$from->id, $to->id]);
+        $info = $this->tripInfo->forIds([$from->id, $to->id]);
 
-        $ankunft = GtfsTime::toSeconds($zeiten[$from->id]['arrival'] ?? null);
-        $abfahrt = GtfsTime::toSeconds($zeiten[$to->id]['departure'] ?? null);
+        return $this->turnaroundFrom($info[$from->id] ?? null, $info[$to->id] ?? null);
+    }
 
-        if ($ankunft === null || $abfahrt === null) {
+    /**
+     * @param  array<string, mixed>|null  $von
+     * @param  array<string, mixed>|null  $nach
+     */
+    private function turnaroundFrom(?array $von, ?array $nach): ?int
+    {
+        if ($von === null || $nach === null) {
+            return null;
+        }
+
+        $ankunft = $von['arrival_sort'];
+        $abfahrt = $nach['departure_sort'];
+
+        // Unlesbare Zeiten sortieren ans Ende; daraus eine Wendezeit zu rechnen wäre erfunden.
+        if ($ankunft === PHP_INT_MAX || $abfahrt === PHP_INT_MAX) {
             return null;
         }
 

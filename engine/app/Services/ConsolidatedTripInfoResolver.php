@@ -22,24 +22,8 @@ final class ConsolidatedTripInfoResolver
         private readonly ConsolidatedStopNameResolver $stopNames,
         private readonly ConsolidatedTripTimeResolver $tripTimes,
         private readonly OperatingDayResolver $operatingDay,
+        private readonly CourseLookup $courses,
     ) {}
-
-    /**
-     * Der Kurs je Fahrt, sofern einer vergeben ist.
-     *
-     * @param  array<int, int>  $tripIds
-     * @return array<int, object>
-     */
-    private function coursesFor(array $tripIds): array
-    {
-        return DB::table('course_trips as k')
-            ->join('courses as c', 'c.id', '=', 'k.course_id')
-            ->whereIn('k.consolidated_trip_id', $tripIds)
-            ->select('k.consolidated_trip_id', 'c.id', 'c.number')
-            ->get()
-            ->keyBy('consolidated_trip_id')
-            ->all();
-    }
 
     /**
      * @param  array<int, int>  $tripIds
@@ -76,7 +60,7 @@ final class ConsolidatedTripInfoResolver
                 ->all()
         );
 
-        $kurse = $this->coursesFor($eindeutig);
+        $kurse = $this->courses->forTrips($eindeutig);
 
         $ergebnis = [];
 
@@ -99,12 +83,12 @@ final class ConsolidatedTripInfoResolver
                 'departure_sort' => $this->operatingDay->sortKey($f->line, $zeiten[$id]['departure'] ?? null),
                 'arrival_sort' => $this->operatingDay->sortKey($f->line, $zeiten[$id]['arrival'] ?? null),
                 'course' => $kurs === null ? null : [
-                    'id' => (int) $kurs->id,
-                    'number' => $kurs->number,
+                    'id' => $kurs['id'],
+                    'number' => $kurs['number'],
                     // Die Nummer gehört dem Umlauf, der Linien-Präfix ist reine Anzeige:
                     // Dieselbe Kette heißt auf der 1 „1/03" und nach dem Übergang „13/03"
                     // (KURSE §2 K1).
-                    'display' => $f->line.'/'.$kurs->number,
+                    'display' => $f->line.'/'.$kurs['number'],
                 ],
             ];
         }

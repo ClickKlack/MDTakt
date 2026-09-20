@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import LineBadge from '../components/LineBadge.vue'
 import TimetableGrid from '../components/TimetableGrid.vue'
+import { assignCourse, detachCourse } from '../services/courses'
 import { fetchLines, FAHRPLAN_TYPEN, type FahrplanTyp, type Line } from '../services/lines'
 import { fetchLineVersions, type LineVersion } from '../services/scheduleVersions'
 import { fetchTimetable, type Timetable } from '../services/timetable'
@@ -24,6 +25,8 @@ const selectedVersion = ref<number | null>(null)
 const loading = ref(true)
 const loadingTimetable = ref(false)
 const error = ref<string | null>(null)
+const busy = ref(false)
+const hinweis = ref<string | null>(null)
 
 const line = computed(() => lines.value.find((l) => l.route_short_name === selectedLine.value) ?? null)
 
@@ -87,6 +90,64 @@ async function selectVersion(id: number): Promise<void> {
   } finally {
     loadingTimetable.value = false
   }
+}
+
+function meldung(e: unknown, fallback: string): string {
+  const antwort = (e as { response?: { data?: { error?: { message?: string } } } }).response
+  return antwort?.data?.error?.message ?? fallback
+}
+
+/**
+ * Der Kurs haengt an der Kette, nicht an der Fahrt: Ein Eintrag hier gilt fuer alle Fahrten
+ * des Umlaufs. Deshalb wird der ganze Fahrplan neu geladen — die Aenderung betrifft in aller
+ * Regel mehr als die angeklickte Spalte, oft auch eine andere Richtungsgruppe.
+ */
+async function setzeKurs(tripId: number, nummer: string): Promise<void> {
+  busy.value = true
+  error.value = null
+  hinweis.value = null
+
+  try {
+    const ergebnis = await assignCourse(tripId, nummer)
+    hinweis.value =
+      ergebnis.trips_assigned > 1
+        ? `Kurs ${ergebnis.course?.number} gilt jetzt für ${ergebnis.trips_assigned} Fahrten dieses Umlaufs.`
+        : `Kurs ${ergebnis.course?.number} gesetzt. Diese Fahrt ist noch mit keiner anderen verknüpft — die Kette entsteht unter „Anschlüsse".`
+
+    if (ergebnis.course?.duplicate) {
+      hinweis.value += ' Achtung: Diese Nummer trägt bereits ein anderer Umlauf.'
+    }
+
+    await ladeFahrplan()
+  } catch (e: unknown) {
+    error.value = meldung(e, 'Der Kurs konnte nicht gesetzt werden.')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function loeseKurs(tripId: number): Promise<void> {
+  busy.value = true
+  error.value = null
+  hinweis.value = null
+
+  try {
+    const ergebnis = await detachCourse(tripId)
+    hinweis.value = `Kurs von ${ergebnis.trips_assigned} Fahrten gelöst.`
+    await ladeFahrplan()
+  } catch (e: unknown) {
+    error.value = meldung(e, 'Der Kurs konnte nicht gelöst werden.')
+  } finally {
+    busy.value = false
+  }
+}
+
+/** Nur den Fahrplan nachladen, ohne die Auswahl anzufassen. */
+async function ladeFahrplan(): Promise<void> {
+  if (selectedVersion.value === null) {
+    return
+  }
+  timetable.value = await fetchTimetable(selectedVersion.value)
 }
 
 watch([selectedLine, dayType], () => {
@@ -208,10 +269,17 @@ function gueltigkeit(version: LineVersion): string {
         Fahrplan wird geladen …
       </p>
 
+      <p v-if="hinweis" class="mx-auto mt-4 max-w-6xl rounded-md bg-emerald-50 px-4 py-2 text-sm text-emerald-900">
+        {{ hinweis }}
+      </p>
+
       <TimetableGrid
         v-for="richtung in timetable?.directions ?? []"
         :key="richtung.key"
         :direction="richtung"
+        :busy="busy"
+        @assign="setzeKurs"
+        @detach="loeseKurs"
       />
     </main>
   </div>

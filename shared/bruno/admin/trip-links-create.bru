@@ -94,6 +94,10 @@ docs {
   der Normalfall einer Fahrzeugkette. `warnings` meldet ihn als Hinweis, damit ein Fehlgriff
   auffaellt; abgewiesen wird er nicht.
 
+  **Der Gattungswechsel dagegen wird abgewiesen.** Ein Fahrzeug wird nie vom Tram zum Bus. Die
+  Unterscheidung zaehlt, weil dieselbe Linie beides sein kann: N2 liegt zeitweise als Tram und
+  als Bus vor (Schienenersatzverkehr).
+
   **Warnung ist nicht Fehler.** `short_turnaround` (Wendezeit unter
   `COURSE_MIN_TURNAROUND_MINUTES`, Vorgabe 3 Minuten) erscheint im Ergebnis, verhindert die
   Verknuepfung aber nicht. Eine *negative* Wendezeit wird dagegen mit 422 abgewiesen.
@@ -109,6 +113,7 @@ docs {
   |---|---|
   | Eine der Fahrten traegt bereits eine Entscheidung | 409 |
   | Uebergangs-Haltestelle passt nicht (die beiden Halte gehoeren verschiedenen `stop_groups` an) | 422 |
+  | Gattungswechsel (Tram auf Bus) | 422 |
   | Verschiedene Periode oder verschiedener Fahrplantyp | 422 |
   | Gueltigkeits-Intervalle der Versionen ueberschneiden sich an keinem Tag | 422 |
   | Selbstverknuepfung oder Zyklus in der Kette | 422 |

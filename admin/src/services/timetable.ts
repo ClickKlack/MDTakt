@@ -19,6 +19,11 @@ export interface TimetableTrip {
   mode: 'tram' | 'bus' | 'other'
   departure_time: string | null
   arrival_time: string | null
+  /**
+   * Der Umlauf, zu dem diese Fahrt gehört. `display` trägt den Linien-Präfix (`1/03`), der
+   * reine Anzeige ist — die Nummer gehört der Kette, nicht der Linie.
+   */
+  course: { id: number; number: string; display: string } | null
   /** Zeiten als „HH:MM", positionsgleich zu `rows`; null = Zeile wird nicht bedient. */
   cells: (string | null)[]
 }

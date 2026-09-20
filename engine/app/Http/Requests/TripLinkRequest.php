@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Enums\RouteType;
 use App\Enums\TripLinkKind;
 use App\Models\ConsolidatedTrip;
 use App\Models\LineVersionInterval;
@@ -20,6 +21,10 @@ use Illuminate\Validation\Validator;
  *
  * Nicht geprüft wird der **Linienwechsel** — eine 1 wird in Sudenburg zur 13, das ist der
  * Normalfall einer Fahrzeugkette (K1). Er erscheint als Hinweis im Ergebnis, nicht als Fehler.
+ *
+ * Der **Gattungswechsel** dagegen wird abgewiesen: Ein Fahrzeug wird nie vom Tram zum Bus.
+ * Beides auseinanderzuhalten ist wesentlich, weil dieselbe Linie beides sein kann — N2 liegt
+ * zeitweise als Tram und als Bus vor (Schienenersatzverkehr).
  */
 final class TripLinkRequest extends ApiFormRequest
 {
@@ -104,6 +109,26 @@ final class TripLinkRequest extends ApiFormRequest
             return;
         }
 
+        // Ein Fahrzeug wechselt die Gattung nicht. Der Linienwechsel ist erlaubt und der
+        // Normalfall (K1) — eine Tram wird aber nie zum Bus. Das Verkehrsmittel hängt an der
+        // Fahrt, nicht an der Linie: N2 liegt zeitweise als Tram und als Bus vor
+        // (Schienenersatzverkehr), und genau dort träfe die Verwechslung zu.
+        $vonMittel = RouteType::modeFor($von->route_type);
+        $nachMittel = RouteType::modeFor($nach->route_type);
+
+        if ($vonMittel !== $nachMittel) {
+            $validator->errors()->add(
+                'to_trip_id',
+                sprintf(
+                    'Ein Fahrzeug wechselt die Gattung nicht: Die erste Fahrt ist %s, die zweite %s.',
+                    $this->mittelName($vonMittel),
+                    $this->mittelName($nachMittel),
+                ),
+            );
+
+            return;
+        }
+
         // Geprüft wird die **Haltestelle**, nicht der einzelne Halt. An einer Endstelle liegen
         // Ankunft und Abfahrt oft auf verschiedenen Punkten: An „Herrenkrug" enden Fahrten auf
         // dem einen Bahnsteig und beginnen 72 m weiter auf dem anderen. Netzweit sind 64 von
@@ -151,6 +176,15 @@ final class TripLinkRequest extends ApiFormRequest
                 'Die zweite Fahrt beginnt vor dem Ende der ersten — das ergibt eine negative Wendezeit.',
             );
         }
+    }
+
+    private function mittelName(string $mode): string
+    {
+        return match ($mode) {
+            'tram' => 'eine Tram',
+            'bus' => 'ein Bus',
+            default => 'ein anderes Verkehrsmittel',
+        };
     }
 
     /**

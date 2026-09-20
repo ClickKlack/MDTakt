@@ -1,9 +1,63 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { TimetableDirection } from '../services/timetable'
+import { computed, nextTick, ref, type VNode } from 'vue'
+import type { TimetableDirection, TimetableTrip } from '../services/timetable'
 import { formatClock } from '../utils/timezone'
 
-const props = defineProps<{ direction: TimetableDirection }>()
+const props = defineProps<{ direction: TimetableDirection; busy: boolean }>()
+
+const emit = defineEmits<{
+  assign: [tripId: number, number: string]
+  detach: [tripId: number]
+}>()
+
+/** Die Fahrt, deren Kursnummer gerade bearbeitet wird. */
+const bearbeitet = ref<number | null>(null)
+const eingabe = ref('')
+
+function bearbeite(trip: TimetableTrip): void {
+  bearbeitet.value = trip.id
+  eingabe.value = trip.course?.number ?? ''
+}
+
+/**
+ * Fokus setzen und eine vorhandene Nummer gleich markieren: Wer einen Kurs korrigiert, tippt
+ * die neue Nummer, statt erst die alte zu loeschen.
+ *
+ * Zwei Fallen stecken darin, beide in dieser Reihenfolge zu umgehen:
+ *
+ * 1. Ueber ein `ref` geht es nicht — ein `ref` innerhalb eines `v-for` sammelt Vue zu einem
+ *    **Array**, nicht zu einem einzelnen Element. Deshalb der Mount-Hook des Elements.
+ * 2. Der Mount-Hook allein genuegt nicht: Vue ruft `vnodeHook` **vor** den Directive-Hooks,
+ *    und `v-model` setzt `el.value` erst in seinem `mounted`. Zum Zeitpunkt des Hooks ist das
+ *    Feld also noch leer, und `select()` markiert nichts. `nextTick` wartet den ganzen
+ *    Render-Durchlauf ab.
+ */
+async function feldBereit(vnode: VNode): Promise<void> {
+  await nextTick()
+
+  const el = vnode.el as HTMLInputElement | null
+  el?.focus()
+  el?.select()
+}
+
+function uebernimm(trip: TimetableTrip): void {
+  const wert = eingabe.value.trim()
+  bearbeitet.value = null
+
+  if (wert === (trip.course?.number ?? '')) {
+    return
+  }
+
+  // Leer bedeutet loesen - aber nur, wenn vorher einer dranhing.
+  if (wert === '') {
+    if (trip.course) {
+      emit('detach', trip.id)
+    }
+    return
+  }
+
+  emit('assign', trip.id, wert)
+}
 
 /**
  * Ein Halt, der auf dem Laufweg erneut berührt wird (Wendeschleife, Stichabstecher), bekommt
@@ -68,6 +122,50 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
               :title="`Fahrt ${i + 1} · Signatur ${trip.signature.slice(0, 12)}…`"
             >
               {{ i + 1 }}
+            </th>
+          </tr>
+          <!--
+            Kurszeile: Sie sagt, zu welchem Umlauf eine Spalte gehoert - die Auskunft, wegen
+            der I-13 (D) offen war. Der Kurs haengt an der Kette, nicht an der Fahrt: Ein
+            Eintrag hier setzt ihn fuer alle Fahrten des Umlaufs.
+          -->
+          <tr>
+            <th
+              class="sticky left-0 top-9 z-30 bg-slate-50 px-4 py-1 text-left text-xs font-medium uppercase text-slate-500 ring-1 ring-slate-200"
+            >
+              Kurs
+            </th>
+            <th
+              v-for="trip in direction.trips"
+              :key="`kurs-${trip.id}`"
+              class="sticky top-9 z-20 bg-slate-50 px-1 py-1 text-center ring-1 ring-slate-200"
+            >
+              <input
+                v-if="bearbeitet === trip.id"
+                v-model="eingabe"
+                @vue:mounted="feldBereit"
+                type="text"
+                maxlength="8"
+                class="w-12 rounded border border-slate-800 px-1 py-0.5 text-center text-xs tabular-nums focus:outline-none"
+                @blur="uebernimm(trip)"
+                @keydown.enter.prevent="uebernimm(trip)"
+                @keydown.esc.prevent="bearbeitet = null"
+              />
+              <button
+                v-else
+                type="button"
+                class="w-full rounded px-1 py-0.5 text-xs tabular-nums transition disabled:opacity-50"
+                :class="
+                  trip.course
+                    ? 'bg-slate-800 font-semibold text-white hover:bg-slate-700'
+                    : 'text-slate-300 hover:bg-slate-200 hover:text-slate-600'
+                "
+                :disabled="busy"
+                :title="trip.course ? `Kurs ${trip.course.display} — klicken zum Ändern` : 'Kursnummer eintragen'"
+                @click="bearbeite(trip)"
+              >
+                {{ trip.course ? trip.course.number : '–' }}
+              </button>
             </th>
           </tr>
         </thead>

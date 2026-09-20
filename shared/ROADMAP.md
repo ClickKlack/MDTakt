@@ -21,7 +21,7 @@
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
 | **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f, Fahrplan + Diff |
 | **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ✅ |
-| **I-14** | **Kurse & Umläufe** | Engine + Admin | Umlauf-Ebene manuell pflegbar: Fahrten verketten, Kursnummern vergeben | 🟡 Etappe 1 |
+| **I-14** | **Kurse & Umläufe** | Engine + Admin | Umlauf-Ebene manuell pflegbar: Fahrten verketten, Kursnummern vergeben | 🟡 Etappen 1 + 2 |
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -44,7 +44,7 @@ Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung
 | 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** | ✅ |
 | 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten | ✅ |
 | 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | ✅ Phasen B und C |
-| 3b | **I-14** Kurse & Umläufe | Baut das Gefüge, in das die Sichtungs-API ihre Kursnummern liefert | 🟡 Etappe 1 |
+| 3b | **I-14** Kurse & Umläufe | Baut das Gefüge, in das die Sichtungs-API ihre Kursnummern liefert | 🟡 Etappen 1 + 2 |
 | 4 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬜ |
 | 5 | **I-05** Matching-Logik | Engine-Kern fürs Matching — setzt stabile Fahrt-Identität aus I-13 voraus | ⬜ |
 | 6 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
@@ -501,9 +501,9 @@ Nicht ursprünglich geplant, sondern aus dem Bedarf entstanden, den konsolidiert
       Start/Ziel und nächstgelegene Abfahrt, Toleranz 60 Minuten
 - [x] Admin: Reiter „Fahrplan" mit Auswahl Linie/Typ/Version; A-B-Auswahl und Vergleichsansicht
       in „Versionen"
-- [ ] **Kurs je Fahrt anzeigen** — setzt I-04 bis I-06 voraus. Es gibt heute keine Sichtungen, kein
-      `Sighting`-Model, und `block_id`/`direction_id` sind im gesamten Feed NULL. Die
-      Kurs↔Signatur-Zuordnung ist Stopp-Regel (INTEGRATION §6.4)
+- [x] **Kurs je Fahrt anzeigen** — erledigt mit I-14 (2). Die ursprüngliche Annahme, das setze
+      I-04 bis I-06 voraus, traf nicht zu: Der Kurs kommt aus der **gepflegten Kette**, nicht aus
+      Sichtungen. Die Sichtungs-API liefert später Nummern in dieses Gefüge hinein
 
 ### (C) Konsolidat-Datenbestand
 - [x] `consolidated_stops` + `consolidated_stop_versions` (Dedup: ≤ 12 m + normalisierter Name),
@@ -602,11 +602,37 @@ Kursnummer dieser Umlauf trägt.
       verschiedene Haltestellen **keinen** Anschluss bilden, und dem Nachweis, dass eine nächtlich verkehrende
       Linie **einen** Mo-Fr-Strang hat statt zweier
 
-### (2) Kursnummern ⬜
-- [ ] `CourseService`: Kurs der **ganzen Kette** zuweisen und lösen; Dubletten-Warnung (K3)
-- [ ] `GET`/`POST`/`PUT`/`DELETE /api/v1/admin/courses`, `PUT`/`DELETE /api/v1/admin/consolidated-trips/{id}/course`
-- [ ] `TimetableService` reicht je Fahrt `course` durch → schließt I-13 (D) „Kurs je Fahrt anzeigen"
-- [ ] Admin: Kurs-Kopfzeile in der Fahrplan-Matrix, inline bearbeitbar
+### (2) Kursnummern ✅
+- [x] `CourseService`: Kurs der **ganzen Kette** zuweisen und lösen; Zuweisung über die Nummer legt
+      einen noch unbekannten Umlauf an. Dubletten-Warnung statt Unique-Index (K3)
+- [x] `CourseLookup` als eigener Dienst ohne Abhängigkeiten — drei Aufrufer brauchen dieselbe
+      Auskunft, und über `CourseService` entstünde ein Ring (`TripLinkService` →
+      `ConsolidatedTripInfoResolver` → zurück)
+- [x] `GET`/`POST`/`PUT`/`DELETE /api/v1/admin/courses`, `PUT`/`DELETE /api/v1/admin/consolidated-trips/{id}/course`
+- [x] `TimetableService` reicht je Fahrt `course` durch → **schließt I-13 (D) „Kurs je Fahrt anzeigen"**
+- [x] Admin: Kurszeile in der Fahrplan-Matrix **und** im Anschluss-Editor, inline bearbeitbar;
+      leeres Feld löst den Kurs
+- [x] **Ein Anschluss überträgt den Kurs von selbst** — zwei verknüpfte Fahrten sind dasselbe
+      Fahrzeug, also derselbe Kurs. Verschiedene Nummern auf beiden Seiten werden gemeldet
+      (`course_conflict`), nicht überschrieben
+- [x] **Anschlüsse sind gattungsrein** — eine Tram wird nie zum Bus (422). Der Linienwechsel
+      bleibt erlaubt; die Unterscheidung zählt, weil N2 zeitweise als Tram *und* als Bus vorliegt
+- [x] Anschluss-Editor, Sortierung: **Die Ankunft führt** — Zeilen mit linker Seite stehen nach
+      ihr, die linke Spalte steigt lückenlos. Kreuzen sich zwei Anschlüsse, springt dafür die
+      rechte; beides zugleich geht nicht. Eine Abfahrt **ohne** Ankunft kreuzt dagegen nichts und
+      wird deshalb unter den Abfahrten einsortiert — sonst stünde eine Ausrück-Fahrt um 04:36
+      unter einem Anschluss, der erst um 04:51 abfährt
+- [x] Entschiedene Fahrten bleiben stehen, aber gedämpft; beim Überfahren wieder voll lesbar
+- [x] Admin: Filter im Anschluss-Editor nach Verkehrsmittel und Linie. Eine Zeile bleibt sichtbar,
+      wenn **eine** ihrer Seiten passt — so zerfällt ein verknüpftes Paar nicht, und ein
+      Linienwechsel 1 → 13 bleibt unter beiden Linienfiltern als Ganzes lesbar
+- [x] **Wendezeit entlang des Betriebstags** — dabei gefunden und behoben: Sie wurde nach der Uhr
+      gerechnet, wodurch jeder Nachtlinien-Anschluss über Mitternacht (`23:20` → `00:19`) als
+      negative Wendezeit abgewiesen worden wäre. Der Feed notiert solche Fahrten nicht als
+      `24:19`, sondern als `00:19`
+- [x] `openapi.yaml` + Bruno (`admin/courses.bru`, `admin/trip-course.bru`)
+- [x] Tests: `CourseTest` (19) — Kette statt Einzelfahrt, Linienwechsel im Umlauf, Dublette,
+      getrennte Stränge, Eckzeiten über Mitternacht
 
 ### (3) Kursübersicht und Übernahme ⬜
 - [ ] `GET /api/v1/admin/lines/{line}/courses` — Kursübersicht je Linie mit Ketten, Lücken und Fahrten ohne Kurs

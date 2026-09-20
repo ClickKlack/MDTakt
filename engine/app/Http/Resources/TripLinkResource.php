@@ -31,6 +31,10 @@ final class TripLinkResource extends JsonResource
             'turnaround_seconds' => $this->resource['turnaround_seconds'],
             'note' => $this->resource['note'],
             'warnings' => $this->resource['warnings'],
+            // Der Kurs der Kette nach dem Anschluss. `course_trips_assigned` nennt, auf wie
+            // viele Fahrten er dabei uebertragen wurde — 0 heisst: es gab nichts zu uebertragen.
+            'course' => $this->resource['course'] ?? null,
+            'course_trips_assigned' => $this->resource['course_trips_assigned'] ?? 0,
         ];
     }
 }

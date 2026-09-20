@@ -95,6 +95,20 @@ Dies präzisiert FAHRPLANPERIODEN §4.4 („betroffene Kurszuordnungen als *stal
 werden nicht markiert, sondern gar nicht erst übertragen; die Vorschau übernimmt die Rolle der
 Markierung.
 
+### K5 — Der Haltestellen-Editor arbeitet auf Periode + Fahrplantyp
+
+Nicht auf einem Datum. Das hält ihn im Versions-Denken des übrigen Admin-Bereichs.
+
+**Dabei entsteht eine Mehrdeutigkeit, die gelöst werden muss:** Innerhalb einer Periode kann eine
+Linie mehrere Versionen mit verschiedenen Gültigkeits-Intervallen haben. An einem Umsteigepunkt
+stehen Linie 1 und Linie 13 dann womöglich auf verschiedenen Ständen, und „Periode + Fahrplantyp"
+benennt keinen eindeutigen Fahrplan.
+
+**Lösung: der Versionsstand.** Der Perioden-Zeitraum wird an allen Intervallgrenzen der beteiligten
+Versionen zerschnitten; aufeinanderfolgende Abschnitte mit identischer Versionsmenge werden wieder
+verschmolzen. Übrig bleiben die Abschnitte, in denen sich am beteiligten Fahrplan nichts ändert.
+Der Editor bietet sie als dritten Selektor an, beschriftet mit ihrem Datumsbereich.
+
 ### K6 — Die Haltestelle ist eine eigene Ebene über dem Halt
 
 **Entschieden 20.09.2026, nachdem die erste Fassung am Realbestand scheiterte.**
@@ -129,20 +143,6 @@ verbleibenden Abstände (201 m, 484 m, 612 m, 675 m) gehören zu **echten Betrie
 `Südring` → `Eiskellerplatz`, `Schleswiger Straße` → `Westerhüsen (Betriebshof)`. Die sollen als
 Aus- und Einrücken festgehalten und nicht zu einer Haltestelle verschmolzen werden. Der Abstand
 dient deshalb nur als **Vorschlag** im Editor (Umkreis 350 m), nie als Automatik.
-
-### K5 — Der Haltestellen-Editor arbeitet auf Periode + Fahrplantyp
-
-Nicht auf einem Datum. Das hält ihn im Versions-Denken des übrigen Admin-Bereichs.
-
-**Dabei entsteht eine Mehrdeutigkeit, die gelöst werden muss:** Innerhalb einer Periode kann eine
-Linie mehrere Versionen mit verschiedenen Gültigkeits-Intervallen haben. An einem Umsteigepunkt
-stehen Linie 1 und Linie 13 dann womöglich auf verschiedenen Ständen, und „Periode + Fahrplantyp"
-benennt keinen eindeutigen Fahrplan.
-
-**Lösung: der Versionsstand.** Der Perioden-Zeitraum wird an allen Intervallgrenzen der beteiligten
-Versionen zerschnitten; aufeinanderfolgende Abschnitte mit identischer Versionsmenge werden wieder
-verschmolzen. Übrig bleiben die Abschnitte, in denen sich am beteiligten Fahrplan nichts ändert.
-Der Editor bietet sie als dritten Selektor an, beschriftet mit ihrem Datumsbereich.
 
 ---
 
@@ -203,6 +203,20 @@ ableitbar und wird trotzdem gespeichert: Es macht Abfragen und Absicht lesbar.
 höchstens einem Umlauf). Die Zuweisung erfolgt immer für die **ganze Kette**, nie für eine einzelne
 Fahrt.
 
+Vergeben wird über die **Nummer**, nicht über eine ID: Wer sie am Fahrzeug abliest, tippt sie ein,
+und ein im Strang noch unbekannter Umlauf entsteht dabei. Dieselbe Nummer zweimal zu setzen hängt
+die zweite Kette an den bestehenden Umlauf, statt einen zweiten anzulegen.
+
+**Ein Anschluss überträgt den Kurs von selbst.** Wer zwei Fahrten verknüpft, sagt damit: dasselbe
+Fahrzeug. Dann kann es nur eine Kursnummer geben — trägt eine Seite bereits eine, gilt sie ab
+diesem Moment für die ganze zusammengewachsene Kette. Das von Hand nachzutragen wäre Arbeit, die
+aus der Verknüpfung schon folgt.
+
+Tragen **beide** Seiten einen Kurs, und zwar verschiedene, wird nichts überschrieben: Welcher der
+richtige ist, weiß nur der Pflegende. Der Widerspruch erscheint als Warnung `course_conflict`, die
+Verknüpfung selbst bleibt bestehen — sie ist eine Aussage über das Fahrzeug, der Kurs nur sein
+Etikett.
+
 ### Warum an `consolidated_trips.id`
 
 Die naheliegende Alternative wäre die Fahrt-**Signatur**, weil sie Importe überlebt. Sie scheidet
@@ -226,6 +240,9 @@ räumt dort korrekt auf.
   Hälfte aller Fahrt-Endpunkte kein Anschluss möglich (K6)
 - die Gültigkeits-Intervalle beider Versionen überschneiden sich an keinem Tag — der Anschluss
   könnte nie zustande kommen
+- **Gattungswechsel**: Ein Fahrzeug wird nie vom Tram zum Bus. Der *Linien*wechsel ist dagegen
+  erlaubt und der Normalfall — beides auseinanderzuhalten ist wesentlich, weil dieselbe Linie
+  beides sein kann (N2 liegt zeitweise als Tram und als Bus vor, Schienenersatzverkehr)
 - Selbstverknüpfung oder Zyklus
 - negative Wendezeit
 
@@ -235,9 +252,15 @@ räumt dort korrekt auf.
 - kurze Wendezeit (Schwelle `COURSE_MIN_TURNAROUND_MINUTES`, Vorgabe 3 Minuten)
 - Linienwechsel — ausdrücklich erlaubt (K1)
 
-**Zeiten sind GTFS-Wallclock.** Eine Ankunft kann `24:50:00` lauten, die Anschlussabfahrt
-`25:10:00`. Gerechnet wird über `GtfsTime::toSeconds()`, **nie** lexikalisch — die GTFS-Spezifikation
-erlaubt `7:00:00` neben `07:00:00`, und als String ist `"7:00:00" > "23:50:00"`.
+**Die Wendezeit wird entlang des Betriebstags gerechnet, nicht nach der Uhr.** Das ist keine
+Feinheit: Der gtfs.de-Feed notiert **keine** Zeiten jenseits 24:00, eine Nachtfahrt um Viertel nach
+zwölf steht dort als `00:19:00`. Nach der Uhr gerechnet wäre die Wendezeit von `23:20` auf `00:19`
+negativ — **jeder** Nachtlinien-Anschluss über Mitternacht wäre abgewiesen worden. Maßgeblich ist
+der Sortierschlüssel aus dem `OperatingDayResolver` (FAHRPLANPERIODEN §10); jede Seite trägt dabei
+die Grenze ihrer eigenen Linie.
+
+Nie lexikalisch vergleichen: Die GTFS-Spezifikation erlaubt `7:00:00` neben `07:00:00`, und als
+String ist `"7:00:00" > "23:50:00"`.
 
 ---
 

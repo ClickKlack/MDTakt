@@ -42,7 +42,9 @@ Entwicklung einer spezialisierten Plattform zur Umlauf-Erkennung für den Magdeb
 ### 2.3 Sichtungs-Datenmodell (aus MDKursTracker)
 
 Eine Sichtung enthält:
-- `course_number` — Kursnummer (z.B. "K12") — **primärer Schlüssel der Umlauf-Identität**
+- `course_number` — Kursnummer (z.B. "03"). ~~Primärer Schlüssel der Umlauf-Identität~~ —
+  **korrigiert 20.09.2026:** Der Umlauf ist die gepflegte **Kette** (§2.4); die Nummer ist ein
+  Etikett daran, dessen netzweite Eindeutigkeit offen ist (KURSE §2 K3)
 - `line` — Linienbezeichnung (z.B. "1", "6")
 - `direction` — Fahrtrichtung (z.B. "Steubenallee", "Kampstraße")
 - `observed_at` — Zeitstempel der Sichtung (Datum + Uhrzeit)
@@ -176,6 +178,9 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 | `GET` | `/api/v1/admin/stop-links?stop=&period=&day_type=&stand=` | Haltestellen-Editor: endende und beginnende Fahrten samt Entscheidungen (I-14) |
 | `POST` | `/api/v1/admin/trip-links` | Anschluss anlegen oder eine Kette bewusst offen lassen (Betriebsfahrt) |
 | `DELETE` | `/api/v1/admin/trip-links/{id}` | Entscheidung wieder lösen |
+| `GET`/`POST` | `/api/v1/admin/courses` | Umläufe eines Strangs / Umlauf anlegen |
+| `PUT`/`DELETE` | `/api/v1/admin/courses/{id}` | Kursnummer ändern / Umlauf löschen |
+| `PUT`/`DELETE` | `/api/v1/admin/consolidated-trips/{id}/course` | Kurs der **ganzen Kette** setzen / lösen |
 
 > Weitere Admin-Endpunkte (Datenkorrektur, Fahrplanperioden-Erkennung) werden mit den jeweiligen ROADMAP-Iterationen ergänzt.
 

@@ -171,6 +171,46 @@ final class TripLinkTest extends TestCase
     }
 
     /**
+     * Der Fall, wie er im Realbestand tatsächlich steht: Der gtfs.de-Feed notiert **keine**
+     * Zeiten jenseits 24:00, eine Nachtfahrt um 00:19 steht als `00:19:00`. Nach der Uhr
+     * gerechnet wäre die Wendezeit negativ — damit wäre jeder Nachtlinien-Anschluss über
+     * Mitternacht abgewiesen worden.
+     *
+     * Gerechnet wird deshalb entlang des Betriebstags: Auf der N1 liegt 00:19 hinter 23:20.
+     */
+    public function test_a_night_line_connects_across_midnight_without_24h_notation(): void
+    {
+        $version = $this->version('N1');
+        $abends = $this->f->fahrt($version, ['Alter Markt', 'Reform'], ['22:49:00', '23:20:00']);
+        $nachts = $this->f->fahrt($version, ['Reform', 'Alter Markt'], ['00:19:00', '00:50:00']);
+
+        $daten = $this->anlegen([
+            'kind' => 'link',
+            'from_trip_id' => $abends->id,
+            'to_trip_id' => $nachts->id,
+        ])->assertCreated()->json('data');
+
+        // 23:20 -> 00:19 sind 59 Minuten, kein Ruecksprung um 23 Stunden.
+        $this->assertSame(3540, $daten['turnaround_seconds']);
+        $this->assertSame([], $daten['warnings']);
+    }
+
+    /**
+     * Die Gegenprobe: Auf einer **Taglinie** liegt 00:19 vor 23:20 am selben Betriebstag —
+     * dort ist der Rücksprung echt und bleibt ein Fehler.
+     */
+    public function test_a_day_line_still_rejects_a_backwards_link(): void
+    {
+        $version = $this->version('1');
+        $spaet = $this->f->fahrt($version, ['A', 'B'], ['22:49:00', '23:20:00']);
+        $frueh = $this->f->fahrt($version, ['B', 'A'], ['06:19:00', '06:50:00']);
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $spaet->id, 'to_trip_id' => $frueh->id])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 422);
+    }
+
+    /**
      * Die GTFS-Spezifikation erlaubt `7:00:00` neben `07:00:00`. Lexikalisch stünde das
      * hinter `23:50:00` — die Wendezeit wäre grotesk falsch.
      */
@@ -214,6 +254,43 @@ final class TripLinkTest extends TestCase
         $this->anlegen(['kind' => 'link', 'from_trip_id' => $hin->id, 'to_trip_id' => $zurueck->id])
             ->assertStatus(422)
             ->assertJsonPath('error.code', 422);
+    }
+
+    /**
+     * Der Linienwechsel ist erlaubt, der **Gattungswechsel** nicht: Ein Fahrzeug wird nie vom
+     * Tram zum Bus. Beides auseinanderzuhalten ist wesentlich, weil dieselbe Linie beides sein
+     * kann — N2 liegt zeitweise als Tram und als Bus vor (Schienenersatzverkehr).
+     */
+    public function test_a_tram_cannot_continue_as_a_bus(): void
+    {
+        $periode = $this->f->periode();
+        $tram = $this->version('N2', FahrplanTyp::MoFrNormal, 1, $periode);
+        $bus = $this->version('N2', FahrplanTyp::MoFrNormal, 2, $periode);
+
+        $tramFahrt = $this->f->fahrt($tram, ['A', 'B'], ['06:14:00', '06:48:00']);
+        $busFahrt = $this->f->fahrt($bus, ['B', 'C'], ['06:52:00', '07:20:00']);
+
+        ConsolidatedTrip::query()->whereKey($tramFahrt->id)->update(['route_type' => 0]);
+        ConsolidatedTrip::query()->whereKey($busFahrt->id)->update(['route_type' => 3]);
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $tramFahrt->id, 'to_trip_id' => $busFahrt->id])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 422);
+    }
+
+    public function test_two_trams_of_different_lines_may_be_linked(): void
+    {
+        $periode = $this->f->periode();
+        $eins = $this->version('1', FahrplanTyp::MoFrNormal, 1, $periode);
+        $dreizehn = $this->version('13', FahrplanTyp::MoFrNormal, 1, $periode);
+
+        $a = $this->f->fahrt($eins, ['Kannenstieg', 'Sudenburg'], ['06:14:00', '06:48:00']);
+        $b = $this->f->fahrt($dreizehn, ['Sudenburg', 'Westerhüsen'], ['06:52:00', '07:24:00']);
+
+        ConsolidatedTrip::query()->whereIn('id', [$a->id, $b->id])->update(['route_type' => 0]);
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $a->id, 'to_trip_id' => $b->id])
+            ->assertCreated();
     }
 
     public function test_stop_mismatch_is_rejected(): void

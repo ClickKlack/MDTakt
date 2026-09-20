@@ -1,0 +1,89 @@
+meta {
+  name: Trip Course (Kurs der Kette setzen)
+  type: http
+  seq: 20
+}
+
+put {
+  url: {{baseUrl}}/api/v1/admin/consolidated-trips/9835/course
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "number": "03"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.course.number: eq 03
+}
+
+script:post-response {
+  const d = res.body.data;
+
+  if (d.trip_ids.length !== d.trips_assigned) {
+    throw new Error("trips_assigned " + d.trips_assigned + " passt nicht zu " + d.trip_ids.length + " IDs");
+  }
+}
+
+docs {
+  # Kurs der ganzen Kette zuordnen
+
+  Setzt den Kurs fuer **alle** Fahrten der Kette, zu der die angegebene Fahrt gehoert. Welche
+  Fahrt der Kette im Pfad steht, ist gleichgueltig — die Kursnummer ist ein Etikett am Umlauf,
+  nicht an der Fahrt (KURSE §2 K2).
+
+  Beispiel-Response:
+
+  ```json
+  {
+    "data": {
+      "course": { "id": 4, "number": "03", "lines": ["1", "13"], "trip_count": 14,
+                  "duplicate": false },
+      "trips_assigned": 14,
+      "trip_ids": [9835, 10412, 10688]
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **`number` statt `course_id` ist der uebliche Weg.** Wer eine Nummer am Fahrzeug abliest,
+  tippt sie ein; ein im Strang noch unbekannter Umlauf wird dabei angelegt. Dieselbe Nummer
+  zweimal zu setzen erzeugt **keinen** zweiten Umlauf, sondern haengt die zweite Kette an den
+  bestehenden.
+
+  **Beides zugleich wird abgewiesen.** Traegt der Umlauf hinter `course_id` eine andere Nummer
+  als `number`, waere nicht bestimmt, welche gilt — deshalb 422 statt einer stillen Annahme.
+
+  **Der Kurs muss zum Strang der Fahrt passen.** Periode und Fahrplantyp sind Teil der
+  Kurs-Identitaet; ein Kurs aus dem So-Strang waere an einer Mo-Fr-Fahrt an keinem Tag wirksam.
+
+  **`trips_assigned` ist die Kettenlaenge.** Steht dort 1, ist die Fahrt noch mit keiner
+  anderen verknuepft — die Kette entsteht unter `GET /api/v1/admin/stop-links`.
+
+  `DELETE` auf denselben Pfad loest den Kurs von der ganzen Kette. Der Umlauf selbst bleibt
+  bestehen und kann erneut vergeben werden.
+
+  Fehlerfaelle:
+
+  | Fall | Status |
+  |---|---|
+  | Weder `course_id` noch `number` | 422 |
+  | Beide zugleich | 422 |
+  | Kurs aus anderer Periode oder anderem Fahrplantyp | 422 |
+  | Unbekannte Fahrt | 404 |
+  | Kein gueltiger Admin-Token | 401 |
+}

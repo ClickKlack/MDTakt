@@ -1,0 +1,84 @@
+meta {
+  name: Courses (Umlaeufe)
+  type: http
+  seq: 19
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/courses?period=1&day_type=mo_fr
+  body: none
+  auth: bearer
+}
+
+params:query {
+  period: 1
+  day_type: mo_fr
+  ~line: 1
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+}
+
+script:post-response {
+  for (const kurs of res.body.data) {
+    // Die Nummer ist ein String, auch wenn sie nur aus Ziffern besteht - "03" ist nicht 3.
+    if (typeof kurs.number !== "string") {
+      throw new Error("Kursnummer " + kurs.number + " ist kein String");
+    }
+
+    // Ein Umlauf ohne Fahrten hat keine Linien, ein Umlauf mit Fahrten mindestens eine.
+    if ((kurs.trip_count > 0) !== (kurs.lines.length > 0)) {
+      throw new Error("Kurs " + kurs.number + ": trip_count und lines widersprechen sich");
+    }
+  }
+}
+
+docs {
+  # Umlaeufe eines Strangs
+
+  Die vergebenen Kursnummern einer Periode und eines Fahrplantyps, samt der Linien, die der
+  jeweilige Umlauf beruehrt.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": [
+      {
+        "id": 4, "period_id": 1, "day_type": "mo_fr", "day_type_label": "Mo-Fr",
+        "number": "03", "note": null,
+        "trip_count": 14, "lines": ["1", "13"],
+        "first_departure": "05:12:00", "last_arrival": "23:41:00",
+        "duplicate": false
+      }
+    ]
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **`lines` hat oft mehr als einen Eintrag.** Ein Umlauf laeuft ueber Linien hinweg: Eine 1
+  wird in Sudenburg zur 13, und die Kursnummer bleibt dabei. Der Filter `line=` findet alle
+  Umlaeufe, die diese Linie **beruehren** — derselbe Umlauf erscheint also bei jeder seiner
+  Linien.
+
+  **`duplicate` ist kein Fehler.** Ob die Kursnummer netzweit eindeutig ist oder nur je Linie,
+  ist offen (KURSE §2 K3). Ein Unique-Index waere eine Behauptung; die Meldung dagegen findet
+  Tippfehler und laesst sich folgenlos ignorieren.
+
+  **Eckzeiten folgen dem Betriebstag, nicht der Uhr.** Auf einer Nachtlinie beginnt der Umlauf
+  abends und endet am Morgen darauf — `first_departure` kann also groesser aussehen als
+  `last_arrival`.
+
+  **Die Nummer ist ein String.** `"03"` ist nicht `3`; die fuehrende Null gehoert dazu.
+}

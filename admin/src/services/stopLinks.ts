@@ -80,7 +80,11 @@ export interface StopLinkBoard {
 }
 
 export interface TripLinkWarning {
-  code: 'short_turnaround' | 'line_change'
+  /**
+   * `course_conflict`: Beide Ketten trugen bereits verschiedene Kursnummern. Die Verknüpfung
+   * bleibt bestehen — sie ist eine Aussage über das Fahrzeug —, aber der Kurs ist zu klären.
+   */
+  code: 'short_turnaround' | 'line_change' | 'course_conflict'
   message: string
 }
 
@@ -94,6 +98,13 @@ export interface TripLinkResult {
   note: string | null
   /** Hinweise, die die Verknüpfung **nicht** verhindern. */
   warnings: TripLinkWarning[]
+  /**
+   * Der Kurs der Kette nach dem Anschluss. Zwei verknüpfte Fahrten sind dasselbe Fahrzeug,
+   * also derselbe Kurs: Trug eine Seite bereits eine Nummer, gilt sie jetzt für beide.
+   */
+  course: { id: number; number: string; lines: string[]; duplicate: boolean } | null
+  /** Auf wie viele Fahrten der Kurs dabei übertragen wurde. 0 = es gab nichts zu übertragen. */
+  course_trips_assigned: number
 }
 
 export interface TripLinkInput {

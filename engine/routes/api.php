@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\AuthController;
+use App\Http\Controllers\Admin\CourseController;
 use App\Http\Controllers\Admin\CoverageController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\Admin\SchoolHolidayController;
 use App\Http\Controllers\Admin\StopGroupController;
 use App\Http\Controllers\Admin\StopLinkController;
 use App\Http\Controllers\Admin\TimetableController;
+use App\Http\Controllers\Admin\TripCourseController;
 use App\Http\Controllers\Admin\TripLinkController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\LineController;
@@ -76,6 +78,16 @@ Route::prefix('v1')->group(function (): void {
             Route::get('stop-links', [StopLinkController::class, 'index'])->name('admin.stop-links.index');
             Route::post('trip-links', [TripLinkController::class, 'store'])->name('admin.trip-links.store');
             Route::delete('trip-links/{tripLink}', [TripLinkController::class, 'destroy'])->name('admin.trip-links.destroy');
+
+            // Kursnummern — das Etikett am Umlauf, nie an der einzelnen Fahrt (KURSE §2 K2).
+            Route::get('courses', [CourseController::class, 'index'])->name('admin.courses.index');
+            Route::post('courses', [CourseController::class, 'store'])->name('admin.courses.store');
+            Route::put('courses/{course}', [CourseController::class, 'update'])->name('admin.courses.update');
+            Route::delete('courses/{course}', [CourseController::class, 'destroy'])->name('admin.courses.destroy');
+            Route::put('consolidated-trips/{consolidatedTrip}/course', [TripCourseController::class, 'update'])
+                ->name('admin.trips.course.update');
+            Route::delete('consolidated-trips/{consolidatedTrip}/course', [TripCourseController::class, 'destroy'])
+                ->name('admin.trips.course.destroy');
 
             // Fahrplanperioden — netzweit, kuratiert (FAHRPLANPERIODEN §4.1)
             Route::get('schedule-periods', [SchedulePeriodController::class, 'index'])->name('admin.schedule-periods.index');

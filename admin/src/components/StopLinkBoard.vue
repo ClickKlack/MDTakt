@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, type VNode } from 'vue'
 import type { Line } from '../services/lines'
 import type { StopLinkBoard, StopLinkTrip } from '../services/stopLinks'
 import { formatClock, formatDuration } from '../utils/timezone'
@@ -12,6 +12,10 @@ const props = defineProps<{
   /** Die links ausgewählte endende Fahrt, die auf einen Anschluss wartet. */
   selected: number | null
   busy: boolean
+  /** `null` = alle Verkehrsmittel. */
+  modeFilter: 'tram' | 'bus' | null
+  /** `null` = alle Linien. */
+  lineFilter: string | null
 }>()
 
 const emit = defineEmits<{
@@ -19,7 +23,49 @@ const emit = defineEmits<{
   link: [fromTripId: number, toTripId: number]
   mark: [tripId: number, kind: 'start' | 'end']
   unlink: [linkId: number]
+  assignCourse: [tripId: number, number: string]
+  detachCourse: [tripId: number]
 }>()
+
+/** Die Fahrt, deren Kursnummer gerade bearbeitet wird. */
+const bearbeitet = ref<number | null>(null)
+const eingabe = ref('')
+
+function bearbeiteKurs(trip: StopLinkTrip): void {
+  bearbeitet.value = trip.id
+  eingabe.value = trip.course?.number ?? ''
+}
+
+function uebernimmKurs(trip: StopLinkTrip): void {
+  const wert = eingabe.value.trim()
+  bearbeitet.value = null
+
+  if (wert === (trip.course?.number ?? '')) {
+    return
+  }
+
+  if (wert === '') {
+    if (trip.course) {
+      emit('detachCourse', trip.id)
+    }
+    return
+  }
+
+  emit('assignCourse', trip.id, wert)
+}
+
+/**
+ * Fokus setzen und eine vorhandene Nummer markieren — siehe TimetableGrid: Ein `ref` im
+ * `v-for` waere ein Array, und der Mount-Hook feuert vor `v-model`, das `el.value` erst in
+ * seinem eigenen `mounted` setzt. Deshalb `nextTick`.
+ */
+async function feldBereit(vnode: VNode): Promise<void> {
+  await nextTick()
+
+  const el = vnode.el as HTMLInputElement | null
+  el?.focus()
+  el?.select()
+}
 
 /**
  * Eine Zeile der Gegenüberstellung. Verknüpfte Fahrten stehen **nebeneinander**, auch wenn
@@ -48,8 +94,31 @@ function signet(trip: StopLinkTrip): Line {
   )
 }
 
+function passt(trip: StopLinkTrip | null): boolean {
+  if (trip === null) {
+    return false
+  }
+  if (props.modeFilter !== null && trip.mode !== props.modeFilter) {
+    return false
+  }
+  return props.lineFilter === null || trip.line === props.lineFilter
+}
+
+/**
+ * Die Zeit, gegen die eine bestehende Zeile beim Einsortieren einer Abfahrt verglichen wird.
+ *
+ * Hat die Zeile eine Abfahrt, zaehlt diese — dann stehen beide in derselben Spalte. Hat sie
+ * keine (eine Ankunft ohne Anschluss), zaehlt ihre Ankunft, damit die Abfahrt im zeitlichen
+ * Fluss landet. Ohne den zweiten Fall rutschten an einer noch ungepflegten Haltestelle
+ * **alle** Abfahrten ans Ende, weil dort keine einzige Zeile eine Abfahrt traegt.
+ */
+function vergleichszeit(zeile: Zeile): number {
+  return zeile.starting?.departure_sort ?? zeile.ending?.arrival_sort ?? Number.MAX_SAFE_INTEGER
+}
+
 const zeilen = computed<Zeile[]>(() => {
-  const rows: Zeile[] = []
+  const mitAnkunft: Zeile[] = []
+  const nurAbfahrt: Zeile[] = []
   const bereitsRechts = new Set<number>()
 
   for (const endet of props.board.ending) {
@@ -60,7 +129,7 @@ const zeilen = computed<Zeile[]>(() => {
       bereitsRechts.add(partner.id)
     }
 
-    rows.push({
+    mitAnkunft.push({
       key: `e${endet.id}`,
       ending: endet,
       starting: partner,
@@ -72,7 +141,7 @@ const zeilen = computed<Zeile[]>(() => {
     if (bereitsRechts.has(beginnt.id)) {
       continue
     }
-    rows.push({
+    nurAbfahrt.push({
       key: `s${beginnt.id}`,
       ending: null,
       starting: beginnt,
@@ -80,11 +149,40 @@ const zeilen = computed<Zeile[]>(() => {
     })
   }
 
-  return rows.sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key))
+  // Die Ankunft fuehrt: Zeilen mit linker Seite stehen nach ihr sortiert, damit die linke
+  // Spalte lueckenlos aufsteigt. Kreuzen sich zwei Anschluesse, springt dafuer die rechte —
+  // beides zugleich geht nicht.
+  mitAnkunft.sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key))
+  nurAbfahrt.sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key))
+
+  // Eine Abfahrt **ohne** Ankunft kreuzt dagegen nichts: Sie hat keine linke Seite, also
+  // verschiebt ihre Position dort nichts. Sie wird deshalb dort eingehaengt, wo sie
+  // hingehoert — sonst stuende eine Ausrueck-Fahrt um 04:36 unter einem Anschluss, der erst
+  // um 04:51 abfaehrt.
+  const ergebnis = [...mitAnkunft]
+
+  for (const zeile of nurAbfahrt) {
+    const eigene = zeile.starting?.departure_sort ?? Number.MAX_SAFE_INTEGER
+    const stelle = ergebnis.findIndex((r) => vergleichszeit(r) > eigene)
+
+    if (stelle === -1) {
+      ergebnis.push(zeile)
+    } else {
+      ergebnis.splice(stelle, 0, zeile)
+    }
+  }
+
+  return ergebnis.filter((zeile) => passt(zeile.ending) || passt(zeile.starting))
 })
 
-const offeneEnden = computed(() => props.board.ending.filter((f) => f.decision === null).length)
-const offeneAnfaenge = computed(() => props.board.starting.filter((f) => f.decision === null).length)
+const offeneEnden = computed(
+  () => props.board.ending.filter((f) => passt(f) && f.decision === null).length,
+)
+const offeneAnfaenge = computed(
+  () => props.board.starting.filter((f) => passt(f) && f.decision === null).length,
+)
+const sichtbareEnden = computed(() => props.board.ending.filter(passt).length)
+const sichtbareAnfaenge = computed(() => props.board.starting.filter(passt).length)
 
 /** Nur eine offene beginnende Fahrt kann einen Anschluss aufnehmen. */
 function istZiel(trip: StopLinkTrip | null): boolean {
@@ -116,13 +214,13 @@ function kurz(wendezeit: number | null): boolean {
       <h2 class="flex items-baseline justify-between text-sm font-medium text-slate-900">
         Endet hier
         <span class="text-xs font-normal text-slate-500">
-          {{ board.ending.length }} Fahrten · {{ offeneEnden }} offen
+          {{ sichtbareEnden }} Fahrten · {{ offeneEnden }} offen
         </span>
       </h2>
       <h2 class="flex items-baseline justify-between text-sm font-medium text-slate-900">
         Beginnt hier
         <span class="text-xs font-normal text-slate-500">
-          {{ board.starting.length }} Fahrten · {{ offeneAnfaenge }} offen
+          {{ sichtbareAnfaenge }} Fahrten · {{ offeneAnfaenge }} offen
         </span>
       </h2>
     </div>
@@ -131,7 +229,12 @@ function kurz(wendezeit: number | null): boolean {
       v-if="zeilen.length === 0"
       class="mt-3 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600"
     >
-      An dieser Haltestelle beginnt und endet in diesem Versionsstand keine Fahrt.
+      <template v-if="modeFilter !== null || lineFilter !== null">
+        Keine Fahrt passt zu diesem Filter. Setz ihn zurück, um alles zu sehen.
+      </template>
+      <template v-else>
+        An dieser Haltestelle beginnt und endet in diesem Versionsstand keine Fahrt.
+      </template>
     </p>
 
     <ul v-else class="mt-1 divide-y divide-slate-100">
@@ -139,11 +242,13 @@ function kurz(wendezeit: number | null): boolean {
         <!-- Linke Seite: endende Fahrt -->
         <div
           v-if="zeile.ending"
-          class="rounded-lg border px-3 py-2 transition"
+          class="rounded-lg border px-3 py-2 transition hover:opacity-100"
           :class="[
             zeile.ending.decision === null
               ? 'cursor-pointer border-slate-200 bg-white hover:border-slate-400'
-              : 'border-slate-100 bg-white',
+              // Entschieden heisst erledigt: gedaempft, damit das Auge die offenen findet.
+              // Beim Ueberfahren wieder voll lesbar — aendern muss man sie ja koennen.
+              : 'border-slate-100 bg-white opacity-55',
             selected === zeile.ending.id ? 'border-slate-800 ring-2 ring-slate-800' : '',
           ]"
           @click="klickEndend(zeile.ending)"
@@ -152,16 +257,33 @@ function kurz(wendezeit: number | null): boolean {
             <LineBadge :line="signet(zeile.ending)" size="sm" />
             <!-- Der Kurs ist die eigentliche Auskunft dieser Ansicht: Er sagt, zu welchem
                  Umlauf die Fahrt gehoert. Deshalb steht er direkt neben dem Signet. -->
-            <span
-              v-if="zeile.ending.course"
-              class="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-white"
-              :title="`Kurs ${zeile.ending.course.number}`"
+            <input
+              v-if="bearbeitet === zeile.ending.id"
+              v-model="eingabe"
+              type="text"
+              maxlength="8"
+              class="w-16 rounded border border-slate-800 px-1 py-0.5 text-xs tabular-nums focus:outline-none"
+              @vue:mounted="feldBereit"
+              @click.stop
+              @blur="uebernimmKurs(zeile.ending)"
+              @keydown.enter.prevent="uebernimmKurs(zeile.ending)"
+              @keydown.esc.prevent="bearbeitet = null"
+            />
+            <button
+              v-else
+              type="button"
+              class="rounded px-1.5 py-0.5 text-xs tabular-nums transition disabled:opacity-50"
+              :class="
+                zeile.ending.course
+                  ? 'bg-slate-800 font-semibold text-white hover:bg-slate-700'
+                  : 'border border-dashed border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-700'
+              "
+              :disabled="busy"
+              :title="zeile.ending.course ? 'Kurs ändern' : 'Kursnummer eintragen'"
+              @click.stop="bearbeiteKurs(zeile.ending)"
             >
-              {{ zeile.ending.course.display }}
-            </span>
-            <span v-else class="rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-xs text-slate-400">
-              ohne Kurs
-            </span>
+              {{ zeile.ending.course ? zeile.ending.course.display : 'ohne Kurs' }}
+            </button>
             <span class="ml-auto shrink-0 text-sm tabular-nums font-medium text-slate-900">
               {{ formatClock(zeile.ending.arrival_time) }}
             </span>
@@ -187,11 +309,13 @@ function kurz(wendezeit: number | null): boolean {
         <!-- Rechte Seite: beginnende Fahrt -->
         <div
           v-if="zeile.starting"
-          class="rounded-lg border px-3 py-2 transition"
+          class="rounded-lg border px-3 py-2 transition hover:opacity-100"
           :class="[
             istZiel(zeile.starting)
               ? 'cursor-pointer border-emerald-400 bg-emerald-50/40 hover:border-emerald-600'
-              : 'border-slate-100 bg-white',
+              : zeile.starting.decision === null
+                ? 'border-slate-200 bg-white'
+                : 'border-slate-100 bg-white opacity-55',
           ]"
           @click="klickBeginnend(zeile.starting)"
         >
@@ -200,16 +324,33 @@ function kurz(wendezeit: number | null): boolean {
               {{ formatClock(zeile.starting.departure_time) }}
             </span>
             <LineBadge :line="signet(zeile.starting)" size="sm" />
-            <span
-              v-if="zeile.starting.course"
-              class="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-white"
-              :title="`Kurs ${zeile.starting.course.number}`"
+            <input
+              v-if="bearbeitet === zeile.starting.id"
+              v-model="eingabe"
+              type="text"
+              maxlength="8"
+              class="w-16 rounded border border-slate-800 px-1 py-0.5 text-xs tabular-nums focus:outline-none"
+              @vue:mounted="feldBereit"
+              @click.stop
+              @blur="uebernimmKurs(zeile.starting)"
+              @keydown.enter.prevent="uebernimmKurs(zeile.starting)"
+              @keydown.esc.prevent="bearbeitet = null"
+            />
+            <button
+              v-else
+              type="button"
+              class="rounded px-1.5 py-0.5 text-xs tabular-nums transition disabled:opacity-50"
+              :class="
+                zeile.starting.course
+                  ? 'bg-slate-800 font-semibold text-white hover:bg-slate-700'
+                  : 'border border-dashed border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-700'
+              "
+              :disabled="busy"
+              :title="zeile.starting.course ? 'Kurs ändern' : 'Kursnummer eintragen'"
+              @click.stop="bearbeiteKurs(zeile.starting)"
             >
-              {{ zeile.starting.course.display }}
-            </span>
-            <span v-else class="rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-xs text-slate-400">
-              ohne Kurs
-            </span>
+              {{ zeile.starting.course ? zeile.starting.course.display : 'ohne Kurs' }}
+            </button>
           </div>
           <div class="mt-1 flex items-center gap-2 text-xs">
             <span class="min-w-0 flex-1 truncate text-slate-600">nach {{ zeile.starting.end_stop ?? '—' }}</span>
@@ -235,7 +376,7 @@ function kurz(wendezeit: number | null): boolean {
         <!-- Die Verbindung selbst, ueber beide Spalten: Wendezeit und Loesen -->
         <div
           v-if="zeile.ending && zeile.starting && zeile.ending.decision?.kind === 'link'"
-          class="col-span-2 -mt-0.5 flex items-center justify-center gap-2 text-xs"
+          class="col-span-2 -mt-0.5 flex items-center justify-center gap-2 text-xs opacity-55 transition hover:opacity-100"
         >
           <span class="h-px flex-1 bg-slate-200" />
           <span

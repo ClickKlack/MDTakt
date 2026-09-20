@@ -475,10 +475,12 @@ final class StopLinkBoardService
         $wendezeit = null;
 
         if ($kind === TripLinkKind::Link && $link->from_trip_id !== null && $link->to_trip_id !== null) {
-            $ankunft = GtfsTime::toSeconds($partner[(int) $link->from_trip_id]['arrival_time'] ?? null);
-            $abfahrt = GtfsTime::toSeconds($partner[(int) $link->to_trip_id]['departure_time'] ?? null);
+            // Entlang des Betriebstags, nicht der Uhr: Auf der N1 folgt auf eine Ankunft um
+            // 23:20 eine Abfahrt um 00:19 — 59 Minuten Wende, kein Ruecksprung.
+            $ankunft = $partner[(int) $link->from_trip_id]['arrival_sort'] ?? PHP_INT_MAX;
+            $abfahrt = $partner[(int) $link->to_trip_id]['departure_sort'] ?? PHP_INT_MAX;
 
-            $wendezeit = $ankunft === null || $abfahrt === null ? null : $abfahrt - $ankunft;
+            $wendezeit = ($ankunft === PHP_INT_MAX || $abfahrt === PHP_INT_MAX) ? null : $abfahrt - $ankunft;
         }
 
         return [

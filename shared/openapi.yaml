@@ -647,6 +647,63 @@ components:
           items: { $ref: '#/components/schemas/ConsolidatedStop' }
         meta: { $ref: '#/components/schemas/SourceMeta' }
 
+    Course:
+      type: object
+      required: [id, period_id, day_type, number, trip_count, lines]
+      description: >
+        Ein **Umlauf** als benennbare Einheit. Die Kursnummer gehoert ihm, nicht der Linie:
+        Wechselt ein Fahrzeug in Sudenburg von der 1 auf die 13, bleibt die Nummer und nur der
+        Anzeige-Praefix wechselt (`1/03` -> `13/03`, KURSE §2 K1).
+      properties:
+        id: { type: integer }
+        period_id: { type: integer }
+        day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+        day_type_label: { type: string }
+        number: { type: string, maxLength: 8, example: '03' }
+        note: { type: string, nullable: true }
+        trip_count: { type: integer }
+        lines:
+          type: array
+          description: Die Linien, die dieser Umlauf beruehrt — mehr als eine ist der Normalfall.
+          items: { type: string }
+        first_departure: { type: string, nullable: true, example: '06:14:00' }
+        last_arrival: { type: string, nullable: true, example: '23:41:00' }
+        duplicate:
+          type: boolean
+          description: >
+            Ein anderer Umlauf im selben (Periode, Fahrplantyp) traegt dieselbe Nummer. Das ist
+            **kein Fehler**: Ob die Kursnummer netzweit eindeutig ist, ist offen (KURSE §2 K3).
+            Gemeldet wird es trotzdem — es findet Tippfehler.
+
+    CourseListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Course' }
+
+    CourseAssignmentResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [course, trips_assigned, trip_ids]
+          properties:
+            course:
+              allOf: [{ $ref: '#/components/schemas/Course' }]
+              nullable: true
+              description: '`null`, wenn der Kurs geloest wurde.'
+            trips_assigned:
+              type: integer
+              description: >
+                Zahl der betroffenen Fahrten. Der Kurs gilt immer fuer die **ganze Kette**, nie
+                fuer eine einzelne Fahrt — er ist ein Etikett am Umlauf (KURSE §2 K2).
+            trip_ids:
+              type: array
+              items: { type: integer }
+
     StopGroupStop:
       type: object
       required: [id, name, assigned_via]
@@ -922,17 +979,30 @@ components:
             to_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
             turnaround_seconds: { type: integer, nullable: true }
             note: { type: string, nullable: true }
+            course:
+              allOf: [{ $ref: '#/components/schemas/Course' }]
+              nullable: true
+              description: >
+                Der Kurs der Kette **nach** dem Anschluss. Zwei verknuepfte Fahrten sind dasselbe
+                Fahrzeug, also derselbe Kurs: Trug eine Seite bereits eine Nummer, gilt sie jetzt
+                fuer die ganze Kette (KURSE §2 K2). `null`, wenn keine Seite einen Kurs trug oder
+                beide verschiedene tragen.
+            course_trips_assigned:
+              type: integer
+              description: Auf wie viele Fahrten der Kurs dabei uebertragen wurde. 0 = nichts zu uebertragen.
             warnings:
               type: array
               description: >
-                Hinweise, die die Verknüpfung **nicht** verhindern. `short_turnaround` bei einer
+                Hinweise, die die Verknuepfung **nicht** verhindern. `short_turnaround` bei einer
                 Wendezeit unter `COURSE_MIN_TURNAROUND_MINUTES`, `line_change` beim Linienwechsel
-                (ausdrücklich erlaubt, siehe KURSE §2 K1).
+                (ausdruecklich erlaubt, siehe KURSE §2 K1), `course_conflict`, wenn beide Ketten
+                bereits **verschiedene** Kursnummern tragen — dann wird nichts ueberschrieben,
+                weil nur der Pflegende weiss, welche die richtige ist.
               items:
                 type: object
                 required: [code, message]
                 properties:
-                  code: { type: string, enum: [short_turnaround, line_change] }
+                  code: { type: string, enum: [short_turnaround, line_change, course_conflict] }
                   message: { type: string }
 
     TimetableRow:
@@ -1591,6 +1661,224 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/admin/courses:
+    get:
+      operationId: listCourses
+      summary: Umlaeufe einer Periode und eines Fahrplantyps
+      description: >
+        Die vergebenen Kursnummern samt der Linien, die der jeweilige Umlauf beruehrt.
+        `line` schraenkt auf Umlaeufe ein, die diese Linie beruehren — ein Umlauf kann mehrere
+        Linien umfassen und erscheint dann bei jeder.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: day_type
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/FahrplanTyp' }
+        - name: line
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Umlaeufe, nach Nummer sortiert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CourseListResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannte Periode oder unbekannter Fahrplantyp
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: createCourse
+      summary: Umlauf anlegen
+      description: >
+        Legt eine Kursnummer an, ohne ihr schon Fahrten zuzuordnen. Meist unnoetig: Das
+        Zuordnen an einer Fahrt legt einen noch unbekannten Kurs selbst an.
+
+
+        **Keine Eindeutigkeitspruefung** — ob die Nummer netzweit eindeutig ist, ist offen
+        (KURSE §2 K3). Eine Dublette wird im Feld `duplicate` gemeldet, nicht abgewiesen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [period_id, day_type, number]
+              properties:
+                period_id: { type: integer }
+                day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+                number: { type: string, maxLength: 8 }
+                note: { type: string, nullable: true, maxLength: 255 }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Course' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Pflichtfeld fehlt oder unbekannte Periode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/courses/{course}:
+    parameters:
+      - name: course
+        in: path
+        required: true
+        schema: { type: integer }
+    put:
+      operationId: updateCourse
+      summary: Kursnummer oder Notiz aendern
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [number]
+              properties:
+                number: { type: string, maxLength: 8 }
+                note: { type: string, nullable: true, maxLength: 255 }
+      responses:
+        '200':
+          description: Geaendert
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Course' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannter Umlauf
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      operationId: deleteCourse
+      summary: Umlauf loeschen
+      description: >
+        Loescht die Kursnummer. Die Fahrten bleiben und ihre Verkettung ebenfalls — nur das
+        Etikett faellt weg.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '204':
+          description: Geloescht
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/consolidated-trips/{consolidatedTrip}/course:
+    parameters:
+      - name: consolidatedTrip
+        in: path
+        required: true
+        description: '`consolidated_trips.id` — irgendeine Fahrt der Kette.'
+        schema: { type: integer }
+    put:
+      operationId: assignCourseToTrip
+      summary: Kurs der ganzen Kette zuordnen
+      description: >
+        Setzt den Kurs fuer **alle** Fahrten der Kette, zu der diese Fahrt gehoert — die
+        Kursnummer ist ein Etikett am Umlauf, nicht an der Fahrt (KURSE §2 K2). Welche Fahrt
+        der Kette angegeben wird, ist gleichgueltig.
+
+
+        Entweder `course_id` (bestehender Umlauf) oder `number` (wird angelegt, falls im
+        selben Periode/Fahrplantyp noch nicht vorhanden). `number` ist der uebliche Weg: Wer
+        eine Nummer am Fahrzeug abliest, will sie eintippen und nicht erst einen Kurs anlegen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                course_id: { type: integer, nullable: true }
+                number: { type: string, nullable: true, maxLength: 8 }
+      responses:
+        '200':
+          description: Zugeordnet — `trips_assigned` nennt die Laenge der Kette
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CourseAssignmentResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannte Fahrt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: >
+            Weder `course_id` noch `number` angegeben, beide zugleich, oder der Kurs gehoert zu
+            einer anderen Periode bzw. einem anderen Fahrplantyp als die Fahrt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      operationId: detachCourseFromTrip
+      summary: Kurs von der ganzen Kette loesen
+      description: >
+        Nimmt den Kurs von allen Fahrten der Kette. Der Umlauf selbst bleibt bestehen und kann
+        erneut vergeben werden.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Geloest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CourseAssignmentResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannte Fahrt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/admin/stop-groups:
     get:
       operationId: listStopGroups
@@ -1917,6 +2205,11 @@ paths:
         wird als Hinweis gemeldet, nicht abgewiesen (KURSE §2, K1).
 
 
+        **Der Gattungswechsel dagegen wird abgewiesen.** Ein Fahrzeug wird nie vom Tram zum Bus.
+        Beides auseinanderzuhalten ist wesentlich, weil dieselbe Linie beides sein kann — N2
+        liegt zeitweise als Tram und als Bus vor (Schienenersatzverkehr).
+
+
         **Geprüft wird die Haltestelle, nicht der Halt.** An einer Endstelle liegen Ankunft und
         Abfahrt oft auf verschiedenen Bahnsteigen — netzweit bei 64 von 104 Endstellen. Beide
         Halte müssen derselben `stop_group` angehören; gehören sie es nicht, ist das der
@@ -1952,8 +2245,9 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: >
-            Haltestelle passt nicht, verschiedene Periode oder Fahrplantyp, Gültigkeiten
-            überschneiden sich nicht, Zyklus, oder negative Wendezeit
+            Haltestelle passt nicht, verschiedene Periode oder Fahrplantyp, **Gattungswechsel**
+            (Tram auf Bus), Gueltigkeiten ueberschneiden sich nicht, Zyklus, oder negative
+            Wendezeit
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

@@ -33,6 +33,7 @@ final class TimetableService
         private readonly StopSequenceAligner $aligner,
         private readonly ConsolidatedStopNameResolver $stopNames,
         private readonly OperatingDayResolver $operatingDay,
+        private readonly CourseLookup $courses,
     ) {}
 
     /**
@@ -240,6 +241,10 @@ final class TimetableService
     ): array {
         $spalten = [];
 
+        // Der Kurs sagt, zu welchem Umlauf eine Fahrt gehoert — die Auskunft, wegen der
+        // I-13 (D) offen war. Er haengt an der Kette, nicht an der Fahrt (KURSE §2 K2).
+        $kurse = $this->courses->forTrips($gruppe->pluck('id')->map(static fn ($x): int => (int) $x)->all());
+
         foreach ($gruppe as $fahrt) {
             $id = (int) $fahrt->id;
 
@@ -265,6 +270,13 @@ final class TimetableService
                 'mode' => RouteType::modeFor((int) $fahrt->route_type),
                 'departure_time' => $erste['departure'] ?? $erste['arrival'],
                 'arrival_time' => $letzte['arrival'] ?? $letzte['departure'],
+                'course' => isset($kurse[$id]) ? [
+                    'id' => $kurse[$id]['id'],
+                    'number' => $kurse[$id]['number'],
+                    // Der Linien-Praefix ist reine Anzeige: dieselbe Kette heisst auf der 1
+                    // "1/03" und nach dem Uebergang "13/03" (KURSE §2 K1).
+                    'display' => $line.'/'.$kurse[$id]['number'],
+                ] : null,
                 'cells' => $zellen,
             ];
         }

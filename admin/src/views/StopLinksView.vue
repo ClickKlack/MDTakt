@@ -5,6 +5,7 @@ import AppHeader from '../components/AppHeader.vue'
 import StopLinkBoard from '../components/StopLinkBoard.vue'
 import { FAHRPLAN_TYPEN, fetchLines, type FahrplanTyp, type Line } from '../services/lines'
 import { fetchSchedulePeriods, type SchedulePeriod } from '../services/schedulePeriods'
+import { assignCourse, detachCourse } from '../services/courses'
 import { fetchStopGroups, type StopGroup } from '../services/stopGroups'
 import {
   createTripLink,
@@ -27,6 +28,8 @@ const gewaehlteHaltestelle = ref<number | null>(null)
 const gewaehltePeriode = ref<number | null>(null)
 const dayType = ref<FahrplanTyp>('mo_fr')
 const gewaehlterStand = ref<number | null>(null)
+const modeFilter = ref<'tram' | 'bus' | null>(null)
+const lineFilter = ref<string | null>(null)
 
 const board = ref<Board | null>(null)
 const auswahl = ref<number | null>(null)
@@ -36,6 +39,8 @@ const loadingBoard = ref(false)
 const busy = ref(false)
 const error = ref<string | null>(null)
 const hinweise = ref<TripLinkWarning[]>([])
+/** Positive Rueckmeldung — getrennt von den Warnungen, damit beides sein Gewicht behaelt. */
+const erfolg = ref<string | null>(null)
 
 const gefiltert = computed(() => {
   const begriff = suche.value.trim().toLowerCase()
@@ -46,6 +51,28 @@ const gefiltert = computed(() => {
 
 /** Haltestellen, an denen nur endet oder nur beginnt — dort fehlt meist ein Bahnsteig. */
 const einseitige = computed(() => haltestellen.value.filter((h) => h.one_sided).length)
+
+/** Die Linien, die an diesem Halt tatsächlich beginnen oder enden — nur die sind filterbar. */
+const linienAmHalt = computed(() => {
+  if (board.value === null) {
+    return []
+  }
+
+  const alle = [...board.value.ending, ...board.value.starting]
+    .filter((f) => modeFilter.value === null || f.mode === modeFilter.value)
+    .map((f) => f.line)
+
+  return [...new Set(alle)].sort((a, b) => a.localeCompare(b, 'de', { numeric: true }))
+})
+
+/** Verkehrsmittel, die hier überhaupt vorkommen — ein Filter auf Leeres wäre irreführend. */
+const mittelAmHalt = computed(() => {
+  if (board.value === null) {
+    return []
+  }
+  const alle = [...board.value.ending, ...board.value.starting].map((f) => f.mode)
+  return [...new Set(alle)].filter((m): m is 'tram' | 'bus' => m === 'tram' || m === 'bus')
+})
 
 onMounted(async () => {
   try {
@@ -119,6 +146,8 @@ function meldung(e: unknown, fallback: string): string {
 
 async function waehleHaltestelle(id: number): Promise<void> {
   gewaehlteHaltestelle.value = id
+  // Ein anderer Halt hat andere Linien — ein mitgeschleppter Linienfilter zeigte dort nichts.
+  lineFilter.value = null
   // Eine andere Haltestelle hat eigene Versionsstände — der alte Index sagt dort nichts.
   gewaehlterStand.value = null
   await ladeBoard()
@@ -128,10 +157,18 @@ async function verknuepfe(fromTripId: number, toTripId: number): Promise<void> {
   busy.value = true
   error.value = null
   hinweise.value = []
+  erfolg.value = null
 
   try {
     const ergebnis = await createTripLink({ kind: 'link', from_trip_id: fromTripId, to_trip_id: toTripId })
     hinweise.value = ergebnis.warnings
+
+    // Zwei verknuepfte Fahrten sind dasselbe Fahrzeug, also derselbe Kurs. Wurde er dabei
+    // uebertragen, sagen wir das — sonst wirkt es, als haette die App etwas eigenmaechtig getan.
+    if (ergebnis.course !== null && ergebnis.course_trips_assigned > 0) {
+      erfolg.value = `Kurs ${ergebnis.course.number} auf ${ergebnis.course_trips_assigned} weitere Fahrten des Umlaufs übertragen.`
+    }
+
     await ladeBoard()
   } catch (e: unknown) {
     error.value = meldung(e, 'Der Anschluss konnte nicht angelegt werden.')
@@ -144,6 +181,7 @@ async function markiere(tripId: number, kind: 'start' | 'end'): Promise<void> {
   busy.value = true
   error.value = null
   hinweise.value = []
+  erfolg.value = null
 
   try {
     await createTripLink(
@@ -157,10 +195,58 @@ async function markiere(tripId: number, kind: 'start' | 'end'): Promise<void> {
   }
 }
 
+async function setzeKurs(tripId: number, nummer: string): Promise<void> {
+  busy.value = true
+  error.value = null
+  hinweise.value = []
+  erfolg.value = null
+
+  try {
+    const ergebnis = await assignCourse(tripId, nummer)
+
+    erfolg.value =
+      ergebnis.trips_assigned > 1
+        ? `Kurs ${ergebnis.course?.number} gilt jetzt für ${ergebnis.trips_assigned} Fahrten dieses Umlaufs.`
+        : `Kurs ${ergebnis.course?.number} gesetzt.`
+
+    if (ergebnis.course?.duplicate) {
+      hinweise.value = [
+        {
+          code: 'course_conflict',
+          message: `Die Nummer ${ergebnis.course.number} trägt bereits ein anderer Umlauf.`,
+        },
+      ]
+    }
+
+    await ladeBoard()
+  } catch (e: unknown) {
+    error.value = meldung(e, 'Der Kurs konnte nicht gesetzt werden.')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function loeseKurs(tripId: number): Promise<void> {
+  busy.value = true
+  error.value = null
+  hinweise.value = []
+  erfolg.value = null
+
+  try {
+    await detachCourse(tripId)
+    await ladeBoard()
+  } catch (e: unknown) {
+    error.value = meldung(e, 'Der Kurs konnte nicht gelöst werden.')
+  } finally {
+    busy.value = false
+  }
+}
+
 async function loese(linkId: number): Promise<void> {
   busy.value = true
   error.value = null
   hinweise.value = []
+  erfolg.value = null
 
   try {
     await deleteTripLink(linkId)
@@ -176,8 +262,9 @@ watch([gewaehltePeriode, dayType], () => {
   if (loading.value) {
     return
   }
-  // Perioden und Fahrplantypen haben je eigene Versionsstände.
+  // Perioden und Fahrplantypen haben je eigene Versionsstände und je eigene Linien.
   gewaehlterStand.value = null
+  lineFilter.value = null
   void ladeBoard()
 })
 
@@ -206,6 +293,10 @@ watch(gewaehlterStand, (neu, alt) => {
 
       <template v-else>
         <p v-if="error" class="mt-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
+
+        <p v-if="erfolg" class="mt-4 rounded-md bg-emerald-50 px-4 py-2 text-sm text-emerald-900">
+          {{ erfolg }}
+        </p>
 
         <ul v-if="hinweise.length" class="mt-4 space-y-1">
           <li
@@ -348,12 +439,17 @@ watch(gewaehlterStand, (neu, alt) => {
                 {{ board.stop_group.stops.map((h) => h.name).join(' · ') }}
               </p>
             </div>
+            <!-- Bewusst die Zahl der **ganzen** Haltestelle, auch bei aktivem Filter: Der
+                 Pflegestand soll sich nicht schoenrechnen lassen, indem man etwas ausblendet. -->
             <p class="text-sm" :class="board.open_count > 0 ? 'text-amber-800' : 'text-emerald-700'">
               {{
                 board.open_count > 0
                   ? `Noch offen: ${board.open_count} Fahrten`
                   : 'Alle Fahrten an dieser Haltestelle sind entschieden.'
               }}
+              <span v-if="modeFilter !== null || lineFilter !== null" class="text-slate-500">
+                (ganze Haltestelle)
+              </span>
             </p>
           </div>
 
@@ -371,15 +467,66 @@ watch(gewaehlterStand, (neu, alt) => {
           </p>
 
           <div :class="loadingBoard ? 'pointer-events-none opacity-60 transition-opacity' : ''">
+          <!-- Filter: An einem Umsteigepunkt liegen schnell 60 Fahrten nebeneinander. Wer
+               eine Linie pflegt, will nur die sehen. -->
+          <div v-if="board.ending.length || board.starting.length" class="mt-4 flex flex-wrap items-center gap-4">
+            <div v-if="mittelAmHalt.length > 1" class="flex flex-wrap gap-1 rounded-lg bg-slate-200/60 p-1">
+              <button
+                type="button"
+                class="rounded-md px-3 py-1 text-sm transition"
+                :class="modeFilter === null ? 'bg-white font-medium text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/60'"
+                @click="modeFilter = null; lineFilter = null"
+              >
+                Alle
+              </button>
+              <button
+                v-for="mittel in mittelAmHalt"
+                :key="mittel"
+                type="button"
+                class="rounded-md px-3 py-1 text-sm transition"
+                :class="modeFilter === mittel ? 'bg-white font-medium text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/60'"
+                @click="modeFilter = mittel; lineFilter = null"
+              >
+                {{ mittel === 'tram' ? 'Tram' : 'Bus' }}
+              </button>
+            </div>
+
+            <div v-if="linienAmHalt.length > 1" class="flex flex-wrap items-center gap-1.5">
+              <span class="text-xs uppercase tracking-wide text-slate-500">Linie</span>
+              <button
+                type="button"
+                class="rounded-md border px-2.5 py-1 text-sm transition"
+                :class="lineFilter === null ? 'border-slate-800 bg-slate-800 font-medium text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'"
+                @click="lineFilter = null"
+              >
+                Alle
+              </button>
+              <button
+                v-for="linie in linienAmHalt"
+                :key="linie"
+                type="button"
+                class="rounded-md border px-2.5 py-1 text-sm tabular-nums transition"
+                :class="lineFilter === linie ? 'border-slate-800 bg-slate-800 font-medium text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'"
+                @click="lineFilter = linie"
+              >
+                {{ linie }}
+              </button>
+            </div>
+          </div>
+
           <StopLinkBoard
             :board="board"
             :lines="linienVerzeichnis"
             :selected="auswahl"
             :busy="busy"
+            :mode-filter="modeFilter"
+            :line-filter="lineFilter"
             @select="auswahl = $event"
             @link="verknuepfe"
             @mark="markiere"
             @unlink="loese"
+            @assign-course="setzeKurs"
+            @detach-course="loeseKurs"
           />
           </div>
         </template>

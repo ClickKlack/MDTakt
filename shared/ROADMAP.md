@@ -21,6 +21,7 @@
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
 | **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f, Fahrplan + Diff |
 | **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ✅ |
+| **I-14** | **Kurse & Umläufe** | Engine + Admin | Umlauf-Ebene manuell pflegbar: Fahrten verketten, Kursnummern vergeben | 🟡 Etappe 1 |
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -43,6 +44,7 @@ Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung
 | 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** | ✅ |
 | 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten | ✅ |
 | 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | ✅ Phasen B und C |
+| 3b | **I-14** Kurse & Umläufe | Baut das Gefüge, in das die Sichtungs-API ihre Kursnummern liefert | 🟡 Etappe 1 |
 | 4 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬜ |
 | 5 | **I-05** Matching-Logik | Engine-Kern fürs Matching — setzt stabile Fahrt-Identität aus I-13 voraus | ⬜ |
 | 6 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
@@ -530,6 +532,94 @@ Lücken aus, statt sie zu verschweigen.
 
 ---
 
+## I-14 — Kurse & Umläufe (manuelle Pflege)
+
+**Ziel:** Die **Umlauf-Ebene** wird pflegbar — welche Fahrten dasselbe Fahrzeug nacheinander fährt und welche
+Kursnummer dieser Umlauf trägt.
+
+> 📄 Konzept und die Entscheidungen K1–K5: [`KURSE.md`](KURSE.md).
+>
+> **Warum vor I-04:** Die Sichtungs-API liefert Kursnummern *in dieses Gefüge hinein*. Ohne die Umlauf-Struktur
+> hätten die eingehenden Kurse nichts, woran sie andocken könnten. GTFS hilft hier nicht: `trips.block_id` ist im
+> gesamten Feed `NULL`, `direction_id` ebenso.
+
+### Vor der Implementierung entschieden (Stopp-Regel — DB-Änderung + neue Fachlogik)
+- [x] **Beim Linienwechsel bleibt die Nummer** (K1, entschieden 20.09.2026) — `1/03` wird zu `13/03`; die Nummer
+      gehört dem Umlauf, der Linien-Präfix ist Anzeige
+- [x] **Die Verkettung führt** (K2) — gespeichert wird der Anschluss A→B plus die bewusste Entscheidung
+      „beginnt/endet hier". Nur so ist der Betriebsfahrt-Fall von „noch nicht gepflegt" unterscheidbar
+- [x] **Kein Unique auf die Kursnummer** (K3) — ob sie netzweit eindeutig ist, zeigt erst die Pflege; Dubletten
+      werden gemeldet, ein Index ist später nachziehbar. **Korrigiert Annahme E2** in `MDKURSTRACKER_REQUIREMENTS.md`
+- [x] **Versionswechsel überträgt nichts von selbst** (K4) — Übernahme aus Version N−1 nur auf Knopfdruck, mit Vorschau
+- [x] **Editor auf Periode + Fahrplantyp** (K5), ergänzt um den **Versionsstand**: Innerhalb einer Periode kann eine
+      Linie mehrere Versionen haben, an einem Umsteigepunkt stehen zwei Linien dann auf verschiedenen Ständen
+- [x] **Die Haltestelle ist eine eigene Ebene über dem Halt** (K6, entschieden 20.09.2026 nach einem Befund am
+      Realbestand): Die Konsolidierung verschmilzt Halte nur bei ≤ 12 m und gleichem Namen — für die Halt-Identität
+      richtig, für den Betrieb zu eng. An „Herrenkrug" enden Fahrten auf dem einen Bahnsteig und beginnen 72 m
+      weiter auf dem anderen; **64 von 104 Endstellen** sind so gebaut, **54,6 % aller Fahrt-Endpunkte**. Gruppierung
+      automatisch über den Namen (631 Halte → 315 Haltestellen, einseitige Endstellen von 64 auf **14**), der Rest
+      von Hand. **Keine Abstands-Automatik:** Die verbleibenden Abstände (201–675 m) gehören zu echten
+      Betriebsfahrten und sollen als Aus-/Einrücken festgehalten, nicht verschmolzen werden
+
+### (1) Datenmodell, Verknüpfungs-API, Haltestellen-Editor ✅
+- [x] Migration `trip_links`, `courses`, `course_trips`; Indizes auf `consolidated_trips.first_stop_id`/`.last_stop_id`
+      (PostgreSQL indiziert Fremdschlüssel nicht — genau darauf fragt der Editor ab)
+- [x] **Betriebstag-Wechsel** (`OperatingDayResolver`, FAHRPLANPERIODEN §10) — löst den seit 18.08.2026 offenen
+      Nachtlinien-Punkt, den erst der Haltestellen-Editor sichtbar machte: An Herrenkrug entstanden 16 Fahrplanstände
+      über vier Wochen, weil N1 im `mo_fr`-Strang montags einen anderen Fingerprint hatte als Di–Fr. Greift in
+      `TripSignatureService`, `ScheduleVersionService` und `TripConsolidationService`
+- [x] **Versionsstände über die Versionsmenge statt über zusammenhängende Zeiträume** — ein Stand trägt mehrere
+      Zeiträume, analog zur Linien-Version (§5.4 a); Abschnitte ohne einen Tag des gewählten Typs entfallen, die
+      übrigen werden auf ihren ersten und letzten passenden Tag beschnitten. Zusammen mit dem Betriebstag-Wechsel:
+      Herrenkrug von 16 auf 3 Stände
+- [x] Migration `stop_groups`, `stop_group_members` (K6) + `StopGroupService` (Automatik über den Namen,
+      `manual`-Zuordnungen gegen die Automatik gesperrt) + `StopGroupDirectoryService`; Automatik läuft beim
+      Import-Abschluss mit
+- [x] `TripLinkKind`-Enum, Models `TripLink`, `Course`, `CourseTrip` samt Factories
+- [x] `ConsolidatedTripTimeResolver` — Abfahrt/Ankunft aus `ConsolidatedScheduleService` herausgelöst, weil
+      inzwischen drei Aufrufer dieselbe Ableitung brauchen. Dabei die lexikalische Sortierung beseitigt, die
+      `GtfsTime` namentlich als Altlast vermerkt hatte (`7:00:00` stand hinter `23:50:00`)
+- [x] `ConsolidatedTripInfoResolver`, `TripLinkService` (Kette, Zyklus-Prüfung, Wendezeit), `StopLinkBoardService`
+      (Versionsstände durch Zerlegen und Wiederverschmelzen des Perioden-Zeitstrahls)
+- [x] `GET /api/v1/stops?source=consolidated` — Halte als physische Punkte mit dauerhafter ID.
+      **Vorgabe ist jetzt das Konsolidat**, wie bei `/lines` und `/trips`
+- [x] `GET /api/v1/admin/stop-links?stop_group=`, `POST`/`DELETE /api/v1/admin/trip-links` — die Anschluss-Prüfung
+      läuft über die **Haltestelle**, nicht über die Halt-Identität
+- [x] `GET`/`POST /api/v1/admin/stop-groups`, `GET`/`PUT /{id}`, `POST`/`DELETE /{id}/stops`, `POST /{id}/merge`
+      — inkl. Vorschlägen in Laufweite (350 m), die ein Mensch bestätigt
+- [x] `openapi.yaml` + Bruno (`stops/consolidated.bru`, `admin/stop-links.bru`, `admin/trip-links-{create,delete}.bru`,
+      `admin/stop-groups{,-merge}.bru`)
+- [x] Admin-Ansicht „Anschlüsse" — Haltestelle, Periode, Fahrplantyp, Versionsstand; zwei Spalten
+      endend/beginnend, Paarbildung per Klick, Betriebsfahrt-Knöpfe, Wendezeit, Zähler „noch offen".
+      Zur Auswahl stehen nur Endstellen — an reinen Durchfahrts-Halten gibt es nichts zu pflegen. Verknüpfte Fahrten
+      stehen **nebeneinander**, auch wenn dadurch Lücken entstehen; der Kurs steht neben dem Liniensignet; beim
+      Speichern bleibt die Scrollposition erhalten (das Board wird gedimmt, nicht ersetzt)
+- [x] Admin-Ansicht „Haltestellen" — Zuordnungs-Editor mit Filter „nur einseitige", Umbenennen, Herauslösen
+      und Zusammenlegen per Vorschlag
+- [x] Tests: `TripLinkTest` (23), `StopLinkBoardTest` (20), `StopGroupTest` (10), `OperatingDayTest` (7),
+      `ConsolidatedTripTimeResolverTest` (5) — inkl. Mitternacht-Grenzfall (`24:50` → `25:10` ist ein gültiger
+      Anschluss), Linienwechsel 1 → 13, getrennte Bahnsteige an einer Endstelle, der Gegenprobe, dass zwei
+      verschiedene Haltestellen **keinen** Anschluss bilden, und dem Nachweis, dass eine nächtlich verkehrende
+      Linie **einen** Mo-Fr-Strang hat statt zweier
+
+### (2) Kursnummern ⬜
+- [ ] `CourseService`: Kurs der **ganzen Kette** zuweisen und lösen; Dubletten-Warnung (K3)
+- [ ] `GET`/`POST`/`PUT`/`DELETE /api/v1/admin/courses`, `PUT`/`DELETE /api/v1/admin/consolidated-trips/{id}/course`
+- [ ] `TimetableService` reicht je Fahrt `course` durch → schließt I-13 (D) „Kurs je Fahrt anzeigen"
+- [ ] Admin: Kurs-Kopfzeile in der Fahrplan-Matrix, inline bearbeitbar
+
+### (3) Kursübersicht und Übernahme ⬜
+- [ ] `GET /api/v1/admin/lines/{line}/courses` — Kursübersicht je Linie mit Ketten, Lücken und Fahrten ohne Kurs
+- [ ] `CourseCarryoverService` auf Basis von `LineVersionDiffService`: Vorschau und Übernahme aus Version N−1 (K4)
+- [ ] Admin-Ansicht „Kurse" + Übernahme-Dialog in „Versionen"
+
+### Abnahmekriterium
+Ein Admin kann an einer Endstelle die dort endenden mit den dort beginnenden Fahrten verketten — auch über Linien
+hinweg —, Betriebsfahrten bewusst offen lassen, der Kette eine Kursnummer geben und sie in der Kursübersicht je
+Linie wiederfinden. Perioden und Versionen bleiben dabei getrennt.
+
+---
+
 ## Offene Punkte (vor jeweiliger Iteration zu klären)
 
 | Thema | Relevant ab | Status |
@@ -551,5 +641,11 @@ Lücken aus, statt sie zu verschweigen.
 | Koordinaten-Drift zwischen zwei Builds | I-13 | ❓ offen — mangels zweitem Build ungemessen; mit dem Import am 24.08.2026 nachzuholen (Sind `stop_id`s stabil? Wandern die Koordinaten?) |
 | Import-Takt | I-13 | ✅ entschieden 18.08.2026: **wöchentlich** — die Quelle aktualisiert selbst nur wöchentlich |
 | Rückwirkende Zuordnung von Alt-Sichtungen | I-09 | ✅ entschieden 18.08.2026: **kein Ziel** — es geht um den Fahrplan-Bestand |
-| Nachtlinien: Betriebstag ≠ Kalendertag (N1 fährt montags anders als Di–Fr) | I-13 | ❓ offen — nicht dringend, siehe FAHRPLANPERIODEN §8 |
+| Nachtlinien: Betriebstag ≠ Kalendertag (N1 fährt montags anders als Di–Fr) | I-13 | ✅ entschieden 20.09.2026: **zwei Grenzen** — Taglinien 03:00, Nachtlinien 12:00 (FAHRPLANPERIODEN §10). Am Bestand gemessen: Beide Netze überlappen 03:45–06:40, eine gemeinsame Grenze ginge nicht; zwischen 07:00 und 22:00 fährt keine Nachtlinie. **Rückwirkend angewandt** durch Neuaufbau des Konsolidats aus dem Feed-Archiv (6 Feeds, 19.08.–20.09.) — die gesamte Historie ab 15.08. trägt das korrigierte Modell |
+| Kursnummer beim Linienwechsel | I-14 | ✅ entschieden 20.09.2026: **Nummer bleibt, Linie wechselt** (`1/03` → `13/03`); die Nummer gehört dem Umlauf (KURSE §2 K1) |
+| Führende Pflege-Wahrheit: Kette oder Kursnummer | I-14 | ✅ entschieden 20.09.2026: **die Verkettung führt**; die Kursnummer ist ein Etikett an der Kette (K2) |
+| Eindeutigkeit der Kursnummer (netzweit oder je Linie) | I-14 | ❓ offen — bewusst **kein** Unique-Index, nur Warnung bei Dubletten (K3). Nachziehbar, sobald die Pflege zeigt, was gilt |
+| Haltestelle als Ebene über dem Halt | I-14 | ✅ entschieden 20.09.2026: **eigene Entität** (`stop_groups`), automatisch über den Namen, von Hand nachpflegbar. Keine Abstands-Automatik — die weiten Fälle sind Betriebsfahrten (KURSE §2 K6) |
+| Übernahme gepflegter Kurse beim Versionswechsel | I-14 | ✅ entschieden 20.09.2026: **nur auf Knopfdruck**, mit Vorschau (K4) — eine verschobene Abfahrt kann die Wendezeit gekippt haben |
+| Umgang mit Sichtungen, die einer gepflegten Kette widersprechen | I-04/I-05 | ❓ offen — siehe KURSE §5 |
 | Startdatum der Sommerferien Sachsen-Anhalt 2026 | — | ❓ offen — Ende ist der 16.08.2026 (bestätigt); der Beginn steht in Test-Fixtures und Bruno-Beispielen noch als unbelegtes `2026-07-13` |

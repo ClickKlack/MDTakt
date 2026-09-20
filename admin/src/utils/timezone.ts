@@ -114,3 +114,29 @@ export function formatClockDelta(seconds: number | null | undefined): string {
   // Unter einer Minute wuerde „+0 Min" stehen — die Sekunden sind dann die ehrlichere Angabe.
   return minuten === 0 ? `${vorzeichen}${Math.abs(seconds)} Sek` : `${vorzeichen}${minuten} Min`
 }
+
+/**
+ * Dauer als Zeitspanne, z. B. „4 Min", „1 Std 12 Min", „40 Sek" — für Wendezeiten zwischen
+ * zwei Fahrten eines Umlaufs. Anders als formatClockDelta ohne Vorzeichen: Eine Wendezeit ist
+ * kein Versatz gegen einen Sollwert, sondern eine Spanne.
+ *
+ * Reine Dauer, keine Uhrzeit — deshalb keine Zeitzonen-Umrechnung. Die Eingabe stammt aus
+ * GTFS-Betriebstag-Sekunden und ist auch über Mitternacht hinweg richtig (24:50 → 25:10).
+ */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) {
+    return '—'
+  }
+  if (seconds < 60) {
+    return `${seconds} Sek`
+  }
+
+  const minuten = Math.round(seconds / 60)
+  if (minuten < 60) {
+    return `${minuten} Min`
+  }
+
+  const stunden = Math.floor(minuten / 60)
+  const rest = minuten % 60
+  return rest === 0 ? `${stunden} Std` : `${stunden} Std ${rest} Min`
+}

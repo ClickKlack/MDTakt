@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Support;
 
 use App\Enums\FahrplanTyp;
+use App\Enums\StopGroupOrigin;
 use App\Models\ConsolidatedStop;
 use App\Models\ConsolidatedStopTime;
 use App\Models\ConsolidatedStopVersion;
@@ -12,6 +13,8 @@ use App\Models\ConsolidatedTrip;
 use App\Models\LineVersion;
 use App\Models\LineVersionInterval;
 use App\Models\SchedulePeriod;
+use App\Models\StopGroup;
+use App\Models\StopGroupMember;
 
 /**
  * Baut Konsolidat-Testdaten direkt, ohne den Umweg über Import und Konsolidierung.
@@ -25,6 +28,9 @@ final class ConsolidatedFixtures
 {
     /** @var array<string, ConsolidatedStop> Haltname => Identität, damit Namen wiederverwendet werden */
     private array $halte = [];
+
+    /** @var array<string, StopGroup> Name => Haltestelle (Betriebspunkt) */
+    private array $gruppen = [];
 
     private ?SchedulePeriod $periode = null;
 
@@ -63,7 +69,34 @@ final class ConsolidatedFixtures
             'name' => $name,
         ]);
 
+        // Jeder Halt gehört zu einer Haltestelle — wie im Betrieb, wo die Automatik das beim
+        // Import erledigt. Ohne sie ließe sich an diesem Halt kein Anschluss bilden.
+        $this->zurHaltestelle($halt, $this->haltestelle($name));
+
         return $this->halte[$name] = $halt;
+    }
+
+    /**
+     * Die Haltestelle (Betriebspunkt) zu einem Namen; derselbe Name liefert dieselbe zurück.
+     */
+    public function haltestelle(string $name): StopGroup
+    {
+        return $this->gruppen[$name] ??= StopGroup::factory()->create([
+            'name' => $name,
+            'name_key' => mb_strtolower($name),
+        ]);
+    }
+
+    /**
+     * Ordnet einen Halt einer Haltestelle zu — der Weg, um im Test zwei Bahnsteige unter einen
+     * Betriebspunkt zu bekommen (wie „Rothensee" und „Rothensee (Schleife)").
+     */
+    public function zurHaltestelle(ConsolidatedStop $halt, StopGroup $gruppe): void
+    {
+        StopGroupMember::query()->updateOrCreate(
+            ['consolidated_stop_id' => $halt->id],
+            ['stop_group_id' => $gruppe->id, 'assigned_via' => StopGroupOrigin::Auto],
+        );
     }
 
     /**

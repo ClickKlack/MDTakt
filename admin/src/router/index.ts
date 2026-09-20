@@ -10,6 +10,8 @@ import SchedulePeriodsView from '../views/SchedulePeriodsView.vue'
 import CoverageView from '../views/CoverageView.vue'
 import TimetableView from '../views/TimetableView.vue'
 import ScheduleDiffView from '../views/ScheduleDiffView.vue'
+import StopLinksView from '../views/StopLinksView.vue'
+import StopGroupsView from '../views/StopGroupsView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -23,6 +25,11 @@ export const router = createRouter({
     // Erste Route mit Query-Auswahl: Ein Fahrplan soll verlinkbar sein.
     { path: '/fahrplan', name: 'timetable', component: TimetableView },
     { path: '/versions/diff', name: 'versions-diff', component: ScheduleDiffView },
+    // Umlauf-Pflege: Haltestelle, Periode, Fahrplantyp und Versionsstand in der Query,
+    // damit ein Pflegestand verlinkbar bleibt.
+    { path: '/anschluesse', name: 'stop-links', component: StopLinksView },
+    // Pflege der Haltestellen-Klammer: welche Halte sind im Betrieb derselbe Ort.
+    { path: '/haltestellen', name: 'stop-groups', component: StopGroupsView },
     { path: '/periods', name: 'periods', component: SchedulePeriodsView },
     { path: '/coverage', name: 'coverage', component: CoverageView },
     { path: '/', redirect: '/imports' },

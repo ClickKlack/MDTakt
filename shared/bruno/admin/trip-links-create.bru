@@ -1,0 +1,118 @@
+meta {
+  name: Trip Link (Anschluss anlegen)
+  type: http
+  seq: 15
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/trip-links
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "kind": "link",
+    "from_trip_id": 9835,
+    "to_trip_id": 10412
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.kind: eq link
+  res.body.data.warnings: isArray
+}
+
+script:post-response {
+  const d = res.body.data;
+
+  if (d.turnaround_seconds === null || d.turnaround_seconds < 0) {
+    throw new Error("Wendezeit fehlt oder ist negativ: " + d.turnaround_seconds);
+  }
+
+  // Die Bahnsteig-Namen duerfen abweichen - massgeblich ist die gemeinsame Haltestelle,
+  // die die Engine prueft. Hier nur sicherstellen, dass beide Seiten geliefert sind.
+  if (!d.from_trip || !d.to_trip) {
+    throw new Error("Anschluss ohne beide Fahrten in der Antwort");
+  }
+
+  // Aufraeumen, damit ein erneuter Lauf nicht an 409 scheitert.
+  bru.setVar("tripLinkId", d.id);
+}
+
+docs {
+  # Anschluss anlegen oder eine Kette bewusst offen lassen
+
+  Eine Zeile ist **eine Entscheidung**. Drei Formen:
+
+  | `kind` | Felder | Bedeutung |
+  |---|---|---|
+  | `link` | `from_trip_id` + `to_trip_id` | Dasselbe Fahrzeug faehrt nach A die Fahrt B |
+  | `start` | nur `to_trip_id` | Die Fahrt beginnt den Umlauf — Ausruecken |
+  | `end` | nur `from_trip_id` | Die Fahrt beendet ihn — Einruecken |
+
+  `start` und `end` sind der **Betriebsfahrt-Fall**. Er kommt besonders morgens vor und ist eine
+  bewusste Aussage, keine fehlende Pflege — der Editor unterscheidet beides.
+
+  Beispiel-Response:
+
+  ```json
+  {
+    "data": {
+      "id": 7,
+      "kind": "link",
+      "stop_id": 117,
+      "from_trip": { "id": 9835, "line": "1", "end_stop": "Sudenburg", "arrival_time": "06:48:00" },
+      "to_trip": { "id": 10412, "line": "13", "start_stop": "Sudenburg", "departure_time": "06:52:00" },
+      "turnaround_seconds": 240,
+      "note": null,
+      "warnings": [
+        { "code": "line_change", "message": "Die Kette wechselt von Linie 1 auf Linie 13." }
+      ]
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **Geprueft wird die Haltestelle, nicht der Halt.** An einer Endstelle liegen Ankunft und
+  Abfahrt oft auf verschiedenen Bahnsteigen — an „Herrenkrug" 72 m auseinander. Beide Halte
+  muessen derselben `stop_group` angehoeren; gehoeren sie es nicht, ist das der Betriebsfahrt-Fall
+  und gehoert als `start`/`end` festgehalten, nicht als Anschluss.
+
+  **Der Linienwechsel ist erlaubt, nicht verboten.** Eine 1 wird in Sudenburg zur 13 — das ist
+  der Normalfall einer Fahrzeugkette. `warnings` meldet ihn als Hinweis, damit ein Fehlgriff
+  auffaellt; abgewiesen wird er nicht.
+
+  **Warnung ist nicht Fehler.** `short_turnaround` (Wendezeit unter
+  `COURSE_MIN_TURNAROUND_MINUTES`, Vorgabe 3 Minuten) erscheint im Ergebnis, verhindert die
+  Verknuepfung aber nicht. Eine *negative* Wendezeit wird dagegen mit 422 abgewiesen.
+
+  **Wendezeit wird in Betriebstag-Sekunden gerechnet, nie lexikalisch.** GTFS erlaubt
+  `7:00:00` neben `07:00:00`, und als String ist `"7:00:00" > "23:50:00"`. Eine Ankunft
+  `24:50:00` mit Anschlussabfahrt `25:10:00` ergibt 1200 s und ist ein gueltiger Anschluss ueber
+  Mitternacht hinweg.
+
+  Fehlerfaelle:
+
+  | Fall | Status |
+  |---|---|
+  | Eine der Fahrten traegt bereits eine Entscheidung | 409 |
+  | Uebergangs-Haltestelle passt nicht (die beiden Halte gehoeren verschiedenen `stop_groups` an) | 422 |
+  | Verschiedene Periode oder verschiedener Fahrplantyp | 422 |
+  | Gueltigkeits-Intervalle der Versionen ueberschneiden sich an keinem Tag | 422 |
+  | Selbstverknuepfung oder Zyklus in der Kette | 422 |
+  | Negative Wendezeit | 422 |
+  | `from_trip_id` bei `kind=start` gesetzt (bzw. `to_trip_id` bei `end`) | 422 |
+  | Kein gueltiger Admin-Token | 401 |
+}

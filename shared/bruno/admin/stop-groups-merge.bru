@@ -1,0 +1,67 @@
+meta {
+  name: Stop Groups (Zusammenlegen)
+  type: http
+  seq: 18
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/stop-groups/{{stopGroupId}}/merge
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "source_id": 0
+  }
+}
+
+assert {
+  res.status: eq 204
+}
+
+docs {
+  # Zwei Haltestellen zusammenlegen
+
+  Der Weg fuer die Faelle, die der Namensabgleich nicht findet. Alle Halte der Quelle wandern in
+  die Ziel-Haltestelle (die im Pfad), die Quelle wird geloescht.
+
+  `source_id` ist vor dem Lauf auf die tatsaechliche Quelle zu setzen — die `0` oben ist ein
+  Platzhalter, damit die Datei nichts Echtes anfasst. Kandidaten liefert
+  `GET /api/v1/admin/stop-groups/{id}` im Feld `suggestions`.
+
+  Am Produktivbestand (Stand 20.09.2026) sind dies die offensichtlichen Paare:
+
+  | Quelle | Ziel | Abstand |
+  |---|---|---|
+  | Rothensee (Schleife) | Rothensee | 201 m |
+  | Buckau (Wasserwerk) Wendeschl. | Buckau (Wasserwerk) | 96 m |
+  | Magdeburg ZOB Hst. 2, alle Richtungen | Magdeburg ZOB, alle Richtungen | — |
+
+  ## Worauf zu achten ist
+
+  **Danach gelten die Mitgliedschaften als von Hand gesetzt.** Sonst zoege der naechste
+  Namensabgleich sie wieder auseinander, und die Pflege waere bei jedem Import verloren.
+
+  **Nicht alles Nahe gehoert zusammen.** `Suedring` und `Eiskellerplatz` liegen 484 m
+  auseinander und sind zwei Orte — die Fahrt dazwischen ist eine Betriebsfahrt und gehoert im
+  Anschluss-Editor als `end` bzw. `start` festgehalten, nicht hier verschmolzen.
+
+  Fehlerfaelle:
+
+  | Fall | Status |
+  |---|---|
+  | Quelle und Ziel sind dieselbe Haltestelle | 422 |
+  | Unbekannte Quelle | 422 |
+  | Unbekanntes Ziel | 404 |
+  | Kein gueltiger Admin-Token | 401 |
+}

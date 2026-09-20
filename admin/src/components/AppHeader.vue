@@ -44,6 +44,20 @@ async function logout(): Promise<void> {
             Fahrplan
           </RouterLink>
           <RouterLink
+            to="/haltestellen"
+            class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
+            active-class="bg-slate-100 font-medium text-slate-900"
+          >
+            Haltestellen
+          </RouterLink>
+          <RouterLink
+            to="/anschluesse"
+            class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
+            active-class="bg-slate-100 font-medium text-slate-900"
+          >
+            Anschlüsse
+          </RouterLink>
+          <RouterLink
             to="/versions"
             class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
             active-class="bg-slate-100 font-medium text-slate-900"

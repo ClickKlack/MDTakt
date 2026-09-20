@@ -1,0 +1,48 @@
+meta {
+  name: Trip Link (Anschluss loesen)
+  type: http
+  seq: 16
+}
+
+delete {
+  url: {{baseUrl}}/api/v1/admin/trip-links/{{tripLinkId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 204
+}
+
+docs {
+  # Anschluss wieder loesen
+
+  Setzt die beteiligten Fahrten zurueck auf "noch nicht gepflegt" (`decision: null` im
+  Haltestellen-Editor). Die `tripLinkId` kommt aus der Antwort von `trip-links-create.bru`, das
+  sie als Laufzeit-Variable hinterlegt — die beiden Dateien sind als Paar gedacht, damit ein
+  wiederholter Lauf nicht am 409 des bereits verknuepften Paars scheitert.
+
+  ## Worauf zu achten ist
+
+  **Loesen in der Mitte teilt die Kette.** Aus einem Umlauf werden zwei. Ein bereits vergebener
+  Kurs haengt danach an beiden Teilen — das ist gewollt (die Zuordnung ist nicht raten, sondern
+  bewahren), muss aber gegebenenfalls neu gesetzt werden.
+
+  **Loesen einer `start`- oder `end`-Zeile** nimmt die Betriebsfahrt-Entscheidung zurueck; die
+  Fahrt gilt danach wieder als ungepflegt und taucht in `open_count` auf.
+
+  Fehlerfaelle:
+
+  | Fall | Status |
+  |---|---|
+  | Unbekannte Verknuepfung | 404 |
+  | Kein gueltiger Admin-Token | 401 |
+}

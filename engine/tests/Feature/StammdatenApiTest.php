@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\Calendar;
+use App\Models\ConsolidatedStop;
+use App\Models\ConsolidatedStopVersion;
 use App\Models\Route;
 use App\Models\Stop;
 use App\Models\StopTime;
@@ -60,15 +62,65 @@ final class StammdatenApiTest extends TestCase
             ->assertJsonPath('data.0.route_ids', ['R-BUS', 'R-TRAM']);
     }
 
-    public function test_stops_endpoint_returns_all_stops_ordered_by_name(): void
+    public function test_stops_endpoint_returns_all_raw_stops_ordered_by_name(): void
     {
         Stop::factory()->create(['stop_id' => 'S2', 'stop_name' => 'Alter Markt']);
         Stop::factory()->create(['stop_id' => 'S1', 'stop_name' => 'Hasselbachplatz']);
 
+        $response = $this->getJson('/api/v1/stops?source=raw');
+
+        $response->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('meta.source', 'raw');
+        $this->assertSame('Alter Markt', $response->json('data.0.stop_name'));
+    }
+
+    /**
+     * Vorgabe ist das Konsolidat — wie bei `/lines` und `/trips`. Der Unterschied ist nicht
+     * nur die Reichweite: Dort ist eine Zeile ein physischer Punkt mit dauerhafter ganzzahliger
+     * ID, hier eine GTFS-`stop_id`, die gtfs.de pro Build neu vergibt.
+     */
+    public function test_stops_endpoint_defaults_to_the_consolidated_identity(): void
+    {
+        Stop::factory()->create(['stop_id' => 'S1', 'stop_name' => 'Roh-Halt']);
+
+        $halt = ConsolidatedStop::factory()->create();
+        ConsolidatedStopVersion::factory()->create([
+            'consolidated_stop_id' => $halt->id,
+            'name' => 'Sudenburg',
+        ]);
+
         $response = $this->getJson('/api/v1/stops');
 
-        $response->assertOk()->assertJsonCount(2, 'data');
-        $this->assertSame('Alter Markt', $response->json('data.0.stop_name'));
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.source', 'consolidated')
+            ->assertJsonPath('data.0.id', $halt->id)
+            ->assertJsonPath('data.0.name', 'Sudenburg');
+
+        // Der Roh-Begriff taucht im Konsolidat bewusst nicht mehr auf.
+        $this->assertArrayNotHasKey('stop_id', $response->json('data.0'));
+    }
+
+    public function test_consolidated_stops_are_ordered_by_name(): void
+    {
+        foreach (['Sudenburg', 'Alter Markt', 'Hasselbachplatz'] as $name) {
+            $halt = ConsolidatedStop::factory()->create();
+            ConsolidatedStopVersion::factory()->create([
+                'consolidated_stop_id' => $halt->id,
+                'name' => $name,
+            ]);
+        }
+
+        $namen = $this->getJson('/api/v1/stops')->assertOk()->json('data.*.name');
+
+        $this->assertSame(['Alter Markt', 'Hasselbachplatz', 'Sudenburg'], $namen);
+    }
+
+    public function test_unknown_stop_source_is_rejected(): void
+    {
+        $this->getJson('/api/v1/stops?source=irgendwas')
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 422);
     }
 
     public function test_trips_endpoint_filters_by_date_line_and_stop(): void

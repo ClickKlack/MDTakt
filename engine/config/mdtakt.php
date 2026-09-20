@@ -53,4 +53,19 @@ return [
 
     ],
 
+    'courses' => [
+
+        /*
+         * Ab welcher Wendezeit ein Anschluss als knapp gilt und im Ergebnis eine Warnung
+         * trägt (KURSE §4). Bewusst nur eine Warnung, keine Schranke: Wie lange ein Fahrzeug
+         * an einer Endstelle wirklich braucht, hängt an Gleisanlage, Fahrerwechsel und
+         * Linie — das weiß der Pflegende, nicht die Konfiguration. Eine *negative* Wendezeit
+         * wird dagegen hart abgewiesen, die ist physikalisch unmöglich.
+         *
+         * 3 Minuten als Ausgangswert; am Realbestand noch nicht gemessen.
+         */
+        'min_turnaround_minutes' => (int) env('COURSE_MIN_TURNAROUND_MINUTES', 3),
+
+    ],
+
 ];

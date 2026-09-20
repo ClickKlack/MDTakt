@@ -12,7 +12,10 @@ use App\Http\Controllers\Admin\LineVersionDiffController;
 use App\Http\Controllers\Admin\PeriodChangeOfferController;
 use App\Http\Controllers\Admin\SchedulePeriodController;
 use App\Http\Controllers\Admin\SchoolHolidayController;
+use App\Http\Controllers\Admin\StopGroupController;
+use App\Http\Controllers\Admin\StopLinkController;
 use App\Http\Controllers\Admin\TimetableController;
+use App\Http\Controllers\Admin\TripLinkController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\StopController;
@@ -57,6 +60,22 @@ Route::prefix('v1')->group(function (): void {
             // Fahrplan einer Version als Matrix: Halte als Zeilen, Fahrten als Spalten
             Route::get('line-versions/{lineVersion}/timetable', [TimetableController::class, 'show'])
                 ->name('admin.line-versions.timetable');
+
+            // Haltestellen als Betriebspunkte: die Klammer um die Richtungs-Bahnsteige.
+            // Automatisch über den Namen gebildet, von Hand nachpflegbar (KURSE §3.1).
+            Route::get('stop-groups', [StopGroupController::class, 'index'])->name('admin.stop-groups.index');
+            Route::post('stop-groups', [StopGroupController::class, 'store'])->name('admin.stop-groups.store');
+            Route::get('stop-groups/{stopGroup}', [StopGroupController::class, 'show'])->name('admin.stop-groups.show');
+            Route::put('stop-groups/{stopGroup}', [StopGroupController::class, 'update'])->name('admin.stop-groups.update');
+            Route::post('stop-groups/{stopGroup}/stops', [StopGroupController::class, 'assign'])->name('admin.stop-groups.assign');
+            Route::delete('stop-groups/{stopGroup}/stops/{stop}', [StopGroupController::class, 'detach'])->name('admin.stop-groups.detach');
+            Route::post('stop-groups/{stopGroup}/merge', [StopGroupController::class, 'merge'])->name('admin.stop-groups.merge');
+
+            // Umlauf-Pflege (I-14): Haltestellen-Editor und die Entscheidungen daraus.
+            // Die Kette führt, die Kursnummer ist ein Etikett daran (KURSE §2 K2).
+            Route::get('stop-links', [StopLinkController::class, 'index'])->name('admin.stop-links.index');
+            Route::post('trip-links', [TripLinkController::class, 'store'])->name('admin.trip-links.store');
+            Route::delete('trip-links/{tripLink}', [TripLinkController::class, 'destroy'])->name('admin.trip-links.destroy');
 
             // Fahrplanperioden — netzweit, kuratiert (FAHRPLANPERIODEN §4.1)
             Route::get('schedule-periods', [SchedulePeriodController::class, 'index'])->name('admin.schedule-periods.index');

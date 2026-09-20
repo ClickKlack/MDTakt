@@ -18,6 +18,10 @@
 - **Stabile Schlüssel sind name-frei:** Stop = **gerundete Koordinaten**, Trip = **Signatur(Linie + Zeitsequenz)**.
   Die volatilen gtfs.de-Surrogat-IDs sind nur refreshbare Pointer.
 - **1 HAFAS-Fahrt → N GTFS-Trips** (Linienübergänge).
+- **Der Umlauf ist eine Kette, nicht ein Tripel** (korrigiert 20.09.2026, siehe [`KURSE.md`](KURSE.md)): Ein Fahrzeug
+  behält beim Linienwechsel seine Kursnummer (`1/03` → `13/03`), der Umlauf umfasst also mehrere Linien. Die frühere
+  Formel `(line, course_number, service_date)` identifiziert ihn nicht. MD-Takt setzt die Kette aus **gepflegten
+  Anschlüssen** je Haltestelle zusammen (I-14) — die Sichtungen liefern die Kursnummern in dieses Gefüge hinein.
 
 ---
 

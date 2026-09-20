@@ -20,8 +20,10 @@ Entwicklung einer spezialisierten Plattform zur Umlauf-Erkennung für den Magdeb
 | Begriff (DE) | Begriff (EN/GTFS) | Definition |
 |---|---|---|
 | **Fahrt** | `trip` | Eine einzelne Linienfahrt von A nach B (in GTFS: `trip_id`) |
-| **Umlauf** | `block` | Folge von Fahrten, die ein Fahrzeug an einem Betriebstag hintereinander durchführt |
-| **Kurs / Kursnummer** | `run` / `course_number` | Bezeichnung eines Umlaufs im Betriebsalltag (z.B. "K12"); kommt aus MDKursTracker |
+| **Umlauf** | `block` | Folge von Fahrten, die ein Fahrzeug an einem Betriebstag hintereinander durchführt. **Nicht** aus GTFS ableitbar: `block_id` ist im gesamten Feed `NULL`. Geführt als **Kette verknüpfter Fahrten** (§2.4) |
+| **Anschluss** | `trip link` | Die Aussage „dasselbe Fahrzeug fährt nach Fahrt A die Fahrt B" — an einer Haltestelle gepflegt |
+| **Ausrücken / Einrücken** | — | Eine Kette beginnt bzw. endet **bewusst ohne Anschluss** (Betriebsfahrt, kommt besonders morgens vor). Eine Entscheidung, keine fehlende Pflege |
+| **Kurs / Kursnummer** | `run` / `course_number` | Bezeichnung eines Umlaufs im Betriebsalltag (z.B. "03"); kommt aus MDKursTracker. Gehört dem **Umlauf**, nicht der Linie — beim Linienwechsel bleibt sie |
 | **Sichtung** | `sighting` | Beobachtung eines Fahrzeugs: Kursnummer + Linie + Richtung + Uhrzeit + Haltestelle |
 | **Haltestelle** | `stop` | GTFS `stop_id` + Name |
 | **Betriebstag** | `service_date` | Kalendertag, für den ein Umlauf gilt (GTFS `calendar`/`calendar_dates`) |
@@ -48,8 +50,28 @@ Eine Sichtung enthält:
 
 **Schnittstelle MDKursTracker → MD-Takt:** Konzept erarbeitet & validiert (2026-06-22) — siehe
 [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md). Kurzfassung: Integration über die
-**HTTP-API** (MDKursTracker = MariaDB nur lokal, kein DB-Direktzugriff). `course_number` ist
-Nutzereingabe und **nur je Linie eindeutig** → Umlauf-Schlüssel `(line, course_number, service_date)`.
+**HTTP-API** (MDKursTracker = MariaDB nur lokal, kein DB-Direktzugriff). `course_number` ist Nutzereingabe.
+
+> ~~Umlauf-Schlüssel `(line, course_number, service_date)`~~ — **korrigiert 20.09.2026**, siehe
+> [`KURSE.md`](KURSE.md) §2 K1: Ein Fahrzeug behält beim Linienwechsel seine Kursnummer (eine 1 wird in
+> Sudenburg zur 13, angezeigt als `1/03` → `13/03`). Der Umlauf umfasst damit mehrere Linien, und das Tripel
+> identifiziert ihn nicht. Er wird stattdessen als **Kette verknüpfter Fahrten** geführt (§2.4).
+
+### 2.4 Umlauf-Ebene (I-14)
+
+Der Umlauf ist **keine** Eigenschaft einer Fahrt und **nicht** aus GTFS ableitbar (`block_id` und `direction_id`
+sind im gesamten gtfs.de-Feed `NULL`). Er entsteht durch Pflege im Admin und wird als **Kette** geführt:
+
+- Eine `trip_links`-Zeile ist **eine Entscheidung**: der Anschluss zweier Fahrten an einer Haltestelle
+  (`kind: link`), oder die bewusste Aussage, dass eine Kette hier beginnt (`start`, Ausrücken) bzw. endet
+  (`end`, Einrücken). Keine Zeile heißt **noch nicht gepflegt** — das ist ausdrücklich etwas anderes.
+- Unique auf `from_trip_id` und `to_trip_id` tragen die Fachregel: Ein Fahrzeug hat höchstens einen Vorgänger
+  und höchstens einen Nachfolger.
+- Ketten laufen **über Linien hinweg** und behalten dabei ihre Kursnummer.
+- Die Kursnummer (`courses`, `course_trips`) ist ein **Etikett an der Kette**, für die ganze Kette gesetzt.
+  Bewusst **ohne** Unique-Constraint, solange offen ist, ob sie netzweit eindeutig ist.
+
+Vollständiges Konzept samt Begründungen: [`KURSE.md`](KURSE.md).
 
 ---
 
@@ -151,6 +173,9 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 | `GET` | `/api/v1/sightings?date=` | Sichtungen eines Betriebstags (Kuratierung/Matching) |
 | `POST` | `/api/v1/sightings/{id}/assign` | Trip-Zuordnung zu einer Sichtung bestätigen (Matching) |
 | `GET` | `/api/v1/admin/imports` | Import-Historie & Datenstand fürs Admin-Frontend |
+| `GET` | `/api/v1/admin/stop-links?stop=&period=&day_type=&stand=` | Haltestellen-Editor: endende und beginnende Fahrten samt Entscheidungen (I-14) |
+| `POST` | `/api/v1/admin/trip-links` | Anschluss anlegen oder eine Kette bewusst offen lassen (Betriebsfahrt) |
+| `DELETE` | `/api/v1/admin/trip-links/{id}` | Entscheidung wieder lösen |
 
 > Weitere Admin-Endpunkte (Datenkorrektur, Fahrplanperioden-Erkennung) werden mit den jeweiligen ROADMAP-Iterationen ergänzt.
 
@@ -187,7 +212,35 @@ sightings (
     assigned_trip_id VARCHAR FK trips,  -- NULL = noch nicht zugeordnet
     created_at    TIMESTAMPTZ DEFAULT now()
 )
+
+-- Umlauf-Ebene (I-14, siehe KURSE.md). Haengt am Konsolidat, nicht am Roh-Bestand:
+-- consolidated_trips.id ueberlebt den Import, die gtfs.de-trip_id nicht.
+trip_links (
+    id             BIGSERIAL PK,
+    from_trip_id   BIGINT FK consolidated_trips UNIQUE,  -- NULL = Ausruecken
+    to_trip_id     BIGINT FK consolidated_trips UNIQUE,  -- NULL = Einruecken
+    stop_id        BIGINT FK consolidated_stops,
+    kind           VARCHAR(8),                           -- link | start | end
+    note           VARCHAR
+)
+
+courses (
+    id         BIGSERIAL PK,
+    period_id  BIGINT FK schedule_periods,
+    day_type   VARCHAR(16),
+    number     VARCHAR(8),        -- Kursnummer ohne Linien-Praefix, bewusst OHNE unique
+    note       VARCHAR
+)
+
+course_trips (
+    course_id            BIGINT FK courses,
+    consolidated_trip_id BIGINT FK consolidated_trips UNIQUE
+)
 ```
+
+> Die `sightings`-Tabelle stammt aus dem Ur-MVP und ist derzeit **toter Code** — kein Model, kein Zugriff.
+> Ihr `assigned_trip_id` zeigt auf die volatile GTFS-`trip_id` und wird bei jedem Import genullt. Ihr Umbau
+> gehört zu I-04.
 
 ---
 

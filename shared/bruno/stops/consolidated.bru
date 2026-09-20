@@ -1,0 +1,79 @@
+meta {
+  name: List Stops (Konsolidat)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/stops?source=consolidated
+  body: none
+  auth: none
+}
+
+params:query {
+  source: consolidated
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+  res.body.meta.source: eq consolidated
+}
+
+script:post-response {
+  const halte = res.body.data;
+
+  if (halte.length === 0) {
+    throw new Error("Keine konsolidierten Halte - lief die Konsolidierung schon?");
+  }
+
+  // Die Konsolidat-ID ist eine Ganzzahl, nicht die volatile GTFS-stop_id (String).
+  for (const halt of halte) {
+    if (typeof halt.id !== "number") {
+      throw new Error("Halt " + halt.name + " hat keine numerische Konsolidat-ID");
+    }
+    if (!halt.name) {
+      throw new Error("Halt " + halt.id + " ohne Namen - stop_versions luecke?");
+    }
+  }
+}
+
+docs {
+  # Alle Halte aus dem Konsolidat
+
+  Oeffentliche Stammdaten, kein Auth. Gegenstueck zu `list.bru`, das den Roh-Bestand liefert.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": [
+      { "id": 42, "name": "Kannenstieg", "lat": 52.1683, "lon": 11.6142 },
+      { "id": 55, "name": "Pablo-Picasso-Strasse", "lat": 52.1651, "lon": 11.6098 }
+    ],
+    "meta": { "source": "consolidated" }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **Die Identitaet ist eine andere als im Roh-Bestand.** Hier ist eine Zeile ein *physischer
+  Punkt*: namensgleiche Halte im Umkreis von 12 m sind zu einer Identitaet verschmolzen. Am
+  Realbestand wurden so aus 730 Roh-Halten 614 Identitaeten. Die `id` ist eine
+  `consolidated_stops.id` (Ganzzahl), keine GTFS-`stop_id` (String).
+
+  **Steige sind bewusst zusammengefasst.** 18 Halte liegen auf exakt identischen Koordinaten
+  und tragen dort die beiden Fahrtrichtungen; keine Koordinaten-Schwelle trennt sie, und
+  `trips.direction_id` ist im gesamten Feed NULL. Die Richtung ergibt sich aus der Position in
+  der Fahrt-Sequenz. Preis: an diesen Punkten ist "Steig A/B" nicht darstellbar.
+
+  **Der Name ist "latest wins".** Umbenennungen liegen als Attribut-Historie in
+  `consolidated_stop_versions`; hier erscheint der juengste bekannte Name.
+
+  Diese IDs sind der Eingabewert fuer `GET /api/v1/admin/stop-links?stop=` und fuer
+  `GET /api/v1/trips?stop=` im Konsolidat.
+}

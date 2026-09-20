@@ -1,0 +1,120 @@
+meta {
+  name: Stop Groups (Haltestellen)
+  type: http
+  seq: 17
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/stop-groups?only_termini=1
+  body: none
+  auth: bearer
+}
+
+params:query {
+  only_termini: 1
+  ~q: Herrenkrug
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+}
+
+script:post-response {
+  const gruppen = res.body.data;
+
+  if (gruppen.length === 0) {
+    throw new Error("Keine Haltestellen - lief die Konsolidierung schon?");
+  }
+
+  for (const g of gruppen) {
+    // Ein Halt gehoert zu genau einer Haltestelle: Die Gruppe darf nicht leer sein.
+    if (g.stop_count < 1 || g.stops.length !== g.stop_count) {
+      throw new Error(g.name + ": stop_count " + g.stop_count + " passt nicht zu " + g.stops.length + " Halten");
+    }
+
+    // only_termini=1 heisst: hier beginnt oder endet etwas.
+    if (!g.is_terminus) {
+      throw new Error(g.name + " ist keine Endstelle, steht aber in der gefilterten Liste");
+    }
+
+    // one_sided ist genau dann wahr, wenn nur eine der beiden Seiten belegt ist.
+    const einseitig = (g.ending_lines.length === 0) !== (g.starting_lines.length === 0);
+    if (einseitig !== g.one_sided) {
+      throw new Error(g.name + ": one_sided passt nicht zu den Linienlisten");
+    }
+
+    // Linien sind Strings, auch die rein numerischen - sonst kaeme "10" als Zahl zurueck.
+    for (const linie of [...g.ending_lines, ...g.starting_lines]) {
+      if (typeof linie !== "string") {
+        throw new Error(g.name + ": Linie " + linie + " ist kein String");
+      }
+    }
+  }
+
+  bru.setVar("stopGroupId", gruppen[0].id);
+}
+
+docs {
+  # Haltestellen als Betriebspunkte
+
+  Eine **Haltestelle** fasst die Halte zusammen, die im Betrieb derselbe Ort sind — ueblicherweise
+  die Richtungs-Bahnsteige.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": [
+      {
+        "id": 42, "name": "Herrenkrug", "created_via": "auto", "note": null,
+        "stop_count": 2,
+        "stops": [
+          { "id": 391, "name": "Herrenkrug", "assigned_via": "auto",
+            "lat": 52.150803, "lon": 11.678898,
+            "ending_lines": ["6", "N1"], "starting_lines": [] },
+          { "id": 250, "name": "Herrenkrug", "assigned_via": "auto",
+            "lat": 52.151405, "lon": 11.679314,
+            "ending_lines": [], "starting_lines": ["6", "9", "N1"] }
+        ],
+        "ending_lines": ["6", "N1"],
+        "starting_lines": ["6", "9", "N1"],
+        "is_terminus": true, "one_sided": false, "manual_count": 0
+      }
+    ]
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **Warum es diese Ebene ueberhaupt gibt.** Die Konsolidierung verschmilzt Halte nur bei
+  **≤ 12 m und gleichem Namen** — richtig fuer die Halt-Identitaet, zu eng fuer den Betrieb. An
+  „Herrenkrug" enden die Fahrten auf dem einen Bahnsteig und beginnen **72 m weiter** auf dem
+  anderen. Netzweit sind **64 von 104 Endstellen** so gebaut, das sind **54,6 %** aller
+  Fahrt-Endpunkte. Ohne die Klammer liesse sich dort kein Anschluss bilden.
+
+  **Die Automatik deckt den Regelfall ab, nicht alles.** Gruppiert wird ueber den normalisierten
+  Namen: 631 Halte werden zu 315 Haltestellen, und die einseitigen Endstellen fallen von 64 auf
+  **14**. Der Rest ist von Hand zu pflegen — „Rothensee" und „Rothensee (Schleife)" sind dieselbe
+  Haltestelle, heissen aber verschieden.
+
+  **`one_sided` ist die Arbeitsliste.** Dort endet nur oder beginnt nur etwas. Meist fehlt der
+  Gegen-Bahnsteig; manchmal ist es aber eine echte Betriebsfahrt (`Suedring` → `Eiskellerplatz`,
+  484 m auseinander), und dann bleibt es dabei.
+
+  **Keine Abstands-Automatik.** 100 m Umkreis haetten 55 der 64 Faelle geloest — die restlichen
+  Abstaende (201 m, 484 m, 612 m, 675 m) gehoeren aber zu echten Betriebsfahrten. Der Abstand ist
+  deshalb nur ein **Vorschlag** (`GET /api/v1/admin/stop-groups/{id}`, Umkreis 350 m), nie eine
+  Entscheidung.
+
+  **Von Hand gesetzte Zuordnungen sind gesperrt.** `assigned_via: "manual"` schuetzt vor dem
+  Namensabgleich — sonst waere jede Pflege beim naechsten Import wieder verloren.
+}

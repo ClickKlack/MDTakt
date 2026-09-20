@@ -130,7 +130,7 @@ sonst matcht das System still falsch.
 | # | MD-Takt erwartet | Stützt sich auf (MDKursTracker) | Bricht, wenn… |
 |---|---|---|---|
 | E1 | `course_number` ist die **am Fahrzeug angeschlagene** Kursnummer (Nutzereingabe), 2-stellig | `recordings.course_number` | sie aus HAFAS abgeleitet/geraten ist |
-| E2 | `course_number` ist **nur je Linie** eindeutig → Umlauf = `(line, course_number, service_date)` | Fachlogik MVB | sie netzweit oder anders eindeutig ist |
+| E2 | `course_number` ist die Bezeichnung des **Umlaufs**, und der Umlauf kann **über mehrere Linien** laufen (siehe Hinweis unten) | Fachlogik MVB | ein Fahrzeug beim Linienwechsel eine **andere** Nummer bekommt |
 | E3 | Tagestypen sind genau **MO-FR / SA / SO(+Feiertag)** | `trips.day_type` | feinere/andere Muster vorkommen (z. B. Mo-Do) |
 | E4 | Pro Fahrt gibt es einen **vollständigen Laufweg mit Soll-Zeit je Halt** | `route_stops` (departure_planned, line, seq) | Laufweg unvollständig ist oder Soll-Zeiten fehlen |
 | E5 | **Alle Zeiten in UTC**; `service_date` = **Berlin**-Betriebstag (Fahrtstart) | `recordings`/`route_stops` UTC, `service_date` | Zeiten lokal/naiv sind oder service_date anders definiert |
@@ -139,7 +139,18 @@ sonst matcht das System still falsch.
 | E8 | Die **HAFAS-`extId`** (inkl. Steig) ist je Abfahrt verfügbar und stabil benannt | `recordings.stop_id` | Halt nur als Klartext ohne ID vorliegt |
 | E9 | Es gibt eine **aufgelöste Kursnummer pro Fahrt** (Mehrheit/Override) + idealerweise Erfassungszahl | Mehrheitsregel / `manual_course_number` | keine Auflösung möglich/lieferbar ist |
 
-> **Wichtigste Risikopunkte:** E2 (Eindeutigkeit der Kursnummer), E4/E7 (vollständiger Laufweg inkl. Linie pro Halt),
+> **E2 wurde am 20.09.2026 korrigiert.** Ursprünglich stand hier: „`course_number` ist **nur je Linie** eindeutig →
+> Umlauf = `(line, course_number, service_date)`". Das trägt nicht. Ein Fahrzeug wechselt im Betrieb die Linie — eine
+> 1 wird in Sudenburg zur 13 — und **behält dabei seine Kursnummer**; angezeigt wird sie je Linie präfixiert
+> (`1/03` → `13/03`). Der Umlauf ist damit **größer** als das Tripel, und das Tripel identifiziert ihn nicht.
+>
+> Für euch ändert das nichts an dem, was ihr liefert: Die Kursnummer bleibt die am Fahrzeug angeschlagene
+> Nutzereingabe je Sichtung (E1). MD-Takt setzt die Umlauf-Kette selbst zusammen, aus gepflegten Anschlüssen je
+> Haltestelle (siehe [`KURSE.md`](KURSE.md)). **Offen bleibt**, ob die Nummer netzweit eindeutig ist oder ob
+> gleichzeitig zwei verschiedene Umläufe „03" heißen können — falls ihr das aus eurem Bestand beantworten könnt,
+> wäre das die nützlichste Rückmeldung zu diesem Dokument.
+>
+> **Wichtigste Risikopunkte:** E2 (Reichweite der Kursnummer), E4/E7 (vollständiger Laufweg inkl. Linie pro Halt),
 > E5 (Zeitzonen). Diese bitte zuerst gegenprüfen.
 
 ---

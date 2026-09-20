@@ -33,6 +33,7 @@ final class ScheduleVersionService
         private readonly SchedulePeriodService $periods,
         private readonly StopConsolidationService $stops,
         private readonly TripConsolidationService $trips,
+        private readonly StopGroupService $stopGroups,
         private readonly OperatingDayResolver $operatingDay,
     ) {}
 
@@ -127,6 +128,10 @@ final class ScheduleVersionService
         // dahin hielt das Konsolidat nur fest, dass und wann sich etwas geändert hat.
         $stopMap = $this->stops->consolidate($window['from'], $window['to']);
         $fahrten = $this->trips->consolidate($repraesentativeTage, $stopMap);
+
+        // Neue Halte brauchen eine Haltestelle, sonst fielen sie aus der Umlauf-Pflege heraus.
+        // Der Lauf fasst nur Unzugeordnetes an — gepflegte Zuordnungen überleben ihn.
+        $this->stopGroups->sync();
 
         return [
             'signatures' => DB::table('trip_signatures')->count(),

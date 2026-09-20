@@ -329,11 +329,12 @@ components:
 
     StopListResponse:
       type: object
-      required: [data]
+      required: [data, meta]
       properties:
         data:
           type: array
           items: { $ref: '#/components/schemas/GtfsStop' }
+        meta: { $ref: '#/components/schemas/SourceMeta' }
 
     TripListResponse:
       type: object
@@ -620,6 +621,319 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ConsolidatedTrip' }
         meta: { $ref: '#/components/schemas/SourceMeta' }
+
+    ConsolidatedStop:
+      type: object
+      required: [id, name]
+      description: >
+        Ein Halt des Konsolidats — eine Zeile je **physischem Punkt**. Steige sind bewusst
+        verschmolzen (FAHRPLANPERIODEN §5.1): 18 Halte des Realbestands liegen auf exakt
+        identischen Koordinaten, und `direction_id` ist im gesamten Feed NULL. Die Richtung
+        ergibt sich aus der Position in der Fahrt-Sequenz, nicht aus dem Halt.
+      properties:
+        id: { type: integer }
+        name:
+          type: string
+          description: Jüngster bekannter Name ("latest wins") aus `consolidated_stop_versions`.
+        lat: { type: number, nullable: true }
+        lon: { type: number, nullable: true }
+
+    ConsolidatedStopListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ConsolidatedStop' }
+        meta: { $ref: '#/components/schemas/SourceMeta' }
+
+    StopGroupStop:
+      type: object
+      required: [id, name, assigned_via]
+      properties:
+        id: { type: integer, description: '`consolidated_stops.id`' }
+        name: { type: string }
+        assigned_via:
+          type: string
+          enum: [auto, manual]
+          description: >
+            `manual` ist keine Herkunftsnotiz, sondern eine **Sperre**: Der Namensabgleich
+            fasst eine von Hand gesetzte Zuordnung nicht an. Ohne sie waere jede Pflege beim
+            naechsten Import wieder verloren.
+        lat: { type: number }
+        lon: { type: number }
+        ending_lines: { type: array, items: { type: string } }
+        starting_lines: { type: array, items: { type: string } }
+
+    StopGroup:
+      type: object
+      required: [id, name, created_via, stop_count, stops, is_terminus, one_sided]
+      description: >
+        Eine **Haltestelle** als Betriebspunkt: die Klammer um die Halte, die im Betrieb
+        derselbe Ort sind — ueblicherweise die Richtungs-Bahnsteige (KURSE §2, K6).
+
+
+        Noetig, weil die Konsolidierung Halte nur bei ≤ 12 m und gleichem Namen verschmilzt.
+        An einer Endstelle liegen Ankunft und Abfahrt oft weiter auseinander: netzweit sind
+        64 von 104 Endstellen so gebaut, das sind 54,6 % aller Fahrt-Endpunkte.
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        created_via: { type: string, enum: [auto, manual] }
+        note: { type: string, nullable: true }
+        stop_count: { type: integer }
+        stops:
+          type: array
+          items: { $ref: '#/components/schemas/StopGroupStop' }
+        ending_lines: { type: array, items: { type: string } }
+        starting_lines: { type: array, items: { type: string } }
+        is_terminus:
+          type: boolean
+          description: Hier beginnt oder endet mindestens eine Fahrt — nur dort ist Umlauf-Pflege moeglich.
+        one_sided:
+          type: boolean
+          description: >
+            Es endet nur oder beginnt nur etwas. Meist der Hinweis, dass der Gegen-Bahnsteig
+            noch als eigene Haltestelle gefuehrt wird — sonst eine echte Betriebsfahrt.
+        manual_count: { type: integer }
+
+    StopGroupSuggestion:
+      type: object
+      required: [id, name, distance_meters, stop_count]
+      description: >
+        Eine andere Haltestelle in Laufweite (Umkreis 350 m). Bewusst nur ein **Vorschlag**:
+        Eine reine Abstandsregel wuerde an dichten Kreuzungen Falsches verschmelzen, und die
+        weiteren Abstaende gehoeren zu echten Betriebsfahrten (`Suedring` → `Eiskellerplatz`,
+        484 m). Der Mensch entscheidet.
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        distance_meters: { type: integer }
+        stop_count: { type: integer }
+
+    StopGroupListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/StopGroup' }
+
+    StopGroupDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          allOf:
+            - $ref: '#/components/schemas/StopGroup'
+            - type: object
+              properties:
+                suggestions:
+                  type: array
+                  items: { $ref: '#/components/schemas/StopGroupSuggestion' }
+
+    StopLinkStand:
+      type: object
+      required: [index, valid_from, valid_to, ranges, line_version_ids, line_count]
+      description: >
+        Ein **Versionsstand** am gewählten Halt: ein Zeitabschnitt, in dem sich an den hier
+        beteiligten Linien-Versionen nichts ändert (KURSE §2, K5). Entsteht, indem der
+        Perioden-Zeitraum an allen Intervallgrenzen der beteiligten Versionen zerschnitten und
+        danach wieder verschmolzen wird, wo die Versionsmenge gleich bleibt.
+
+
+        Ohne diesen Begriff wäre "Periode + Fahrplantyp" an einem Umsteigepunkt mehrdeutig:
+        Linie 1 und Linie 13 können dort gleichzeitig auf verschiedenen Ständen stehen.
+      properties:
+        index: { type: integer, description: Laufende Nummer, chronologisch ab 0. }
+        valid_from: { type: string, format: date, description: Erster Tag, an dem dieser Stand gilt. }
+        valid_to: { type: string, format: date, description: Letzter Tag. }
+        ranges:
+          type: array
+          description: >
+            Die einzelnen Zeiträume. Ein Stand ist über seine **Versionsmenge** identifiziert,
+            nicht über eine durchgehende Laufzeit — dieselbe Denkweise wie bei der Linien-Version
+            selbst (FAHRPLANPERIODEN §5.4 a).
+
+
+            Nötig wegen der Nachtlinien: Sie wechseln im `mo_fr`-Strang wöchentlich die Version,
+            weil die Nacht von Sonntag auf Montag eine Sonntagnacht ist. Derselbe Stand gilt
+            deshalb für alle Montage, ein anderer für alle Di–Fr-Blöcke. Ohne diese
+            Zusammenfassung ergaben sich an Herrenkrug 16 Stände über vier Wochen.
+
+
+            Die Zeiträume sind auf Tage des gewählten Fahrplantyps beschnitten: Ein Abschnitt,
+            in den keiner fällt, erscheint gar nicht, und keiner beginnt an einem Tag, an dem
+            der Fahrplan nicht gilt.
+          items:
+            type: object
+            required: [valid_from, valid_to]
+            properties:
+              valid_from: { type: string, format: date }
+              valid_to: { type: string, format: date }
+        line_version_ids:
+          type: array
+          items: { type: integer }
+        line_count: { type: integer }
+
+    StopLinkDecision:
+      type: object
+      required: [id, kind]
+      description: >
+        Die an einer Fahrt getroffene Entscheidung. `null` bedeutet **noch nicht gepflegt** —
+        das ist ausdrücklich etwas anderes als `start`/`end`, die eine bewusst offen gelassene
+        Kette bezeichnen (Aus- bzw. Einrücken, Betriebsfahrt).
+      properties:
+        id: { type: integer, description: 'ID der `trip_links`-Zeile, zum Lösen.' }
+        kind:
+          type: string
+          enum: [link, start, end]
+        partner:
+          allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }]
+          nullable: true
+          description: Nur bei `kind=link` gesetzt — die angeschlossene Gegenfahrt.
+        turnaround_seconds:
+          type: integer
+          nullable: true
+          description: >
+            Wendezeit in Sekunden, nur bei `kind=link`. Gerechnet über Betriebstag-Sekunden,
+            nicht lexikalisch — eine Ankunft um `24:50:00` und eine Abfahrt um `25:10:00`
+            ergeben 1200.
+        note: { type: string, nullable: true }
+
+    StopLinkTrip:
+      type: object
+      required: [id, line, mode, version_no, start_stop, end_stop, departure_sort, arrival_sort]
+      properties:
+        id: { type: integer, description: '`consolidated_trips.id`' }
+        line: { type: string }
+        mode: { type: string, enum: [tram, bus, other] }
+        version_no: { type: integer }
+        line_version_id: { type: integer }
+        start_stop: { type: string, nullable: true }
+        end_stop: { type: string, nullable: true }
+        departure_time:
+          type: string
+          nullable: true
+          example: '24:50:00'
+          description: GTFS-Wallclock des Betriebstags — Werte jenseits 24:00 sind gültig und gewollt.
+        arrival_time: { type: string, nullable: true, example: '25:10:00' }
+        departure_sort:
+          type: integer
+          description: >
+            Sortierschluessel **entlang des Betriebstags**. Eine Zeit vor der Betriebstag-Grenze
+            der Linie traegt 24 Stunden Aufschlag: Auf der N1 faehrt 22:49 vor 00:19, obwohl
+            00:19 als Uhrzeit kleiner ist. Immer hiernach sortieren, nie nach der Uhrzeit —
+            sonst stuende die halbe Nacht am Anfang (FAHRPLANPERIODEN §10).
+        arrival_sort: { type: integer, description: Analog fuer die Ankunft. }
+        course:
+          type: object
+          nullable: true
+          description: Ab Etappe 2 gesetzt — der Kurs der Kette, zu der diese Fahrt gehört.
+          properties:
+            id: { type: integer }
+            number: { type: string }
+            display: { type: string, example: '13/03' }
+        decision:
+          allOf: [{ $ref: '#/components/schemas/StopLinkDecision' }]
+          nullable: true
+
+    StopLinkBoardResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [stop_group, period, day_type, stands, stand, ending, starting, open_count]
+          properties:
+            stop_group:
+              type: object
+              description: >
+                Die Haltestelle samt ihrer einzelnen Bahnsteige. Die bleiben sichtbar: An einer
+                Endstelle endet die eine Fahrt auf dem einen und beginnt die nächste auf dem
+                anderen, und der Pflegende soll sehen, dass die Klammer das zusammenhält.
+              required: [id, name, stops]
+              properties:
+                id: { type: integer }
+                name: { type: string }
+                stops:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      name: { type: string }
+            period:
+              type: object
+              properties:
+                id: { type: integer }
+                label: { type: string }
+                status: { type: string, enum: [current, frozen] }
+            day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+            day_type_label: { type: string }
+            stands:
+              type: array
+              items: { $ref: '#/components/schemas/StopLinkStand' }
+            stand:
+              allOf: [{ $ref: '#/components/schemas/StopLinkStand' }]
+              nullable: true
+              description: Der ausgewählte Stand; `null`, wenn am Halt keine Fahrten liegen.
+            ending:
+              type: array
+              description: Fahrten, die an diesem Halt **enden**, nach Ankunft sortiert.
+              items: { $ref: '#/components/schemas/StopLinkTrip' }
+            starting:
+              type: array
+              description: Fahrten, die an diesem Halt **beginnen**, nach Abfahrt sortiert.
+              items: { $ref: '#/components/schemas/StopLinkTrip' }
+            open_count:
+              type: integer
+              description: Zahl der Fahrten ohne Entscheidung — der Pflegestand auf einen Blick.
+
+    TripLinkRequest:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [link, start, end]
+        from_trip_id:
+          type: integer
+          nullable: true
+          description: Pflicht bei `kind=link` und `kind=end`, verboten bei `kind=start`.
+        to_trip_id:
+          type: integer
+          nullable: true
+          description: Pflicht bei `kind=link` und `kind=start`, verboten bei `kind=end`.
+        note: { type: string, nullable: true, maxLength: 255 }
+
+    TripLinkResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, kind, warnings]
+          properties:
+            id: { type: integer }
+            kind: { type: string, enum: [link, start, end] }
+            stop_id: { type: integer }
+            from_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
+            to_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
+            turnaround_seconds: { type: integer, nullable: true }
+            note: { type: string, nullable: true }
+            warnings:
+              type: array
+              description: >
+                Hinweise, die die Verknüpfung **nicht** verhindern. `short_turnaround` bei einer
+                Wendezeit unter `COURSE_MIN_TURNAROUND_MINUTES`, `line_change` beim Linienwechsel
+                (ausdrücklich erlaubt, siehe KURSE §2 K1).
+              items:
+                type: object
+                required: [code, message]
+                properties:
+                  code: { type: string, enum: [short_turnaround, line_change] }
+                  message: { type: string }
 
     TimetableRow:
       type: object
@@ -991,14 +1305,35 @@ paths:
     get:
       operationId: listStops
       summary: Alle MVB-Haltestellen
-      description: Öffentliche Stammdaten — kein Auth im MVP. Nach Name sortiert.
+      description: >
+        Öffentliche Stammdaten — kein Auth im MVP. Nach Name sortiert.
+
+
+        **Die Quelle bestimmt die Identität.** Aus dem Konsolidat (Vorgabe) ist eine Zeile ein
+        **physischer Punkt** mit ganzzahliger `id`; namensgleiche Halte im Umkreis von 12 m sind
+        zu einer Identität verschmolzen, Steige also bewusst zusammengefasst. Aus dem
+        Roh-Bestand (`source=raw`) ist eine Zeile eine GTFS-`stop_id` — mehrere pro Name, pro
+        Build neu vergeben. `meta.source` sagt, was geliefert wurde.
       tags: [Stammdaten]
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ScheduleSource' }
       responses:
         '200':
-          description: Liste aller Haltestellen
+          description: Liste aller Haltestellen — Form je nach `source`
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/StopListResponse' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ConsolidatedStopListResponse'
+                  - $ref: '#/components/schemas/StopListResponse'
+        '422':
+          description: Unbekannte Quelle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/trips:
     get:
@@ -1252,6 +1587,403 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: Unbekannte Version, identische IDs, oder verschiedene Linie/Fahrplantyp/Periode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/stop-groups:
+    get:
+      operationId: listStopGroups
+      summary: Haltestellen als Betriebspunkte
+      description: >
+        Je Haltestelle ihre Halte, ob dort Fahrten beginnen oder enden, und welche Linien sie
+        beruehren (KURSE §2, K6).
+
+
+        **Warum es diese Ebene gibt.** Die Konsolidierung verschmilzt Halte nur bei ≤ 12 m und
+        gleichem Namen. An „Herrenkrug" enden die Fahrten auf dem einen Bahnsteig und beginnen
+        72 m weiter auf dem anderen; netzweit sind 64 von 104 Endstellen so gebaut, das sind
+        54,6 % aller Fahrt-Endpunkte. Ohne diese Klammer liesse sich dort kein Anschluss bilden.
+
+
+        Die Gruppierung laeuft automatisch ueber den normalisierten Namen und deckt damit 49
+        der 64 Faelle ab. Der Rest ist hier von Hand zu pflegen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Sucht in den Namen der Haltestelle und ihrer Halte.
+          schema: { type: string }
+        - name: only_termini
+          in: query
+          required: false
+          description: Nur Haltestellen, an denen Fahrten beginnen oder enden — netzweit 63 von 315.
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Haltestellen mit ihren Halten
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StopGroupListResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: createStopGroup
+      summary: Haltestelle von Hand anlegen
+      description: >
+        Eine von Hand angelegte Haltestelle traegt **keinen** Namensschluessel: Sie soll bei der
+        naechsten Automatik keine fremden Halte einsammeln.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 255 }
+                note: { type: string, nullable: true, maxLength: 255 }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/StopGroup' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Name fehlt oder ist zu lang
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/stop-groups/{stopGroup}:
+    parameters:
+      - name: stopGroup
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      operationId: getStopGroup
+      summary: Eine Haltestelle samt Vorschlaegen
+      description: >
+        Wie die Liste, zusaetzlich `suggestions`: andere Haltestellen in Laufweite, die das
+        fehlende Gegenstueck sein koennten.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: Haltestelle mit Halten und Vorschlaegen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StopGroupDetailResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannte Haltestelle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      operationId: renameStopGroup
+      summary: Haltestelle umbenennen
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 255 }
+                note: { type: string, nullable: true, maxLength: 255 }
+      responses:
+        '200':
+          description: Geaendert
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/StopGroup' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannte Haltestelle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/stop-groups/{stopGroup}/stops:
+    parameters:
+      - name: stopGroup
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      operationId: assignStopToGroup
+      summary: Halt dieser Haltestelle zuordnen
+      description: >
+        Die Zuordnung gilt danach als **von Hand gesetzt** und ist damit vor dem Namensabgleich
+        geschuetzt. Bleibt die bisherige Haltestelle leer zurueck, wird sie geloescht — eine
+        Haltestelle ohne Halte ist keine.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consolidated_stop_id]
+              properties:
+                consolidated_stop_id: { type: integer }
+      responses:
+        '204':
+          description: Zugeordnet
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannter Halt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/stop-groups/{stopGroup}/stops/{stop}:
+    parameters:
+      - name: stopGroup
+        in: path
+        required: true
+        schema: { type: integer }
+      - name: stop
+        in: path
+        required: true
+        description: '`consolidated_stops.id`'
+        schema: { type: integer }
+    delete:
+      operationId: detachStopFromGroup
+      summary: Halt aus der Haltestelle herausloesen
+      description: >
+        Gibt den Halt der Automatik zurueck: Er landet wieder in der Gruppe seines
+        Namensschluessels.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '204':
+          description: Geloest
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/stop-groups/{stopGroup}/merge:
+    parameters:
+      - name: stopGroup
+        in: path
+        required: true
+        description: Die Ziel-Haltestelle, in die hinein gelegt wird.
+        schema: { type: integer }
+    post:
+      operationId: mergeStopGroup
+      summary: Zwei Haltestellen zusammenlegen
+      description: >
+        Der Weg fuer „Rothensee (Schleife)" → „Rothensee": Alle Halte der Quelle wandern in die
+        Ziel-Haltestelle, die Quelle wird geloescht. Die Mitgliedschaften gelten danach als von
+        Hand gesetzt, damit die Automatik sie nicht wieder auseinanderzieht.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_id]
+              properties:
+                source_id: { type: integer }
+      responses:
+        '204':
+          description: Zusammengelegt
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannte Quelle, oder Quelle und Ziel sind dieselbe Haltestelle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/stop-links:
+    get:
+      operationId: getStopLinkBoard
+      summary: Haltestellen-Editor — endende und beginnende Fahrten an einem Halt
+      description: >
+        Die Datengrundlage für die Umlauf-Pflege (KURSE §1): Welche Fahrten enden an diesem
+        Halt, welche beginnen dort, und was ist bereits entschieden.
+
+
+        **Warum ein Versionsstand nötig ist.** Der Editor arbeitet auf Periode + Fahrplantyp,
+        nicht auf einem Datum (KURSE §2, K5). Innerhalb einer Periode kann eine Linie aber
+        mehrere Versionen mit verschiedenen Gültigkeits-Intervallen haben — an einem
+        Umsteigepunkt stehen Linie 1 und Linie 13 dann womöglich auf verschiedenen Ständen, und
+        die Auswahl wäre mehrdeutig. `stands[]` löst das auf: Zeitabschnitte, in denen sich an
+        den hier beteiligten Versionen nichts ändert. Ohne `stand=` wird der Abschnitt
+        vorausgewählt, der den heutigen Tag enthält, sonst der letzte.
+
+
+        **`decision: null` heißt "noch nicht gepflegt"** — ausdrücklich etwas anderes als
+        `kind: start`/`end`, die eine bewusst offen gelassene Kette bezeichnen (Aus- bzw.
+        Einrücken). Nur so ist der Pflegestand ablesbar; `open_count` zählt genau diese Fälle.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: stop_group
+          in: query
+          required: true
+          description: >
+            `stop_groups.id` — die **Haltestelle** als Betriebspunkt, nicht ein einzelner Halt.
+            An einer Endstelle liegen Ankunft und Abfahrt oft auf verschiedenen Bahnsteigen.
+          schema: { type: integer }
+        - name: period
+          in: query
+          required: true
+          description: '`schedule_periods.id`'
+          schema: { type: integer }
+        - name: day_type
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/FahrplanTyp' }
+        - name: stand
+          in: query
+          required: false
+          description: Index eines Versionsstands aus `stands[]`. Ohne Angabe wird vorausgewählt.
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Endende und beginnende Fahrten samt Entscheidungen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StopLinkBoardResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannte Haltestelle, unbekannte Periode, unbekannter Fahrplantyp oder Stand außerhalb des Bereichs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/trip-links:
+    post:
+      operationId: createTripLink
+      summary: Anschluss anlegen oder eine Kette bewusst offen lassen
+      description: >
+        Eine Zeile ist **eine Entscheidung**: `link` verbindet zwei Fahrten, `start` erklärt eine
+        Fahrt zum Beginn eines Umlaufs (Ausrücken), `end` zu dessen Ende (Einrücken). Die beiden
+        letzten sind der Betriebsfahrt-Fall — er kommt besonders morgens vor und ist eine
+        bewusste Aussage, keine fehlende Pflege.
+
+
+        **Ketten laufen über Linien hinweg.** Eine 1 wird in Sudenburg zur 13; der Linienwechsel
+        wird als Hinweis gemeldet, nicht abgewiesen (KURSE §2, K1).
+
+
+        **Geprüft wird die Haltestelle, nicht der Halt.** An einer Endstelle liegen Ankunft und
+        Abfahrt oft auf verschiedenen Bahnsteigen — netzweit bei 64 von 104 Endstellen. Beide
+        Halte müssen derselben `stop_group` angehören; gehören sie es nicht, ist das der
+        Betriebsfahrt-Fall und gehört als `start`/`end` festgehalten (KURSE §2, K6).
+
+
+        **Zeiten sind GTFS-Wallclock.** Die Wendezeit wird in Betriebstag-Sekunden gerechnet,
+        nie lexikalisch — eine Ankunft `24:50:00` mit Anschlussabfahrt `25:10:00` ergibt 1200 s
+        und ist gültig. Eine zu kurze Wendezeit erscheint als Warnung im Ergebnis, eine negative
+        wird mit 422 abgewiesen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TripLinkRequest' }
+      responses:
+        '201':
+          description: Entscheidung gespeichert — `warnings` kann trotzdem belegt sein
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TripLinkResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Eine der beiden Fahrten trägt bereits eine Entscheidung
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: >
+            Haltestelle passt nicht, verschiedene Periode oder Fahrplantyp, Gültigkeiten
+            überschneiden sich nicht, Zyklus, oder negative Wendezeit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/trip-links/{tripLink}:
+    parameters:
+      - name: tripLink
+        in: path
+        required: true
+        description: '`trip_links.id`'
+        schema: { type: integer }
+    delete:
+      operationId: deleteTripLink
+      summary: Entscheidung wieder lösen
+      description: >
+        Setzt die beteiligten Fahrten zurück auf "noch nicht gepflegt". Bricht eine Kette in der
+        Mitte auf, zerfällt sie in zwei — ein davon abhängiger Kurs bleibt an beiden Teilen
+        hängen und ist danach gegebenenfalls neu zu setzen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '204':
+          description: Gelöst
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannte Verknüpfung
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

@@ -1,0 +1,148 @@
+meta {
+  name: Stop Links (Haltestellen-Editor)
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/stop-links?stop_group=117&period=1&day_type=mo_fr
+  body: none
+  auth: bearer
+}
+
+params:query {
+  stop_group: 117
+  period: 1
+  day_type: mo_fr
+  ~stand: 0
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.stands: isArray
+  res.body.data.ending: isArray
+  res.body.data.starting: isArray
+  res.body.data.day_type: eq mo_fr
+}
+
+script:post-response {
+  const d = res.body.data;
+
+  // Staende muessen luecken- und ueberschneidungsfrei aneinandergrenzen: Sie entstehen
+  // aus der Zerlegung EINES Zeitraums, nicht aus unabhaengigen Intervallen.
+  for (let i = 1; i < d.stands.length; i++) {
+    if (d.stands[i].valid_from <= d.stands[i - 1].valid_to) {
+      throw new Error("Stand " + i + " ueberschneidet den vorigen");
+    }
+  }
+
+  // Der gewaehlte Stand muss aus der Liste stammen.
+  if (d.stand !== null) {
+    const treffer = d.stands.filter(s => s.index === d.stand.index);
+    if (treffer.length !== 1) {
+      throw new Error("Gewaehlter Stand steht nicht in stands[]");
+    }
+  }
+
+  // open_count muss zaehlen, was decision === null hat - sonst ist der Pflegestand gelogen.
+  const offen = [...d.ending, ...d.starting].filter(f => f.decision === null).length;
+  if (offen !== d.open_count) {
+    throw new Error("open_count " + d.open_count + " passt nicht zu " + offen + " offenen Fahrten");
+  }
+
+  // Eine Fahrt darf an diesem Halt enden UND beginnen (Wendeschleife), aber jede Seite
+  // traegt hoechstens eine Entscheidung.
+  for (const fahrt of d.ending) {
+    if (fahrt.decision && fahrt.decision.kind === "start") {
+      throw new Error("Endende Fahrt " + fahrt.id + " traegt eine start-Entscheidung");
+    }
+  }
+}
+
+docs {
+  # Haltestellen-Editor: endende und beginnende Fahrten
+
+  Die Datengrundlage fuer die Umlauf-Pflege. Liefert fuer einen Halt, eine Periode und einen
+  Fahrplantyp die Fahrten, die dort **enden**, die dort **beginnen**, und was bereits
+  entschieden ist.
+
+  `stop_group` ist eine `stop_groups.id` — die **Haltestelle** als Betriebspunkt, zu bekommen
+  ueber `GET /api/v1/admin/stop-groups?only_termini=1`. Nicht ein einzelner Halt: An einer
+  Endstelle enden die Fahrten auf dem einen Bahnsteig und beginnen auf dem anderen.
+
+  Beispiel-Response (gekuerzt, Sudenburg):
+
+  ```json
+  {
+    "data": {
+      "stop_group": {
+        "id": 117, "name": "Sudenburg",
+        "stops": [{ "id": 391, "name": "Sudenburg" }, { "id": 250, "name": "Sudenburg (Schleife)" }]
+      },
+      "period": { "id": 1, "label": "Ausgangsperiode ab 15.08.2026", "status": "current" },
+      "day_type": "mo_fr",
+      "day_type_label": "Mo-Fr",
+      "stands": [
+        { "index": 0, "valid_from": "2026-08-15", "valid_to": "2026-09-20",
+          "line_version_ids": [174, 188], "line_count": 2 },
+        { "index": 1, "valid_from": "2026-09-21", "valid_to": "2026-09-28",
+          "line_version_ids": [201, 188], "line_count": 2 }
+      ],
+      "stand": { "index": 1, "valid_from": "2026-09-21", "valid_to": "2026-09-28",
+                 "line_version_ids": [201, 188], "line_count": 2 },
+      "ending": [
+        { "id": 9835, "line": "1", "mode": "tram", "version_no": 2, "line_version_id": 201,
+          "start_stop": "Kannenstieg", "end_stop": "Sudenburg",
+          "departure_time": "06:14:00", "arrival_time": "06:48:00",
+          "course": null,
+          "decision": { "id": 7, "kind": "link", "turnaround_seconds": 240,
+                        "partner": { "id": 10412, "line": "13" }, "note": null } }
+      ],
+      "starting": [
+        { "id": 10412, "line": "13", "mode": "tram", "version_no": 1, "line_version_id": 188,
+          "start_stop": "Sudenburg", "end_stop": "Westerhuesen",
+          "departure_time": "06:52:00", "arrival_time": "07:24:00",
+          "course": null,
+          "decision": { "id": 7, "kind": "link", "turnaround_seconds": 240,
+                        "partner": { "id": 9835, "line": "1" }, "note": null } }
+      ],
+      "open_count": 34
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **`decision: null` heisst "noch nicht gepflegt".** Das ist ausdruecklich etwas anderes als
+  `kind: "start"` oder `"end"` — die bezeichnen eine *bewusst* offen gelassene Kette (Aus- bzw.
+  Einruecken, Betriebsfahrt; kommt besonders morgens vor). Ohne diese Unterscheidung waere der
+  Pflegestand nicht ablesbar. `open_count` zaehlt genau die `null`-Faelle.
+
+  **Warum es `stands[]` gibt.** Der Editor arbeitet auf Periode + Fahrplantyp, nicht auf einem
+  Datum. Innerhalb einer Periode kann eine Linie aber mehrere Versionen mit verschiedenen
+  Gueltigkeits-Intervallen haben: An einem Umsteigepunkt stehen Linie 1 und Linie 13 dann
+  womoeglich auf verschiedenen Staenden, und die Auswahl waere mehrdeutig. Ein *Stand* ist ein
+  Zeitabschnitt, in dem sich an den hier beteiligten Versionen nichts aendert. Ohne `stand=`
+  wird der Abschnitt vorausgewaehlt, der heute enthaelt, sonst der letzte.
+
+  **Endende und beginnende Fahrt liegen oft auf verschiedenen Bahnsteigen.** Deshalb ist der
+  Bezug die Haltestelle, nicht der Halt: Netzweit sind 64 von 104 Endstellen einseitig, das sind
+  54,6 % aller Fahrt-Endpunkte. `stop_group.stops` zeigt die einzelnen Bahnsteige weiterhin an —
+  die Klammer versteckt sie nicht.
+
+  **Eine Fahrt kann in beiden Listen stehen.** Bei einer Wendeschleife ist derselbe Halt Start
+  und Ziel. Die Entscheidungen sind trotzdem getrennt: ein Vorgaenger und ein Nachfolger.
+
+  **Zeiten sind GTFS-Wallclock.** Stunden ueber 24 bleiben stehen (`25:10:00`) — sie gehoeren
+  zum Betriebstag des Vortags. Nicht als Uhrzeit parsen und nicht lexikalisch vergleichen.
+
+  **Ein leerer Halt ist kein Fehler**, sondern liefert leere Listen und `stand: null`.
+}

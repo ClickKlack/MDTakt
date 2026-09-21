@@ -11,6 +11,7 @@ use App\Models\StopGroupMember;
 use App\Models\User;
 use App\Services\StopGroupService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\ConsolidatedFixtures;
 use Tests\TestCase;
 
 /**
@@ -186,7 +187,7 @@ final class StopGroupTest extends TestCase
 
     public function test_directory_marks_one_sided_stop_groups(): void
     {
-        $f = new \Tests\Support\ConsolidatedFixtures;
+        $f = new ConsolidatedFixtures;
         $version = $f->version('10');
         $f->gueltigkeit($version);
         $f->fahrt($version, ['Alter Markt', 'Rothensee'], ['06:00:00', '06:30:00']);

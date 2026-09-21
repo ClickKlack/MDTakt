@@ -11,6 +11,7 @@ use App\Models\SchedulePeriod;
 use App\Models\TripLink;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Tests\Support\ConsolidatedFixtures;
 use Tests\TestCase;
 
@@ -53,7 +54,7 @@ final class TripLinkTest extends TestCase
     /**
      * @param  array<string, mixed>  $body
      */
-    private function anlegen(array $body): \Illuminate\Testing\TestResponse
+    private function anlegen(array $body): TestResponse
     {
         return $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', $body);
     }

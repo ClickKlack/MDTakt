@@ -8,7 +8,6 @@ use App\Enums\FahrplanTyp;
 use App\Enums\TripLinkKind;
 use App\Models\SchedulePeriod;
 use App\Models\StopGroup;
-use App\Support\GtfsTime;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -491,5 +490,4 @@ final class StopLinkBoardService
             'note' => $link->note,
         ];
     }
-
 }

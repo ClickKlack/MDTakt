@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Zugehörigkeit eines Halts zu einer Haltestelle.
  *
  * `assigned_via = manual` schützt die Zeile vor dem Namensabgleich — siehe
- * {@see \App\Enums\StopGroupOrigin}.
+ * {@see StopGroupOrigin}.
  *
  * @property int $id
  * @property int $stop_group_id

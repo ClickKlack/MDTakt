@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\TripLinkKind;
+use App\Http\Requests\TripLinkRequest;
 use App\Models\ConsolidatedTrip;
 use App\Models\TripLink;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,7 @@ use Illuminate\Support\Facades\Log;
  * ohne Anschluss beginnen oder enden zu lassen (KURSE §1).
  *
  * Der Dienst legt die Entscheidung an und liest Ketten aus; die **Zulässigkeit** einer
- * Verknüpfung prüft {@see \App\Http\Requests\TripLinkRequest}, damit ein Verstoß im
+ * Verknüpfung prüft {@see TripLinkRequest}, damit ein Verstoß im
  * einheitlichen 422-Envelope landet statt als Exception.
  */
 final class TripLinkService

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\ConsolidatedStopTime;
+use App\Models\ConsolidatedTrip;
 use App\Services\ConsolidatedTripTimeResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\ConsolidatedFixtures;
@@ -94,7 +95,7 @@ final class ConsolidatedTripTimeResolverTest extends TestCase
     public function test_trip_without_stop_times_is_absent(): void
     {
         $version = $this->f->version();
-        $fahrt = \App\Models\ConsolidatedTrip::factory()->create(['line_version_id' => $version->id]);
+        $fahrt = ConsolidatedTrip::factory()->create(['line_version_id' => $version->id]);
 
         $this->assertArrayNotHasKey($fahrt->id, $this->resolver->endpoints([$fahrt->id]));
     }

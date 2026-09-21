@@ -8,7 +8,6 @@ use App\Enums\FahrplanTyp;
 use App\Enums\RouteType;
 use App\Models\LineColor;
 use App\Models\LineVersion;
-use App\Support\GtfsTime;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;

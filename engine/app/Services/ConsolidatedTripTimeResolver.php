@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\GtfsTime;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\DB;
  * kopieren hieße, dreimal dieselbe Grenzfall-Entscheidung zu treffen.
  *
  * **Die Zeiten sind GTFS-Wallclock**, nicht Uhrzeiten: `25:10:00` gehört zum Betriebstag des
- * Vortags. Wer sie vergleicht, nimmt {@see \App\Support\GtfsTime}, nie den String-Vergleich.
+ * Vortags. Wer sie vergleicht, nimmt {@see GtfsTime}, nie den String-Vergleich.
  */
 final class ConsolidatedTripTimeResolver
 {

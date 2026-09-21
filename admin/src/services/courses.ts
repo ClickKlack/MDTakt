@@ -127,6 +127,88 @@ export async function fetchLineCourses(
   return data.data
 }
 
+// ---------------------------------------------------------------- Umläufe als Tabelle
+
+/** Eine Zeile der gemeinsamen Halte-Achse. Eine **Position**, keine Halt-Identität. */
+export interface CourseGridRow {
+  position: number
+  stop_id: number
+  stop_name: string
+  /**
+   * Die wievielte Berührung dieses Halts, ab 0. Ein Umlauf fährt hin und zurück — dieselbe
+   * Haltestelle mehrfach untereinander ist keine Doppelung, sondern die nächste Runde.
+   */
+  repeat_index: number
+}
+
+export interface CourseGridCell {
+  /** GTFS-Wallclock; „25:10:00" ist gültig und gehört zum Betriebstag des Vortags. */
+  time: string | null
+  /** Abfahrt — außer am letzten Halt einer Fahrt, dort die Ankunft. */
+  kind: 'departure' | 'arrival'
+  /**
+   * Hier **beginnt** eine Fahrt.
+   *
+   * Zusammen mit `kind: 'arrival'` markiert das die Endstelle: eine Zeile mit der Ankunft, die
+   * nächste mit der Abfahrt. `kind` allein unterschiede das nicht — eine Abfahrt am
+   * Zwischenhalt sieht genauso aus.
+   */
+  starts_trip: boolean
+  /**
+   * Die Linie **dieser Fahrt**, nicht des Umlaufs. Wo der Wert umspringt, hat das Fahrzeug die
+   * Linie gewechselt — die Stelle, die farbig unterlegt wird.
+   */
+  line: string
+}
+
+export interface CourseGridColumn {
+  id: number
+  number: string
+  lines: string[]
+  trip_count: number
+  breaks: number
+  duplicate: boolean
+  first_departure: string | null
+  last_arrival: string | null
+  /** Positionsgleich zu `rows`; `null` = dieser Umlauf berührt die Zeile nicht. */
+  cells: (CourseGridCell | null)[]
+}
+
+export interface CourseGrid {
+  line: string
+  period: { id: number; label: string; status: 'current' | 'frozen' }
+  day_type: FahrplanTyp
+  day_type_label: string
+  rows: CourseGridRow[]
+  /**
+   * Eine Spalte je Umlauf, in Kursreihenfolge — aber gegeneinander **um ganze Umläufe
+   * verschoben**, damit eine Taktzeile quer gelesen aufsteigt. Kurs 2 zeigt neben der ersten
+   * Runde von Kurs 1 also seine zweite.
+   */
+  courses: CourseGridColumn[]
+  /** Die Umläufe laufen stark auseinander — die Tabelle liest sich dann lückenhaft. */
+  alignment_warning: boolean
+  unassigned: CourseChainTrip[]
+  summary: { courses: number; assigned_trips: number; unassigned_trips: number; breaks: number }
+}
+
+/**
+ * Dieselben Umläufe wie {@link fetchLineCourses}, nur als Tabelle: Halte als Zeilen, ein Kurs
+ * je Spalte.
+ *
+ * Eigener Endpunkt, weil die Antwort schwerer wiegt — für Linie 6 Mo–Fr rund 8.500 Zellen.
+ */
+export async function fetchCourseGrid(
+  line: string,
+  periodId: number,
+  dayType: FahrplanTyp,
+): Promise<CourseGrid> {
+  const { data } = await api.get(`/api/v1/admin/lines/${encodeURIComponent(line)}/course-grid`, {
+    params: { period: periodId, day_type: dayType },
+  })
+  return data.data
+}
+
 export interface CarryoverVersion {
   id: number
   line: string

@@ -23,12 +23,22 @@ use Illuminate\Support\Facades\DB;
  */
 final class CourseOverviewService
 {
-    public function __construct(private readonly ConsolidatedTripInfoResolver $tripInfo) {}
+    public function __construct(
+        private readonly ConsolidatedTripInfoResolver $tripInfo,
+        private readonly ConsolidatedTripStopsResolver $tripStops,
+    ) {}
 
     /**
+     * `$withStops` hängt jeder Fahrt ihre vollständige Haltefolge an — die Grundlage des
+     * Fahrtenbuchs, das den Betriebstag eines Fahrzeugs Halt für Halt durchläuft.
+     *
+     * Bewusst abschaltbar und in der Vorgabe aus: Eine Linie mit acht Umläufen à zwanzig Fahrten
+     * bringt mehrere tausend Haltezeilen mit. Wer nur die Ketten sehen will, soll sie nicht
+     * übertragen müssen.
+     *
      * @return array<string, mixed>
      */
-    public function forLine(string $line, SchedulePeriod $period, FahrplanTyp $typ): array
+    public function forLine(string $line, SchedulePeriod $period, FahrplanTyp $typ, bool $withStops = false): array
     {
         $kurse = Course::query()
             ->where('period_id', $period->id)
@@ -40,6 +50,10 @@ final class CourseOverviewService
 
         $info = $this->tripInfo->forIds($alleTripIds);
         $anschluesse = $this->links($alleTripIds);
+
+        // Einmal für alle Fahrten aller Umläufe — nicht je Kurs, sonst fragte dieselbe Linie
+        // achtmal dieselbe Tabelle ab.
+        $halte = $withStops ? $this->tripStops->forTrips($alleTripIds) : [];
 
         // Eine Dublette ist dieselbe Nummer auf **überschneidenden Linien** (KURSE §2 K3):
         // Die „2" der Linie 8 ist ein anderer Umlauf als die „2" der Linie 6 und kein Fehler.
@@ -81,7 +95,7 @@ final class CourseOverviewService
                 'lines' => $this->sortiert($linien),
                 'first_departure' => $fahrten === [] ? null : $fahrten[0]['departure_time'],
                 'last_arrival' => $fahrten === [] ? null : $fahrten[count($fahrten) - 1]['arrival_time'],
-                'trips' => $this->withChainInfo($fahrten, $anschluesse),
+                'trips' => $this->withChainInfo($fahrten, $anschluesse, $halte),
                 'breaks' => $this->countBreaks($fahrten, $anschluesse),
             ];
         }
@@ -138,9 +152,10 @@ final class CourseOverviewService
      *
      * @param  array<int, array<string, mixed>>  $fahrten
      * @param  array<string, bool>  $anschluesse
+     * @param  array<int, array<int, array<string, mixed>>>  $halte  leer, wenn nicht angefordert
      * @return array<int, array<string, mixed>>
      */
-    private function withChainInfo(array $fahrten, array $anschluesse): array
+    private function withChainInfo(array $fahrten, array $anschluesse, array $halte = []): array
     {
         $ergebnis = [];
 
@@ -161,7 +176,7 @@ final class CourseOverviewService
             $ergebnis[] = $fahrt + [
                 'gap_before_seconds' => $abstand,
                 'linked_to_previous' => $verknuepft,
-            ];
+            ] + ($halte === [] ? [] : ['stops' => $halte[$fahrt['id']] ?? []]);
         }
 
         return $ergebnis;

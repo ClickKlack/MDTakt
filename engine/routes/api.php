@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\AuthController;
 use App\Http\Controllers\Admin\AutoTripLinkController;
 use App\Http\Controllers\Admin\CourseCarryoverController;
 use App\Http\Controllers\Admin\CourseController;
+use App\Http\Controllers\Admin\CourseGridController;
 use App\Http\Controllers\Admin\CourseSequenceController;
 use App\Http\Controllers\Admin\CoverageController;
 use App\Http\Controllers\Admin\HolidayController;
@@ -103,6 +104,11 @@ Route::prefix('v1')->group(function (): void {
 
             // Die Umlaeufe einer Linie im Ganzen: Ketten, Risse, Fahrten ohne Kurs
             Route::get('lines/{line}/courses', [LineCourseController::class, 'index'])->name('admin.lines.courses');
+
+            // Dieselben Umlaeufe als klassische Tabelle: Halte als Zeilen, ein Kurs je Spalte.
+            // Eigener Endpunkt, weil die Antwort eine andere Form hat und deutlich mehr wiegt.
+            Route::get('lines/{line}/course-grid', [CourseGridController::class, 'index'])
+                ->name('admin.lines.course-grid');
 
             // Kursnummern je Richtung ueber einen Spaltenbereich fortschreiben oder entfernen.
             // Die Nummer haengt an der Kette — ein Lauf zieht deshalb mehr Fahrten mit, als

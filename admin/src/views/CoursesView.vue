@@ -2,8 +2,15 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
+import CourseGridTable from '../components/CourseGridTable.vue'
 import LineBadge from '../components/LineBadge.vue'
-import { fetchLineCourses, type CourseChainTrip, type LineCourseOverview } from '../services/courses'
+import {
+  fetchCourseGrid,
+  fetchLineCourses,
+  type CourseChainTrip,
+  type CourseGrid,
+  type LineCourseOverview,
+} from '../services/courses'
 import { FAHRPLAN_TYPEN, fetchLines, type FahrplanTyp, type Line } from '../services/lines'
 import { lineSortKey, lineTypeOrder } from '../utils/lineStyle'
 import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
@@ -20,6 +27,18 @@ const gewaehlteLinie = ref<string | null>(null)
 const gewaehltePeriode = ref<number | null>(null)
 const dayType = ref<FahrplanTyp>('mo_fr')
 const nurUnvollstaendige = ref(false)
+
+/**
+ * „Kette" zeigt je Umlauf seine Fahrten untereinander — gut, um **einen** Umlauf zu pruefen.
+ * „Tabelle" stellt die Umlaeufe **nebeneinander**: Halte als Zeilen, ein Kurs je Spalte. Erst so
+ * wird sichtbar, was ein Takt ist — Kurs 1 und Kurs 2 fahren dieselbe Folge, nur versetzt.
+ *
+ * Zwei Endpunkte, weil die Tabelle deutlich schwerer wiegt (Linie 6 Mo-Fr: rund 8.500 Zellen).
+ * Sie wird deshalb erst geladen, wenn sie gebraucht wird.
+ */
+const ansicht = ref<'kette' | 'tabelle'>('kette')
+
+const grid = ref<CourseGrid | null>(null)
 
 const loading = ref(true)
 const loadingKurse = ref(false)
@@ -71,6 +90,7 @@ onMounted(async () => {
     gewaehltePeriode.value =
       Number(route.query.period) || p.find((periode) => periode.status === 'current')?.id || p[0]?.id || null
     dayType.value = ((route.query.day_type as FahrplanTyp) ?? 'mo_fr') as FahrplanTyp
+    ansicht.value = route.query.view === 'tabelle' ? 'tabelle' : 'kette'
 
     await lade()
   } catch {
@@ -90,19 +110,56 @@ async function lade(): Promise<void> {
   error.value = null
 
   try {
-    uebersicht.value = await fetchLineCourses(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value)
+    // Die Kennzahlen und die Fahrten ohne Kurs kommen immer aus der Uebersicht; die Tabelle
+    // liegt auf einem eigenen Endpunkt und wird nur geholt, wenn sie gerade gezeigt wird.
+    const [u, g] = await Promise.all([
+      fetchLineCourses(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value),
+      ansicht.value === 'tabelle'
+        ? fetchCourseGrid(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value)
+        : Promise.resolve(null),
+    ])
 
-    void router.replace({
-      name: 'courses',
-      query: { line: gewaehlteLinie.value, period: gewaehltePeriode.value, day_type: dayType.value },
-    })
+    uebersicht.value = u
+    grid.value = g
+
+    spiegelUrl()
   } catch {
     uebersicht.value = null
+    grid.value = null
     error.value = 'Die Umläufe konnten nicht geladen werden.'
   } finally {
     loadingKurse.value = false
   }
 }
+
+function spiegelUrl(): void {
+  void router.replace({
+    name: 'courses',
+    query: {
+      line: gewaehlteLinie.value,
+      period: gewaehltePeriode.value,
+      day_type: dayType.value,
+      view: ansicht.value === 'tabelle' ? 'tabelle' : undefined,
+    },
+  })
+}
+
+/**
+ * Der Wechsel zur Tabelle holt sie nach, die Rueckkehr zur Kette nicht: Die Uebersicht liegt
+ * bereits vor, und die einmal geholte Tabelle bleibt fuer den naechsten Wechsel stehen.
+ */
+watch(ansicht, () => {
+  if (loading.value) {
+    return
+  }
+
+  if (ansicht.value === 'tabelle' && grid.value === null) {
+    void lade()
+    return
+  }
+
+  spiegelUrl()
+})
 
 /**
  * Ein Abstand ist erst dann auffällig, wenn dort **kein** Anschluss steht — dann ist die Kette
@@ -201,23 +258,66 @@ watch([gewaehlteLinie, gewaehltePeriode, dayType], () => {
             </span>
           </div>
 
-          <label v-if="uebersicht.summary.breaks > 0" class="mt-3 flex items-center gap-1.5 text-xs text-slate-600">
-            <input v-model="nurUnvollstaendige" type="checkbox" />
-            Nur Umläufe mit gerissener Kette
-          </label>
+          <div class="mt-3 flex flex-wrap items-center gap-4">
+            <div class="flex gap-1 rounded-lg bg-slate-200/60 p-1">
+              <button
+                v-for="sicht in [
+                  { wert: 'kette' as const, text: 'Kette' },
+                  { wert: 'tabelle' as const, text: 'Tabelle' },
+                ]"
+                :key="sicht.wert"
+                type="button"
+                class="rounded-md px-3 py-1 text-sm transition"
+                :class="
+                  ansicht === sicht.wert
+                    ? 'bg-white font-medium text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:bg-white/60'
+                "
+                @click="ansicht = sicht.wert"
+              >
+                {{ sicht.text }}
+              </button>
+            </div>
 
-          <p v-if="sichtbareKurse.length === 0" class="mt-6 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <template v-if="nurUnvollstaendige">
-              Keine gerissene Kette — alle Umläufe dieser Linie hängen durchgehend zusammen.
-            </template>
-            <template v-else>
-              Für diese Linie ist noch kein Umlauf vergeben. Die Ketten entstehen unter „Anschlüsse", die Kursnummern
-              dort oder in der Fahrplan-Ansicht.
-            </template>
+            <!-- Der Filter greift nur in die Ketten-Liste; die Tabelle zeigt alle Spalten. -->
+            <label
+              v-if="ansicht === 'kette' && uebersicht.summary.breaks > 0"
+              class="flex items-center gap-1.5 text-xs text-slate-600"
+            >
+              <input v-model="nurUnvollstaendige" type="checkbox" />
+              Nur Umläufe mit gerissener Kette
+            </label>
+          </div>
+
+          <p v-if="ansicht === 'tabelle'" class="mt-2 max-w-3xl text-xs text-slate-500">
+            Halte als Zeilen, ein Kurs je Spalte. In der Zelle steht die Abfahrt — am letzten Halt einer Fahrt die
+            Ankunft. Die Achse folgt dem Umlauf: Nach der Endstelle geht es zurück, dieselbe Haltestelle steht
+            deshalb mehrfach untereinander. Das ist die nächste Runde, keine Doppelung.
+            <br />
+            Die Spalten sind gegeneinander <strong>um ganze Umläufe verschoben</strong>, damit eine Taktzeile quer
+            gelesen aufsteigt — Kurs 2 zeigt neben der ersten Runde von Kurs 1 also seine zweite. Am Ausrücken
+            bleiben die Zeilen ungeordnet: Dort hat jedes Fahrzeug sein eigenes Muster.
           </p>
 
-          <!-- Umläufe -->
-          <section v-for="kurs in sichtbareKurse" :key="kurs.id" class="mt-6 rounded-lg bg-white p-4 shadow-sm">
+          <!-- Tabelle: alle Umläufe nebeneinander -->
+          <template v-if="ansicht === 'tabelle'">
+            <p v-if="grid === null" class="mt-6 text-sm text-slate-500">Tabelle wird geladen …</p>
+            <CourseGridTable v-else :grid="grid" :lines="linienVerzeichnis" />
+          </template>
+
+          <!-- Kette: je Umlauf ein Abschnitt untereinander -->
+          <template v-else>
+            <p v-if="sichtbareKurse.length === 0" class="mt-6 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <template v-if="nurUnvollstaendige">
+                Keine gerissene Kette — alle Umläufe dieser Linie hängen durchgehend zusammen.
+              </template>
+              <template v-else>
+                Für diese Linie ist noch kein Umlauf vergeben. Die Ketten entstehen unter „Anschlüsse", die
+                Kursnummern dort oder in der Fahrplan-Ansicht.
+              </template>
+            </p>
+
+            <section v-for="kurs in sichtbareKurse" :key="kurs.id" class="mt-6 rounded-lg bg-white p-4 shadow-sm">
             <header class="flex flex-wrap items-center gap-3">
               <span class="rounded bg-slate-800 px-2 py-1 text-sm font-semibold tabular-nums text-white">
                 {{ kurs.number }}
@@ -259,9 +359,10 @@ watch([gewaehlteLinie, gewaehltePeriode, dayType], () => {
                     {{ trip.start_stop ?? '—' }} → {{ trip.end_stop ?? '—' }}
                   </span>
                 </div>
-              </li>
-            </ol>
-          </section>
+                </li>
+              </ol>
+            </section>
+          </template>
 
           <!-- Fahrten ohne Kurs -->
           <section v-if="uebersicht.unassigned.length" class="mt-8">

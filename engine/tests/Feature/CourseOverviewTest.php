@@ -232,4 +232,15 @@ final class CourseOverviewTest extends TestCase
         $this->assertSame([], $daten['unassigned']);
         $this->assertSame(0, $daten['summary']['courses']);
     }
+
+    public function test_the_chain_view_carries_no_stop_sequences(): void
+    {
+        $version = $this->version();
+        $a = $this->f->fahrt($version, ['A', 'B', 'C'], ['06:00:00', '06:15:00', '06:30:00']);
+        $this->setzeKurs($a, '03');
+
+        // Eine Linie mit acht Umläufen brächte sonst mehrere tausend Haltezeilen mit, die die
+        // Kettenansicht gar nicht braucht. Wer sie will, nimmt die Tabelle.
+        $this->assertArrayNotHasKey('stops', $this->hole('1')['courses'][0]['trips'][0]);
+    }
 }

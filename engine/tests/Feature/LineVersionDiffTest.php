@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Enums\FahrplanTyp;
 use App\Models\LineVersion;
+use App\Models\SchedulePeriod;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\ConsolidatedFixtures;
@@ -267,5 +268,44 @@ final class LineVersionDiffTest extends TestCase
         $this->withToken($this->token())
             ->getJson("/api/v1/admin/line-version-diff?from={$a->id}&to=999999")
             ->assertStatus(422);
+    }
+
+    /**
+     * Über die Periodengrenze hinweg ist der Vergleich seit dem 21.09.2026 erlaubt — und zwar
+     * genau da, wo er am meisten hergibt: Die letzte Version der alten und Version 1 der neuen
+     * Periode folgen unmittelbar aufeinander.
+     */
+    public function test_versions_from_different_periods_can_be_compared(): void
+    {
+        $alt = $this->f->version('1', FahrplanTyp::MoFrNormal, 3);
+
+        $neuePeriode = SchedulePeriod::factory()->create([
+            'label' => 'Nachfolgerin',
+            'valid_from' => '2026-09-21',
+        ]);
+        $neu = $this->f->version('1', FahrplanTyp::MoFrNormal, 1, $neuePeriode);
+
+        $this->f->fahrt($alt, ['A', 'B'], ['07:00:00', '07:10:00']);
+        $this->f->fahrt($neu, ['A', 'B'], ['07:05:00', '07:15:00']);
+
+        $d = $this->vergleiche($alt, $neu);
+
+        $this->assertSame(1, $d['summary']['changed']);
+
+        // Die Periode gehört in die Ausgabe: `version_no` zählt je Periode neu, „v3 gegen v1"
+        // wäre ohne sie nicht einzuordnen.
+        $this->assertSame($alt->period_id, $d['from']['period']['id']);
+        $this->assertSame('Nachfolgerin', $d['to']['period']['label']);
+    }
+
+    public function test_versions_of_different_day_types_are_still_rejected(): void
+    {
+        $a = $this->f->version('1', FahrplanTyp::MoFrNormal, 1);
+        $b = $this->f->version('1', FahrplanTyp::Sa, 1);
+
+        $this->withToken($this->token())
+            ->getJson("/api/v1/admin/line-version-diff?from={$a->id}&to={$b->id}")
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 422);
     }
 }

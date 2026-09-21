@@ -40,6 +40,8 @@ export interface DiffVersion {
   version_no: number
   fingerprint: string
   trip_count: number
+  /** `version_no` zählt je Periode neu — ohne sie wäre „v3 gegen v1" nicht einzuordnen. */
+  period: { id: number; label: string; valid_from: string; status: 'current' | 'frozen' } | null
   intervals: VersionInterval[]
 }
 

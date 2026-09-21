@@ -87,10 +87,22 @@ docs {
 
   Ohne `include=stops` bleibt der Halt-fuer-Halt-Vergleich weg und die Antwort klein.
 
+  ## Ueber die Periodengrenze
+
+  Seit dem 21.09.2026 duerfen die beiden Versionen aus **verschiedenen Perioden** stammen. Die
+  alte Sperre trug fuer zwei beliebige Versionen, aber nicht an der Grenze: Die letzte Version
+  der alten und Version 1 der neuen Periode folgen unmittelbar aufeinander — das sind genau die
+  beiden Fahrplaene, die gegeneinander standen, und ein Periodenwechsel ist der Moment, in dem
+  die Frage "was hat sich geaendert?" am dringendsten ist.
+
+  Weil `version_no` je Periode wieder bei 1 beginnt, traegt jede Version in der Antwort ihre
+  Periode mit (`data.from.period`, `data.to.period`) — "v3 gegen v1" laese sich sonst rueckwaerts.
+
   | Fehlerfall | Status |
   |---|---|
   | `from` oder `to` unbekannt | 422 |
   | `from` gleich `to` | 422 |
-  | verschiedene Linie, Fahrplantyp oder Periode | 422 |
+  | verschiedene Linie oder Fahrplantyp | 422 |
+  | verschiedene Periode | **200** — seit 21.09.2026 erlaubt, siehe unten |
   | kein gueltiger Admin-Token | 401 |
 }

@@ -11,8 +11,14 @@ use Illuminate\Validation\Validator;
  * Übernahme gepflegter Kurse und Anschlüsse von einer Version auf ihre Nachfolgerin.
  *
  * Zwei Versionen sind nur dann sinnvoll füreinander Quelle und Ziel, wenn sie denselben Strang
- * bilden — dieselbe Linie, derselbe Fahrplantyp, dieselbe Periode. Sonst überträge man Pflege
- * auf einen Fahrplan, der nie in Konkurrenz zu ihr stand.
+ * bilden — dieselbe Linie, derselbe Fahrplantyp. Sonst überträge man Pflege auf einen
+ * Fahrplan, der nie in Konkurrenz zu ihr stand.
+ *
+ * **Die Periode ist seit dem 21.09.2026 keine Schranke mehr.** Sie war die härteste von
+ * allen: Ein Periodenwechsel setzt jede (Linie, Fahrplantyp) auf Version 1 zurück, und mit
+ * der Sperre wäre die gesamte Kurs- und Anschlusspflege mit ihm verloren und von Hand neu zu
+ * setzen gewesen. Übertragen wird ohnehin nur, wo der Diff eine Partnerfahrt findet — die
+ * Periodengrenze ändert daran nichts, sie zählt die Versionen nur neu.
  */
 final class CourseCarryoverRequest extends ApiFormRequest
 {
@@ -46,8 +52,6 @@ final class CourseCarryoverRequest extends ApiFormRequest
                 $validator->errors()->add('from', 'Die Versionen gehören zu verschiedenen Linien.');
             } elseif ($quelle->day_type !== $ziel->day_type) {
                 $validator->errors()->add('from', 'Die Versionen gehören zu verschiedenen Fahrplantypen.');
-            } elseif ($quelle->period_id !== $ziel->period_id) {
-                $validator->errors()->add('from', 'Die Versionen gehören zu verschiedenen Fahrplanperioden.');
             }
         });
     }

@@ -6,7 +6,6 @@ namespace App\Services;
 
 use App\Enums\PeriodOfferStatus;
 use App\Enums\PeriodOrigin;
-use App\Enums\PeriodStatus;
 use App\Models\LineVersion;
 use App\Models\LineVersionInterval;
 use App\Models\PeriodChangeOffer;
@@ -221,7 +220,6 @@ final class ScheduleVersionService
             'label' => 'Ausgangsperiode ab '.$from->format('d.m.Y'),
             'valid_from' => $from->toDateString(),
             'valid_to' => null,
-            'status' => PeriodStatus::Current,
             'created_via' => PeriodOrigin::Bootstrap,
         ]);
 

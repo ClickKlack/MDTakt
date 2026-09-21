@@ -10,16 +10,19 @@ use App\Services\LineVersionOverviewService;
 use Illuminate\Http\JsonResponse;
 
 /**
- * Fahrplan-Änderungshistorie der laufenden Periode (Admin-Schaltzentrale, I-13).
+ * Fahrplan-Änderungshistorie einer Periode (Admin-Schaltzentrale, I-13).
+ *
+ * Ohne `period` die laufende; mit `period` auch eine eingefrorene, damit die Historie einen
+ * Periodenwechsel überlebt.
  */
 final class LineVersionController extends Controller
 {
     public function __construct(private readonly LineVersionOverviewService $overview) {}
 
-    /** GET /api/v1/admin/line-versions?line=&day_type= */
+    /** GET /api/v1/admin/line-versions?line=&day_type=&period= */
     public function index(LineVersionFilterRequest $request): JsonResponse
     {
-        $data = $this->overview->overview($request->line(), $request->dayType());
+        $data = $this->overview->overview($request->line(), $request->dayType(), $request->period());
 
         return response()->json([
             'data' => [

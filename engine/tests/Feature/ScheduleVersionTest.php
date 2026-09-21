@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\PeriodOrigin;
-use App\Enums\PeriodStatus;
 use App\Models\Calendar;
 use App\Models\CalendarDate;
 use App\Models\LineVersion;
@@ -247,11 +246,11 @@ final class ScheduleVersionTest extends TestCase
         // Der Admin hat einen Fahrplanwechsel zum 24.08. deklariert — mitten im Feed-Fenster.
         $alt = SchedulePeriod::query()->create([
             'label' => 'Alte Periode', 'valid_from' => '2026-08-01', 'valid_to' => null,
-            'status' => PeriodStatus::Frozen, 'created_via' => PeriodOrigin::Admin,
+            'created_via' => PeriodOrigin::Admin,
         ]);
         $neu = SchedulePeriod::query()->create([
             'label' => 'Neue Periode', 'valid_from' => '2026-08-24', 'valid_to' => null,
-            'status' => PeriodStatus::Frozen, 'created_via' => PeriodOrigin::Admin,
+            'created_via' => PeriodOrigin::Admin,
         ]);
         app(SchedulePeriodService::class)->rebuildChain();
 

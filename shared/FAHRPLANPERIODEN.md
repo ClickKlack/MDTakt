@@ -123,7 +123,38 @@ Zwei Ebenen: **Perioden** (kuratiert, netzweit) und **Linien-Versionen** (automa
 - **Gezählt werden nur beobachtete Wechsel:** Eine Version, die an der Feed-Fensterkante beginnt, ist bloß eine
   Untergrenze (§5.4 b) und ergibt keinen Wechseltag. Der erste Import löst deshalb keinen Vorschlag aus.
 
-### 4.4 Bezug Matching
+### 4.4 `status` ist abgeleitet, nicht gespeichert (21.09.2026)
+
+`valid_to` hängt allein an der Nachbarperiode und ändert sich nur, wenn ohnehin geschrieben wird — es bleibt
+gespeichert. **`status` hängt zusätzlich am heutigen Tag** und wurde als Spalte nur beim Schreiben einer Periode
+nachgezogen (`SchedulePeriodService::rebuildChain`).
+
+Der Fehler, der das zeigte: Am 20.09.2026 wurde eine Periode ab dem **21.09.** angelegt. Zu Recht war sie da noch
+nicht laufend. Am 21.09. war sie es — aber nichts hatte nachgerechnet. Die abgelaufene Periode trug weiterhin
+`current`, die geltende `frozen`. Jede Ansicht, die „die laufende Periode" über die Spalte suchte, zeigte damit den
+falschen Fahrplan; die Auswahlmasken in „Kurse" und „Anschlüsse" wählten die Vorperiode vor.
+
+Seitdem: **keine Spalte**, sondern ein Accessor auf `SchedulePeriod` und derselbe Ausdruck als Query-Scope.
+`current` ist die Periode, die den heutigen Tag abdeckt; eine erst künftig beginnende bleibt `frozen`, sonst
+schlüge der nächste Import seine Versionen einer noch nicht geltenden Periode zu.
+
+### 4.5 Historie über Periodengrenzen (21.09.2026)
+
+Eine neue Periode setzt alle Linien zurück (§4.1) — sie darf die Historie davor aber nicht unsichtbar machen.
+
+- **`GET /admin/line-versions` nimmt `?period=`.** Ohne Angabe die laufende Periode, mit Angabe auch eine
+  eingefrorene. Die Admin-Ansichten „Versionen" und „Fahrplan" haben eine Periodenauswahl.
+- **Der Versionsvergleich ist über die Periodengrenze erlaubt.** Die frühere Sperre („Fahrpläne, die nie in
+  Konkurrenz standen") trug für zwei beliebige Versionen, nicht aber an der Grenze: Die letzte Version der alten
+  und Version 1 der neuen Periode folgen unmittelbar aufeinander, und ein Periodenwechsel ist der Moment, in dem
+  die Frage *was hat sich geändert?* am dringendsten ist. Gemessen am Wechsel zum 21.09.2026 (Linie 1, `mo_fr`):
+  390 Fahrten unverändert, 3 verschoben — ohne die Öffnung nicht abrufbar.
+- **Die Kursübernahme (KURSE §2 K4) ebenso.** Dort war die Sperre am teuersten: Ein Periodenwechsel hätte die
+  gesamte Kurs- und Anschlusspflege verworfen. Übertragen wird ohnehin nur, wo der Diff eine Partnerfahrt findet.
+- Weil `version_no` je Periode wieder bei 1 beginnt, trägt jede Version im Vergleich ihre Periode mit — „v3 gegen
+  v1" läse sich sonst rückwärts.
+
+### 4.6 Bezug Matching
 Versions- und Periodenwechsel → betroffene Kurszuordnungen als *stale / neu zu bestätigen* markieren
 (siehe `INTEGRATION_MDKURSTRACKER.md` §4.2).
 
@@ -234,7 +265,7 @@ der Sommerferien- und Baustellenphase, deren Beginn vor dem Fenster liegt.
 |---|---|---|
 | *(keine)* `holidays` | Config | Feiertage — **nicht persistiert**, `HolidayService` berechnet sie (Sachsen-Anhalt) |
 | `school_holidays` | Config | Ferienzeiten — `id, name, start_date, end_date` (Admin-CRUD) |
-| `schedule_periods` | 2 | `id, valid_from, valid_to (nullable), label, status (current/frozen), created_via (admin/offer), detected_at` |
+| `schedule_periods` | 2 | `id, valid_from, valid_to (nullable), label, created_via (admin/offer), detected_at` — `status` ist **abgeleitet**, siehe §4.4 |
 | `line_versions` | 2 | `id, period_id, line (route_short_name), day_type, version_no, fingerprint, first_seen_at, last_seen_at` — Gültigkeit liegt in `line_version_intervals`, nicht hier |
 | `consolidated_stops` | 2 | **Global**, eine Zeile je physischem Halt — `id, anchor_lat, anchor_lon, first_seen_at, last_seen_at`. Identität = gerundete Koordinaten (entschieden 18.08.2026) |
 | `consolidated_stop_versions` | 2 | Attribut-Historie je Halt — `consolidated_stop_id, name, lat, lon, valid_from, valid_to, from_confirmed, to_confirmed`. Trägt Umbenennungen und Verlegungen, ohne die Identität zu vervielfachen |
@@ -258,7 +289,7 @@ Alle Entscheidungen aus §5.4 und §5.1 eingearbeitet. **Noch nicht implementier
 | `label` | varchar | z. B. „Jahresfahrplan 2026/27" |
 | `valid_from` | date | vom Admin gesetzt |
 | `valid_to` | date, null | offen = laufende Periode |
-| `status` | varchar | `current` \| `frozen` (PHP-Enum) |
+| ~~`status`~~ | — | **keine Spalte** (seit 21.09.2026) — `current`/`frozen` wird beim Lesen aus `valid_from`/`valid_to` gegen den heutigen Tag gerechnet, siehe §4.4 |
 | `created_via` | varchar | `admin` \| `offer` — angenommener Systemvorschlag (§4.3) |
 | `created_at` | timestamptz | |
 

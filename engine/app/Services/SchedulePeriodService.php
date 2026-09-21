@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\PeriodOrigin;
-use App\Enums\PeriodStatus;
 use App\Models\SchedulePeriod;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -16,13 +15,16 @@ use Illuminate\Support\Facades\Log;
  * Pflegt die netzweiten Fahrplanperioden (FAHRPLANPERIODEN §4.1).
  *
  * Perioden bilden eine **lückenlose, überschneidungsfreie Kette**: Maßgeblich ist allein
- * `valid_from`. `valid_to` und `status` sind daraus **abgeleitet** und werden nach jeder
- * Änderung neu gerechnet — der Vorgänger endet am Vortag des Nachfolgers, die jüngste
- * Periode bleibt offen, und `current` trägt die Periode, die den heutigen Tag abdeckt.
+ * `valid_from`. `valid_to` ist daraus **abgeleitet** und wird nach jeder Änderung neu
+ * gerechnet — der Vorgänger endet am Vortag des Nachfolgers, die jüngste Periode bleibt offen.
  *
  * Zwei Felder redundant zu halten wäre die Alternative gewesen; sie geht erfahrungsgemäß
  * beim ersten Verschieben einer Grenze auseinander. Deshalb hat nur `valid_from` einen
  * eigenen Wert.
+ *
+ * `status` hat gar keinen mehr: Er hängt zusätzlich am heutigen Tag und veraltete als Spalte
+ * still, weil nur ein Schreibvorgang ihn nachzog. Er wird beim Lesen abgeleitet
+ * ({@see SchedulePeriod::status()}).
  */
 final class SchedulePeriodService
 {
@@ -41,9 +43,9 @@ final class SchedulePeriodService
 
     /**
      * Legt eine Periode an. Die Kette zieht nach: Der Vorgänger endet am Vortag, ab
-     * `valid_from` gilt die neue Periode. Für sie beginnt die Versions-Zählung jeder
-     * (Linie, Fahrplantyp) wieder bei 1 (§4.1) — das ergibt sich von selbst, weil
-     * `version_no` je Periode gezählt wird.
+     * `valid_from` gilt die neue Periode — ab diesem Tag, nicht ab dem Anlegen. Für sie
+     * beginnt die Versions-Zählung jeder (Linie, Fahrplantyp) wieder bei 1 (§4.1) — das
+     * ergibt sich von selbst, weil `version_no` je Periode gezählt wird.
      */
     public function create(string $label, string $validFrom): SchedulePeriod
     {
@@ -52,7 +54,6 @@ final class SchedulePeriodService
                 'label' => $label,
                 'valid_from' => $validFrom,
                 'valid_to' => null,
-                'status' => PeriodStatus::Frozen, // wird gleich neu bestimmt
                 'created_via' => PeriodOrigin::Admin,
             ]);
 
@@ -122,31 +123,33 @@ final class SchedulePeriodService
     }
 
     /**
-     * Rechnet `valid_to` und `status` aus der Reihenfolge der `valid_from` neu.
-     * Idempotent — mehrfaches Ausführen ändert nichts.
+     * Rechnet `valid_to` aus der Reihenfolge der `valid_from` neu: Jede Periode endet am
+     * Vortag ihrer Nachfolgerin, die jüngste bleibt offen. Idempotent — mehrfaches
+     * Ausführen ändert nichts.
+     *
+     * `status` steht hier bewusst nicht mehr: Er hängt am heutigen Tag, und ein Wert, den nur
+     * ein Schreibvorgang nachzieht, wäre am nächsten Morgen falsch.
      */
     public function rebuildChain(): void
     {
         $perioden = SchedulePeriod::query()->orderBy('valid_from')->get();
-        $heute = CarbonImmutable::now()->startOfDay();
 
         foreach ($perioden as $i => $periode) {
             $nachfolger = $perioden->get($i + 1);
 
-            $validTo = $nachfolger === null
-                ? null
-                : CarbonImmutable::parse($nachfolger->valid_from->toDateString())->subDay()->toDateString();
-
-            // `current` ist die Periode, die heute gilt: begonnen und noch nicht abgelöst.
-            // Eine erst künftig beginnende Periode bleibt bewusst `frozen` — sonst würde der
-            // nächste Import seine Versionen einer noch nicht geltenden Periode zuschlagen.
-            $laeuft = ! CarbonImmutable::parse($periode->valid_from->toDateString())->greaterThan($heute)
-                && ($validTo === null || ! CarbonImmutable::parse($validTo)->lessThan($heute));
-
             $periode->update([
-                'valid_to' => $validTo,
-                'status' => $laeuft ? PeriodStatus::Current : PeriodStatus::Frozen,
+                'valid_to' => $nachfolger === null
+                    ? null
+                    : CarbonImmutable::parse($nachfolger->valid_from->toDateString())->subDay()->toDateString(),
             ]);
         }
+    }
+
+    /**
+     * Die heute geltende Periode, oder `null`, wenn die Kette erst in der Zukunft beginnt.
+     */
+    public function current(): ?SchedulePeriod
+    {
+        return SchedulePeriod::query()->current()->first();
     }
 }

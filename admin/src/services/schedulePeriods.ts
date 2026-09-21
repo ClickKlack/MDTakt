@@ -13,6 +13,16 @@ export interface SchedulePeriod {
   is_deletable: boolean
 }
 
+/**
+ * Beschriftung einer Periode in einer Auswahlliste.
+ *
+ * Die laufende Periode wird benannt, weil genau das die Verwechslung war, die den Fehler vom
+ * 21.09.2026 sichtbar machte: In der Liste sieht eine abgelaufene Periode aus wie jede andere.
+ */
+export function periodOptionLabel(periode: SchedulePeriod): string {
+  return periode.status === 'current' ? `${periode.label} · laufend` : periode.label
+}
+
 export interface SchedulePeriodInput {
   label: string
   valid_from: string

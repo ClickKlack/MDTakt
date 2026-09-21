@@ -4,7 +4,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import StopLinkBoard from '../components/StopLinkBoard.vue'
 import { FAHRPLAN_TYPEN, fetchLines, type FahrplanTyp, type Line } from '../services/lines'
-import { fetchSchedulePeriods, type SchedulePeriod } from '../services/schedulePeriods'
+import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
 import { assignCourse, detachCourse } from '../services/courses'
 import { fetchStopGroups, type StopGroup } from '../services/stopGroups'
 import {
@@ -349,7 +349,7 @@ watch(gewaehlterStand, (neu, alt) => {
                 class="mt-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-800 focus:outline-none"
               >
                 <option v-for="periode in perioden" :key="periode.id" :value="periode.id">
-                  {{ periode.label }}
+                  {{ periodOptionLabel(periode) }}
                 </option>
               </select>
             </div>

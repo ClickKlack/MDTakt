@@ -105,7 +105,7 @@ Begründung: Eine neue Version bedeutet, dass sich Zeiten geändert haben. Ob ei
 machen. Eine automatische Übernahme würde solche Fälle stillschweigend fortschreiben. Der Knopf
 macht die Übernahme zu einer datierten Entscheidung und zeigt vorher, was sie bewirkt.
 
-Dies präzisiert FAHRPLANPERIODEN §4.4 („betroffene Kurszuordnungen als *stale* markieren"): Sie
+Dies präzisiert FAHRPLANPERIODEN §4.6 („betroffene Kurszuordnungen als *stale* markieren"): Sie
 werden nicht markiert, sondern gar nicht erst übertragen; die Vorschau übernimmt die Rolle der
 Markierung.
 

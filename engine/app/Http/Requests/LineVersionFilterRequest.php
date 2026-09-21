@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use App\Enums\FahrplanTyp;
+use App\Models\SchedulePeriod;
 use Illuminate\Validation\Rule;
 
 /**
@@ -20,6 +21,7 @@ final class LineVersionFilterRequest extends ApiFormRequest
         return [
             'line' => ['nullable', 'string', 'max:255'],
             'day_type' => ['nullable', Rule::enum(FahrplanTyp::class)],
+            'period' => ['nullable', 'integer', 'exists:schedule_periods,id'],
         ];
     }
 
@@ -35,5 +37,18 @@ final class LineVersionFilterRequest extends ApiFormRequest
         $value = $this->query('day_type');
 
         return is_string($value) && $value !== '' ? FahrplanTyp::from($value) : null;
+    }
+
+    /**
+     * Ohne Angabe entscheidet der Dienst (laufende Periode). Mit Angabe ist auch eine
+     * eingefrorene erlaubt — die Historie davor soll erreichbar bleiben.
+     */
+    public function period(): ?SchedulePeriod
+    {
+        $value = $this->query('period');
+
+        return is_string($value) && $value !== ''
+            ? SchedulePeriod::query()->find((int) $value)
+            : null;
     }
 }

@@ -319,4 +319,31 @@ final class CourseCarryoverTest extends TestCase
 
         $this->assertSame($nachErstem, [TripLink::query()->count(), CourseTrip::query()->count()]);
     }
+
+    /**
+     * Der Periodenwechsel ist genau der Moment, in dem die Übernahme gebraucht wird: Er setzt
+     * jede (Linie, Fahrplantyp) auf Version 1 zurück. Wäre er gesperrt, wäre die gesamte Kurs-
+     * und Anschlusspflege mit ihm verloren (entschieden 21.09.2026).
+     */
+    public function test_courses_are_carried_across_a_period_boundary(): void
+    {
+        $alt = $this->version('1', 2);
+
+        $neuePeriode = SchedulePeriod::factory()->create([
+            'label' => 'Nachfolgerin',
+            'valid_from' => '2026-09-21',
+        ]);
+        $neu = $this->f->version('1', FahrplanTyp::MoFrNormal, 1, $neuePeriode);
+        $this->f->gueltigkeit($neu);
+
+        $alteFahrt = $this->f->fahrt($alt, ['A', 'B'], ['06:00:00', '06:30:00'], 'sig-gleich');
+        $neueFahrt = $this->f->fahrt($neu, ['A', 'B'], ['06:00:00', '06:30:00'], 'sig-gleich');
+
+        $this->setzeKurs($alteFahrt, '03');
+
+        $daten = $this->uebernimm($alt, $neu)->assertOk()->json('data');
+
+        $this->assertSame(1, $daten['summary']['courses_carried']);
+        $this->assertDatabaseHas('course_trips', ['consolidated_trip_id' => $neueFahrt->id]);
+    }
 }

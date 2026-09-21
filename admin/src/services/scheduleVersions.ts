@@ -43,10 +43,16 @@ export interface LineVersions {
   lines: { line: string; versions: LineVersion[] }[]
 }
 
-/** Fahrplan-Änderungshistorie der laufenden Periode (Admin/Sanctum). */
+/**
+ * Fahrplan-Änderungshistorie einer Periode (Admin/Sanctum).
+ *
+ * Ohne `periodId` die laufende. Die Periode mitzugeben ist nicht optionales Beiwerk: Sobald
+ * eine neue Periode beginnt, wäre die Historie davor sonst unerreichbar.
+ */
 export async function fetchLineVersions(
   dayType?: string | null,
   line?: string | null,
+  periodId?: number | null,
 ): Promise<LineVersions> {
   const params: Record<string, string> = {}
   if (dayType) {
@@ -54,6 +60,9 @@ export async function fetchLineVersions(
   }
   if (line) {
     params.line = line
+  }
+  if (periodId) {
+    params.period = String(periodId)
   }
 
   const { data } = await api.get('/api/v1/admin/line-versions', { params })

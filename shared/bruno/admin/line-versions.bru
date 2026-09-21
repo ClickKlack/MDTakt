@@ -48,8 +48,15 @@ script:post-response {
 docs {
   # Fahrplan-Aenderungshistorie (Konsolidat)
 
-  Je Linie und Fahrplantyp die beobachteten Versionen der laufenden Periode mit
-  ihren Gueltigkeits-Intervallen. Sanctum-geschuetzt.
+  Je Linie und Fahrplantyp die beobachteten Versionen einer Periode mit ihren
+  Gueltigkeits-Intervallen. Sanctum-geschuetzt.
+
+  ## Periode waehlen
+
+  Ohne `?period=` antwortet der Endpunkt fuer die **laufende** Periode (beginnt die
+  Kette erst in der Zukunft: fuer die juengste). Mit `?period=<id>` auch fuer eine
+  eingefrorene — sonst waere die gesamte Historie vor einem Periodenwechsel
+  unerreichbar. Die IDs liefert `GET /api/v1/admin/schedule-periods`.
 
   ## Versionen
 
@@ -75,9 +82,9 @@ docs {
 
   ## trip_count
 
-  Fahrten der Version, gezaehlt am ersten Tag ihres ersten Intervalls. `null`,
-  wenn dieser Tag ausserhalb des aktuellen Roh-Bestands liegt - das Konsolidat
-  haelt die Historie, der Roh-Feed nur das letzte Fenster.
+  Konsolidierte Fahrten der Version. `null` heisst: Die Version belegt, *dass* an
+  diesen Tagen ein bestimmter Fahrplan galt, traegt aber keinen Inhalt - dieselbe
+  Aussage, die die Abdeckungs-Anzeige als `versions_without_content` fuehrt.
 
   Voraussetzung fuer Daten: mindestens ein GTFS-Import mit Konsolidierung.
 }

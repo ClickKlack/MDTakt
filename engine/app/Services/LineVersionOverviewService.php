@@ -5,24 +5,32 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\FahrplanTyp;
-use App\Enums\PeriodStatus;
 use App\Models\LineVersion;
 use App\Models\SchedulePeriod;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Stellt die Fahrplan-Änderungshistorie der laufenden Periode für die Admin-Ansicht zusammen
+ * Stellt die Fahrplan-Änderungshistorie einer Periode für die Admin-Ansicht zusammen
  * (FAHRPLANPERIODEN §5.4): je Linie und Fahrplantyp die Versionen mit ihren Intervallen.
+ *
+ * Ohne Angabe ist das die laufende Periode. Eine Periode mitzugeben ist kein Beiwerk: Sobald
+ * eine neue Periode beginnt, wäre die gesamte Historie davor sonst unerreichbar — sie hängt
+ * unverändert in der Datenbank, nur sah sie niemand mehr.
  */
 final class LineVersionOverviewService
 {
+    public function __construct(private readonly SchedulePeriodService $periods) {}
+
     /**
      * @return array{period: SchedulePeriod|null, coverage: array<string, mixed>|null, lines: array<int, array<string, mixed>>}
      */
-    public function overview(?string $line = null, ?FahrplanTyp $dayType = null): array
+    public function overview(?string $line = null, ?FahrplanTyp $dayType = null, ?SchedulePeriod $periode = null): array
     {
-        $periode = SchedulePeriod::query()->where('status', PeriodStatus::Current)->first();
+        // Beginnt die Kette erst in der Zukunft, gibt es keine laufende Periode. Dann die
+        // jüngste zeigen statt eine leere Seite — sie ist das, was der Nutzer meint.
+        $periode ??= $this->periods->current()
+            ?? SchedulePeriod::query()->orderByDesc('valid_from')->first();
 
         if ($periode === null) {
             return ['period' => null, 'coverage' => null, 'lines' => []];

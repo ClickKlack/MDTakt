@@ -409,13 +409,23 @@ final class LineVersionDiffService
         return $liste;
     }
 
+    /**
+     * Die Periode gehört mit in die Ausgabe: `version_no` zählt je Periode, „v3 gegen v1"
+     * wäre ohne sie nicht einzuordnen (vgl. LineVersionDiffRequest).
+     */
     private function versionInfo(LineVersion $version, int $tripCount): array
     {
-        $version->loadMissing('intervals');
+        $version->loadMissing(['intervals', 'period']);
 
         return [
             'id' => $version->id,
             'line' => $version->line,
+            'period' => $version->period === null ? null : [
+                'id' => $version->period->id,
+                'label' => $version->period->label,
+                'valid_from' => $version->period->valid_from->toDateString(),
+                'status' => $version->period->status->value,
+            ],
             'day_type' => $version->day_type->value,
             'day_type_label' => $version->day_type->label(),
             'version_no' => $version->version_no,

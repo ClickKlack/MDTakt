@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import { fetchLineVersions, type LineVersions } from '../services/scheduleVersions'
+import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
 import { FAHRPLAN_TYPEN } from '../services/lines'
 import { applyCarryover, previewCarryover, type CarryoverResult } from '../services/courses'
 import { formatDate } from '../utils/timezone'
 
+const route = useRoute()
+const router = useRouter()
+
 const data = ref<LineVersions | null>(null)
+const perioden = ref<SchedulePeriod[]>([])
+const gewaehltePeriode = ref<number | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 const dayType = ref<string | null>(null)
@@ -16,7 +22,9 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    data.value = await fetchLineVersions(dayType.value)
+    data.value = await fetchLineVersions(dayType.value, null, gewaehltePeriode.value)
+    // Die Antwort nennt die tatsächlich gelieferte Periode — ohne Vorgabe ist das die laufende.
+    gewaehltePeriode.value = data.value.period?.id ?? null
   } catch {
     error.value = 'Fahrplan-Versionen konnten nicht geladen werden.'
   } finally {
@@ -30,12 +38,41 @@ function select(typ: string | null): void {
 }
 
 /**
+ * Periodenwechsel. Die A/B-Auswahl bleibt bewusst stehen: Genau so entsteht ein Vergleich über
+ * die Periodengrenze — A in der alten Periode markieren, umschalten, B in der neuen.
+ *
+ * Bewusst am `change` der Auswahl statt an einem Watcher auf `gewaehltePeriode`: `load()`
+ * schreibt die Auswahl aus der Antwort zurück, ein Watcher liefe daraufhin ein zweites Mal.
+ */
+async function waehlePeriode(): Promise<void> {
+  const id = gewaehltePeriode.value
+  if (id !== null) {
+    void router.replace({ name: 'versions', query: { ...route.query, period: String(id) } })
+  }
+  await load()
+}
+
+/**
  * Auswahl für den Vergleich. Zwei Versionen sind nur vergleichbar, wenn sie zu derselben Linie
  * und demselben Fahrplantyp gehören — die Auswahl setzt das durch, statt den Nutzer in einen
  * 422-Fehler laufen zu lassen.
+ *
+ * Die **Periode** gehört seit dem 21.09.2026 nicht mehr dazu, muss aber mitgeführt werden:
+ * `version_no` zählt je Periode wieder bei 1, „v3 gegen v1" wäre sonst nicht einzuordnen und
+ * die Reihenfolge alt→neu nicht zu bestimmen.
  */
-const vergleichA = ref<{ id: number; line: string; day_type: string; version_no: number } | null>(null)
-const vergleichB = ref<{ id: number; line: string; day_type: string; version_no: number } | null>(null)
+type Markierung = {
+  id: number
+  line: string
+  day_type: string
+  version_no: number
+  period_id: number | null
+  period_label: string | null
+  period_valid_from: string | null
+}
+
+const vergleichA = ref<Markierung | null>(null)
+const vergleichB = ref<Markierung | null>(null)
 
 function waehlbar(version: { line: string; day_type: string; id: number }): boolean {
   const gesetzt = vergleichA.value ?? vergleichB.value
@@ -43,7 +80,25 @@ function waehlbar(version: { line: string; day_type: string; id: number }): bool
   return gesetzt.line === version.line && gesetzt.day_type === version.day_type
 }
 
-function markiere(version: { id: number; line: string; day_type: string; version_no: number }): void {
+/** Die ältere zuerst: erst nach Periodenbeginn, dann nach Versionsnummer. */
+function aelterZuerst(x: Markierung, y: Markierung): number {
+  return (x.period_valid_from ?? '').localeCompare(y.period_valid_from ?? '') || x.version_no - y.version_no
+}
+
+/** Baut die Markierung aus einer Tabellenzeile — die Periode kommt aus der geladenen Antwort. */
+function markierung(version: { id: number; day_type: string; version_no: number }, line: string): Markierung {
+  return {
+    id: version.id,
+    line,
+    day_type: version.day_type,
+    version_no: version.version_no,
+    period_id: data.value?.period?.id ?? null,
+    period_label: data.value?.period?.label ?? null,
+    period_valid_from: data.value?.period?.valid_from ?? null,
+  }
+}
+
+function markiere(version: Markierung): void {
   if (vergleichA.value?.id === version.id) {
     vergleichA.value = null
     return
@@ -85,7 +140,7 @@ const uebernahmePaar = computed(() => {
   if (!vergleichA.value || !vergleichB.value) {
     return null
   }
-  const [von, nach] = [vergleichA.value, vergleichB.value].sort((x, y) => x.version_no - y.version_no)
+  const [von, nach] = [vergleichA.value, vergleichB.value].sort(aelterZuerst)
   return { von, nach }
 })
 
@@ -136,9 +191,17 @@ function verwirfVorschau(): void {
 /** Die ältere Version steht links — sonst läse sich der Vergleich rückwärts. */
 const vergleichZiel = computed(() => {
   if (!vergleichA.value || !vergleichB.value) return null
-  const [von, nach] = [vergleichA.value, vergleichB.value].sort((x, y) => x.version_no - y.version_no)
+  const [von, nach] = [vergleichA.value, vergleichB.value].sort(aelterZuerst)
   return { name: 'versions-diff', query: { from: String(von.id), to: String(nach.id) } }
 })
+
+/** Liegen A und B in verschiedenen Perioden? Dann gehört das in die Beschriftung. */
+const periodenuebergreifend = computed<boolean>(
+  () =>
+    vergleichA.value !== null &&
+    vergleichB.value !== null &&
+    vergleichA.value.period_id !== vergleichB.value.period_id,
+)
 
 /** Linien mit mehr als einer Version je Typ — dort hat sich der Fahrplan geändert. */
 const geaenderteLinien = computed<number>(() => {
@@ -150,7 +213,17 @@ const geaenderteLinien = computed<number>(() => {
   }).length
 })
 
-onMounted(load)
+onMounted(async () => {
+  try {
+    perioden.value = await fetchSchedulePeriods()
+  } catch {
+    // Ohne Periodenliste bleibt die Ansicht benutzbar — sie zeigt dann die laufende Periode.
+    perioden.value = []
+  }
+
+  gewaehltePeriode.value = Number(route.query.period) || null
+  await load()
+})
 </script>
 
 <template>
@@ -167,13 +240,30 @@ onMounted(load)
       <div v-else-if="error" class="mt-4 rounded-md bg-red-50 px-4 py-3 text-red-700">{{ error }}</div>
 
       <template v-else-if="data">
+        <!-- Periodenauswahl: ohne sie waere die Historie vor einem Wechsel unerreichbar.
+             Als Auswahlliste, weil die Zahl der Perioden mit jedem Fahrplanwechsel waechst. -->
+        <div v-if="perioden.length > 0" class="mt-4">
+          <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Periode</label>
+          <select
+            v-model.number="gewaehltePeriode"
+            class="mt-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-800 focus:outline-none"
+            @change="waehlePeriode"
+          >
+            <option v-for="p in perioden" :key="p.id" :value="p.id">
+              {{ periodOptionLabel(p) }}
+            </option>
+          </select>
+        </div>
+
         <!-- Periode + Abdeckung -->
         <div v-if="data.period" class="mt-4 grid gap-4 sm:grid-cols-3">
           <div class="rounded-lg bg-white px-4 py-3 shadow-sm">
             <div class="text-xs uppercase text-slate-500">Periode</div>
             <div class="mt-1 font-medium text-slate-900">{{ data.period.label }}</div>
             <div class="text-xs text-slate-400">
-              ab {{ formatDate(data.period.valid_from) }}
+              {{ formatDate(data.period.valid_from) }} –
+              {{ data.period.valid_to ? formatDate(data.period.valid_to) : 'offen' }}
+              <span v-if="data.period.status === 'frozen'" class="text-amber-600"> · eingefroren</span>
               <span v-if="data.period.created_via === 'bootstrap'"> · automatisch angelegt</span>
             </div>
           </div>
@@ -201,8 +291,14 @@ onMounted(load)
           <span class="text-sm text-slate-700">
             Vergleich: Linie {{ vergleichA.line }} ·
             <strong>v{{ vergleichA.version_no }}</strong>
-            <template v-if="vergleichB"> gegen <strong>v{{ vergleichB.version_no }}</strong></template>
-            <span v-else class="text-slate-500"> — zweite Version wählen</span>
+            <span v-if="periodenuebergreifend" class="text-slate-500">({{ vergleichA.period_label }})</span>
+            <template v-if="vergleichB">
+              gegen <strong>v{{ vergleichB.version_no }}</strong>
+              <span v-if="periodenuebergreifend" class="text-slate-500">({{ vergleichB.period_label }})</span>
+            </template>
+            <span v-else class="text-slate-500">
+              — zweite Version wählen<template v-if="perioden.length > 1">, auch in einer anderen Periode</template>
+            </span>
           </span>
 
           <RouterLink
@@ -382,7 +478,7 @@ onMounted(load)
                           ? 'Für den Vergleich auswählen'
                           : 'Nur Versionen derselben Linie und desselben Fahrplantyps sind vergleichbar'
                       "
-                      @click="markiere({ id: version.id, line: linie.line, day_type: version.day_type, version_no: version.version_no })"
+                      @click="markiere(markierung(version, linie.line))"
                     >
                       {{
                         vergleichA?.id === version.id
@@ -401,6 +497,7 @@ onMounted(load)
                           line: linie.line,
                           day_type: version.day_type,
                           version: String(version.id),
+                          period: data.period ? String(data.period.id) : undefined,
                         },
                       }"
                       class="text-slate-500 hover:text-slate-900"

@@ -33,6 +33,12 @@ onMounted(async () => {
   }
 })
 
+/** Liegen die beiden Versionen in verschiedenen Perioden? Seit 21.09.2026 möglich. */
+const periodenwechsel = computed<boolean>(() => {
+  const d = diff.value
+  return d?.from.period != null && d.to.period != null && d.from.period.id !== d.to.period.id
+})
+
 const kennzahlen = computed(() => {
   const s = diff.value?.summary
   return s
@@ -87,11 +93,21 @@ const ZEILENFARBE: Record<string, string> = {
           v{{ diff.from.version_no }} gegen v{{ diff.to.version_no }}
         </p>
 
+        <!-- Ueber die Periodengrenze faengt die Zaehlung wieder bei 1 an - das muss dastehen,
+             sonst liest sich "v3 gegen v1" rueckwaerts. -->
+        <p v-if="periodenwechsel" class="mt-2 rounded-md bg-slate-200/70 px-4 py-2 text-sm text-slate-700">
+          Über die Periodengrenze: <strong>{{ diff.from.period?.label }}</strong> →
+          <strong>{{ diff.to.period?.label }}</strong>. In der neuen Periode beginnt die
+          Versionszählung jeder Linie wieder bei&nbsp;1 — die kleinere Nummer rechts ist kein
+          Rückschritt.
+        </p>
+
         <!-- Die beiden Versionen mit ihrer beobachteten Gültigkeit -->
         <div class="mt-4 grid gap-4 md:grid-cols-2">
           <div v-for="(v, i) in [diff.from, diff.to]" :key="v.id" class="rounded-lg border border-slate-200 bg-white p-4">
             <div class="text-xs uppercase text-slate-500">{{ i === 0 ? 'vorher' : 'nachher' }}</div>
             <div class="mt-1 font-semibold text-slate-900">Version {{ v.version_no }}</div>
+            <div v-if="v.period" class="text-xs text-slate-500">{{ v.period.label }}</div>
             <div class="mt-1 text-sm text-slate-600">{{ v.trip_count }} Fahrten</div>
             <div class="mt-1 text-xs text-slate-500">{{ gueltigkeit(v.intervals) }}</div>
           </div>

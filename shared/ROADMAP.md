@@ -504,6 +504,20 @@ Nicht ursprünglich geplant, sondern aus dem Bedarf entstanden, den konsolidiert
 - [x] **Kurs je Fahrt anzeigen** — erledigt mit I-14 (2). Die ursprüngliche Annahme, das setze
       I-04 bis I-06 voraus, traf nicht zu: Der Kurs kommt aus der **gepflegten Kette**, nicht aus
       Sichtungen. Die Sichtungs-API liefert später Nummern in dieses Gefüge hinein
+- [x] **Historie über Periodengrenzen** (21.09.2026, FAHRPLANPERIODEN §4.4/§4.5) — ausgelöst durch einen
+      Fehler im Betrieb: Nach dem ersten echten Periodenwechsel war der Fahrplan der Vorperiode nicht mehr
+      erreichbar, und die neue Periode wurde nirgends als die laufende geführt
+      - `status` ist **keine Spalte** mehr, sondern wird beim Lesen aus `valid_from`/`valid_to` gegen den
+        heutigen Tag gerechnet. Als gespeicherter Wert zog ihn nur ein Schreibvorgang nach — wer am Vortag
+        eine Periode für den Folgetag anlegte, hatte am Folgetag zwei falsche Werte
+        (Migration `2026_09_21_100000_drop_status_from_schedule_periods`)
+      - `GET /admin/line-versions` nimmt `?period=`; die Admin-Ansichten „Versionen" und „Fahrplan" haben
+        eine Periodenauswahl
+      - **Versionsvergleich und Kursübernahme über die Periodengrenze erlaubt.** Die alte Sperre trug für
+        zwei beliebige Versionen, nicht aber an der Grenze: Die letzte Version der alten und Version 1 der
+        neuen Periode folgen unmittelbar aufeinander. Bei der Kursübernahme war sie am teuersten — ein
+        Periodenwechsel hätte die gesamte Kurs- und Anschlusspflege verworfen
+      - Gemessen am Wechsel zum 21.09.2026 (Linie 1, `mo_fr`): 390 Fahrten unverändert, 3 verschoben
 
 ### (C) Konsolidat-Datenbestand
 - [x] `consolidated_stops` + `consolidated_stop_versions` (Dedup: ≤ 12 m + normalisierter Name),

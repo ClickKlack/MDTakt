@@ -7,6 +7,7 @@ import TimetableGrid from '../components/TimetableGrid.vue'
 import { assignCourse, detachCourse } from '../services/courses'
 import { fetchLines, FAHRPLAN_TYPEN, type FahrplanTyp, type Line } from '../services/lines'
 import { fetchLineVersions, type LineVersion } from '../services/scheduleVersions'
+import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
 import { fetchTimetable, type Timetable } from '../services/timetable'
 import { formatDate } from '../utils/timezone'
 import { lineSortKey, lineTypeOrder } from '../utils/lineStyle'
@@ -16,11 +17,13 @@ const router = useRouter()
 
 const lines = ref<Line[]>([])
 const versions = ref<LineVersion[]>([])
+const perioden = ref<SchedulePeriod[]>([])
 const timetable = ref<Timetable | null>(null)
 
 const selectedLine = ref<string | null>(null)
 const dayType = ref<FahrplanTyp>('mo_fr')
 const selectedVersion = ref<number | null>(null)
+const selectedPeriod = ref<number | null>(null)
 
 const loading = ref(true)
 const loadingTimetable = ref(false)
@@ -32,6 +35,9 @@ const line = computed(() => lines.value.find((l) => l.route_short_name === selec
 
 onMounted(async () => {
   try {
+    // Ohne Periodenliste bleibt die Ansicht benutzbar — sie zeigt dann die laufende Periode.
+    perioden.value = await fetchSchedulePeriods().catch(() => [])
+
     const data = await fetchLines()
     lines.value = data
       .slice()
@@ -45,6 +51,7 @@ onMounted(async () => {
     // Auswahl aus der URL übernehmen, damit ein Fahrplan verlinkbar bleibt.
     selectedLine.value = (route.query.line as string) ?? lines.value[0]?.route_short_name ?? null
     dayType.value = ((route.query.day_type as FahrplanTyp) ?? 'mo_fr') as FahrplanTyp
+    selectedPeriod.value = Number(route.query.period) || null
 
     await loadVersions(Number(route.query.version) || null)
   } catch {
@@ -63,7 +70,9 @@ async function loadVersions(bevorzugt: number | null = null): Promise<void> {
     return
   }
 
-  const daten = await fetchLineVersions(dayType.value, selectedLine.value)
+  const daten = await fetchLineVersions(dayType.value, selectedLine.value, selectedPeriod.value)
+  // Ohne Vorgabe entscheidet die Engine (laufende Periode) — die Auswahl zieht nach.
+  selectedPeriod.value = daten.period?.id ?? null
   versions.value = (daten.lines[0]?.versions ?? []).slice().sort((a, b) => a.version_no - b.version_no)
 
   if (versions.value.length === 0) {
@@ -72,6 +81,15 @@ async function loadVersions(bevorzugt: number | null = null): Promise<void> {
 
   const treffer = versions.value.find((v) => v.id === bevorzugt)
   await selectVersion((treffer ?? versions.value[versions.value.length - 1]).id)
+}
+
+/**
+ * Periodenwechsel. Bewusst am `change` der Auswahl statt an einem Watcher auf `selectedPeriod`:
+ * `loadVersions` schreibt die Auswahl aus der Antwort zurück, ein Watcher liefe daraufhin ein
+ * zweites Mal.
+ */
+async function waehlePeriode(): Promise<void> {
+  await loadVersions()
 }
 
 async function selectVersion(id: number): Promise<void> {
@@ -83,7 +101,12 @@ async function selectVersion(id: number): Promise<void> {
     timetable.value = await fetchTimetable(id)
     void router.replace({
       name: 'timetable',
-      query: { line: selectedLine.value, day_type: dayType.value, version: String(id) },
+      query: {
+        line: selectedLine.value,
+        day_type: dayType.value,
+        version: String(id),
+        period: selectedPeriod.value ? String(selectedPeriod.value) : undefined,
+      },
     })
   } catch {
     error.value = 'Fahrplan konnte nicht geladen werden.'
@@ -226,6 +249,21 @@ function gueltigkeit(version: LineVersion): string {
             </button>
           </div>
 
+          <!-- Periode: ohne sie zeigte die Ansicht nur die laufende, und alles davor war weg.
+               Als Auswahlliste, weil die Zahl der Perioden mit jedem Fahrplanwechsel waechst. -->
+          <div v-if="perioden.length > 0" class="mt-4">
+            <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Periode</label>
+            <select
+              v-model.number="selectedPeriod"
+              class="mt-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-800 focus:outline-none"
+              @change="waehlePeriode"
+            >
+              <option v-for="p in perioden" :key="p.id" :value="p.id">
+                {{ periodOptionLabel(p) }}
+              </option>
+            </select>
+          </div>
+
           <!-- Version -->
           <div v-if="versions.length > 0" class="mt-4 flex flex-wrap items-center gap-2">
             <span class="text-sm text-slate-500">Version:</span>
@@ -251,9 +289,12 @@ function gueltigkeit(version: LineVersion): string {
             class="mt-6 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900"
           >
             Für Linie {{ line.route_short_name }} liegt zum Typ
-            „{{ FAHRPLAN_TYPEN.find((t) => t.value === dayType)?.label }}" noch nichts
-            konsolidiert vor. Das Konsolidat wächst über viele Importe zusammen — der Reiter
-            „Abdeckung" zeigt, welche Zeiträume schon vorliegen.
+            „{{ FAHRPLAN_TYPEN.find((t) => t.value === dayType)?.label }}" in dieser Periode
+            noch nichts konsolidiert vor. Das Konsolidat wächst über viele Importe zusammen —
+            der Reiter „Abdeckung" zeigt, welche Zeiträume schon vorliegen.
+            <template v-if="perioden.length > 1">
+              Eine frühere Periode hat den Fahrplan möglicherweise schon.
+            </template>
           </p>
 
           <p v-if="timetable" class="mt-4 text-sm text-slate-500">

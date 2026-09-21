@@ -376,9 +376,22 @@ components:
         day_type_label: { type: string }
         version_no: { type: integer, description: 'Fortlaufend je (Periode, Linie, Typ) — nur zur Anzeige.' }
         fingerprint: { type: string, description: 'SHA256 über die sortierten Fahrt-Signaturen; identifiziert die Version.' }
-        trip_count: { type: integer, description: 'Fahrten dieser Version im aktuellen Roh-Bestand.' }
+        trip_count: { type: integer, nullable: true, description: 'Konsolidierte Fahrten dieser Version; null = die Version trägt keinen Inhalt.' }
         first_seen_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
+        period:
+          nullable: true
+          description: >
+            Nur im Versionsvergleich gesetzt. Dort können die beiden Versionen aus
+            verschiedenen Perioden stammen, und `version_no` beginnt je Periode wieder bei 1 —
+            ohne die Periode wäre „v3 gegen v1" nicht einzuordnen.
+          type: object
+          required: [id, label, valid_from, status]
+          properties:
+            id: { type: integer }
+            label: { type: string }
+            valid_from: { type: string, format: date }
+            status: { type: string, enum: [current, frozen] }
         intervals:
           type: array
           items: { $ref: '#/components/schemas/LineVersionInterval' }
@@ -391,7 +404,14 @@ components:
         label: { type: string }
         valid_from: { type: string, format: date }
         valid_to: { type: string, format: date, nullable: true }
-        status: { type: string, enum: [current, frozen] }
+        status:
+          type: string
+          enum: [current, frozen]
+          description: >
+            **Abgeleitet, nicht gespeichert.** `current` ist die Periode, die den heutigen Tag
+            abdeckt; eine erst künftig beginnende bleibt `frozen`. Der Wert wird bei jeder
+            Abfrage aus `valid_from`/`valid_to` gerechnet — als Spalte veraltete er, sobald ein
+            Tag verging, ohne dass jemand eine Periode schrieb.
         created_via:
           type: string
           enum: [admin, offer, bootstrap]
@@ -1695,14 +1715,27 @@ paths:
           required: false
           description: Auf einen Fahrplantyp einschränken.
           schema: { $ref: '#/components/schemas/FahrplanTyp' }
+        - name: period
+          in: query
+          required: false
+          description: >
+            `schedule_periods.id`. Ohne Angabe die **laufende** Periode; beginnt die Kette
+            erst in der Zukunft, die jüngste. Auch eine eingefrorene Periode ist erlaubt —
+            sonst wäre die gesamte Historie vor einem Periodenwechsel unerreichbar.
+          schema: { type: integer }
       responses:
         '200':
-          description: Versionen der laufenden Periode
+          description: Versionen der gewählten Periode
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LineVersionsResponse' }
         '401':
           description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannte Periode oder unbekannter day_type
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1768,7 +1801,13 @@ paths:
         Produktivbestand gemessene Extremfall liegt bei 43 Minuten.
 
 
-        Beide Versionen müssen dieselbe Periode, Linie und denselben Fahrplantyp tragen; sonst 422.
+        Beide Versionen müssen dieselbe Linie und denselben Fahrplantyp tragen; sonst 422.
+
+
+        **Die Periode darf abweichen** (seit 21.09.2026). An der Periodengrenze ist der Vergleich
+        am aussagekräftigsten: Die letzte Version der alten und Version 1 der neuen Periode folgen
+        unmittelbar aufeinander. Weil `version_no` je Periode wieder bei 1 beginnt, trägt jede
+        Version in der Antwort ihre Periode mit.
       tags: [Admin]
       security: [{ AdminToken: [] }]
       parameters:

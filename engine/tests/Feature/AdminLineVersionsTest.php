@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\PeriodOrigin;
-use App\Enums\PeriodStatus;
 use App\Models\ConsolidatedStop;
 use App\Models\ConsolidatedTrip;
 use App\Models\LineVersion;
 use App\Models\LineVersionInterval;
 use App\Models\SchedulePeriod;
 use App\Models\User;
+use App\Services\SchedulePeriodService;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -30,7 +31,6 @@ final class AdminLineVersionsTest extends TestCase
             'label' => 'Ausgangsperiode',
             'valid_from' => '2026-08-15',
             'valid_to' => null,
-            'status' => PeriodStatus::Current,
             'created_via' => PeriodOrigin::Bootstrap,
         ]);
 
@@ -163,5 +163,49 @@ final class AdminLineVersionsTest extends TestCase
             ->assertJsonPath('data.period', null)
             ->assertJsonPath('data.coverage', null)
             ->assertJsonCount(0, 'data.lines');
+    }
+
+    /**
+     * Die Historie muss einen Periodenwechsel überleben.
+     *
+     * Vorher war der Endpunkt fest auf die laufende Periode verdrahtet: Sobald eine neue
+     * begann, war alles davor unerreichbar — es hing unverändert in der Datenbank, nur sah es
+     * niemand mehr.
+     */
+    public function test_an_earlier_period_stays_reachable_through_the_period_filter(): void
+    {
+        $alt = $this->periodeMitVersionen();
+
+        $dienst = app(SchedulePeriodService::class);
+        $neu = $dienst->create('Nachfolgerin', CarbonImmutable::now()->subDay()->toDateString());
+        $dienst->rebuildChain();
+
+        LineVersion::query()->create([
+            'period_id' => $neu->id, 'line' => '9', 'day_type' => 'mo_fr',
+            'version_no' => 1, 'fingerprint' => str_repeat('c', 64),
+            'first_seen_at' => now(), 'last_seen_at' => now(),
+        ]);
+
+        $token = $this->token();
+
+        // Ohne Angabe: die laufende Periode — das ist die neue.
+        $this->withToken($token)->getJson('/api/v1/admin/line-versions')
+            ->assertOk()
+            ->assertJsonPath('data.period.id', $neu->id)
+            ->assertJsonPath('data.lines.0.line', '9');
+
+        // Mit Angabe: auch die eingefrorene Vorperiode, samt ihrer vollen Historie.
+        $this->withToken($token)->getJson("/api/v1/admin/line-versions?period={$alt->id}")
+            ->assertOk()
+            ->assertJsonPath('data.period.id', $alt->id)
+            ->assertJsonPath('data.period.status', 'frozen')
+            ->assertJsonPath('data.lines.0.line', '1')
+            ->assertJsonCount(2, 'data.lines.0.versions');
+    }
+
+    public function test_rejects_an_unknown_period(): void
+    {
+        $this->withToken($this->token())->getJson('/api/v1/admin/line-versions?period=999999')
+            ->assertStatus(422)->assertJsonPath('error.code', 422);
     }
 }

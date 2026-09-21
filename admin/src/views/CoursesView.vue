@@ -6,7 +6,7 @@ import LineBadge from '../components/LineBadge.vue'
 import { fetchLineCourses, type CourseChainTrip, type LineCourseOverview } from '../services/courses'
 import { FAHRPLAN_TYPEN, fetchLines, type FahrplanTyp, type Line } from '../services/lines'
 import { lineSortKey, lineTypeOrder } from '../utils/lineStyle'
-import { fetchSchedulePeriods, type SchedulePeriod } from '../services/schedulePeriods'
+import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
 import { formatClock, formatDuration } from '../utils/timezone'
 
 const route = useRoute()
@@ -157,7 +157,9 @@ watch([gewaehlteLinie, gewaehltePeriode, dayType], () => {
               v-model.number="gewaehltePeriode"
               class="mt-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-800 focus:outline-none"
             >
-              <option v-for="periode in perioden" :key="periode.id" :value="periode.id">{{ periode.label }}</option>
+              <option v-for="periode in perioden" :key="periode.id" :value="periode.id">
+                {{ periodOptionLabel(periode) }}
+              </option>
             </select>
           </div>
 

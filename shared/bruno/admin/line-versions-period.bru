@@ -1,0 +1,95 @@
+meta {
+  name: Line Versions (fruehere Periode)
+  type: http
+  seq: 23
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/line-versions?period=1
+  body: none
+  auth: bearer
+}
+
+params:query {
+  period: 1
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.lines: isArray
+}
+
+script:post-response {
+  const data = res.getBody().data;
+
+  if (data.period === null) {
+    throw new Error("Zu einer angefragten Periode muss die Antwort diese Periode nennen");
+  }
+
+  if (data.period.id !== 1) {
+    throw new Error("Geliefert wurde Periode " + data.period.id + " statt der angefragten 1");
+  }
+}
+
+docs {
+  # Versionen einer frueheren Periode
+
+  Beispiel-Response (Ausgangsperiode, nachdem am 21.09.2026 eine neue Periode begann):
+
+  ```json
+  {
+    "data": {
+      "period": {
+        "id": 1,
+        "label": "Ausgangsperiode ab 15.08.2026",
+        "valid_from": "2026-08-15",
+        "valid_to": "2026-09-20",
+        "status": "frozen",
+        "created_via": "bootstrap"
+      },
+      "coverage": {
+        "from": "2026-08-15", "to": "2026-09-20",
+        "confirmed_boundaries": 214, "open_boundaries": 146
+      },
+      "lines": [
+        {
+          "line": "1",
+          "versions": [
+            {
+              "id": 145, "day_type": "mo_fr", "day_type_label": "Mo-Fr normal",
+              "version_no": 1, "trip_count": 393,
+              "intervals": [
+                { "valid_from": "2026-08-17", "valid_to": "2026-09-18",
+                  "from_confirmed": false, "to_confirmed": true }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+  ## Wozu
+
+  Ohne `period` liefert der Endpunkt die **laufende** Periode. Das war bis zum 21.09.2026
+  die einzige Moeglichkeit — mit dem ersten Periodenwechsel war damit die gesamte Historie
+  davor unerreichbar. Sie hing unveraendert in der Datenbank, nur sah sie niemand mehr.
+
+  `status` ist **abgeleitet, nicht gespeichert**: `current` ist die Periode, die den heutigen
+  Tag abdeckt. Eine erst kuenftig beginnende bleibt `frozen`, sonst schluege der naechste
+  Import seine Versionen einer noch nicht geltenden Periode zu.
+
+  | Fehlerfall | Status |
+  |---|---|
+  | `period` unbekannt | 422 |
+  | kein gueltiger Admin-Token | 401 |
+}

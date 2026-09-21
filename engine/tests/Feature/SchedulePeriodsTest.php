@@ -10,6 +10,7 @@ use App\Enums\PeriodStatus;
 use App\Models\LineVersion;
 use App\Models\SchedulePeriod;
 use App\Models\User;
+use App\Services\SchedulePeriodService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -32,7 +33,6 @@ final class SchedulePeriodsTest extends TestCase
             'label' => $label,
             'valid_from' => $validFrom,
             'valid_to' => null,
-            'status' => PeriodStatus::Frozen,
             'created_via' => $origin,
         ]);
     }
@@ -182,5 +182,46 @@ final class SchedulePeriodsTest extends TestCase
             ->assertJsonPath('data.1.label', 'Ausgangsperiode')
             ->assertJsonPath('data.1.line_version_count', 1)
             ->assertJsonPath('data.1.is_deletable', false);
+    }
+
+    /**
+     * Der Fehler vom 21.09.2026: `status` war eine gespeicherte Spalte und wurde nur beim
+     * Schreiben einer Periode nachgezogen. Wer am Vortag eine Periode für den Folgetag anlegte,
+     * hatte am Folgetag eine Kette, in der die abgelaufene Periode weiterhin `current` trug —
+     * und jede Ansicht, die „die laufende Periode" darüber suchte, zeigte den falschen
+     * Fahrplan. Zwischen dem Anlegen und der Prüfung schreibt hier **nichts**.
+     */
+    public function test_a_period_becomes_current_when_its_first_day_arrives_without_any_write(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-20 12:00:00'));
+
+        $dienst = app(SchedulePeriodService::class);
+        $alt = $dienst->create('Ausgangsperiode', '2026-08-15');
+        $neu = $dienst->create('Freigabe Hallische Str.', '2026-09-21');
+
+        $this->assertSame(PeriodStatus::Current, $alt->refresh()->status);
+        $this->assertSame(PeriodStatus::Frozen, $neu->refresh()->status);
+
+        // Ein Tag vergeht. Niemand legt etwas an, niemand ändert etwas.
+        $this->travelTo(CarbonImmutable::parse('2026-09-21 06:00:00'));
+
+        $this->assertSame(PeriodStatus::Frozen, $alt->refresh()->status);
+        $this->assertSame(PeriodStatus::Current, $neu->refresh()->status);
+
+        // Auch die Abfrage-Variante derselben Regel muss mitziehen.
+        $this->assertSame($neu->id, SchedulePeriod::query()->current()->first()?->id);
+    }
+
+    /** Der Grenzfall am letzten Tag: Die Periode gilt bis einschließlich ihres `valid_to`. */
+    public function test_a_period_stays_current_on_its_last_day(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-20 23:30:00'));
+
+        $dienst = app(SchedulePeriodService::class);
+        $alt = $dienst->create('Ausgangsperiode', '2026-08-15');
+        $dienst->create('Nachfolgerin', '2026-09-21');
+
+        $this->assertSame('2026-09-20', $alt->refresh()->valid_to?->toDateString());
+        $this->assertSame(PeriodStatus::Current, $alt->status);
     }
 }

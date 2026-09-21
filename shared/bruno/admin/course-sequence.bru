@@ -1,0 +1,168 @@
+meta {
+  name: Course Sequence (Vorschau)
+  type: http
+  seq: 27
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/line-versions/201/course-sequence?from_trip_id=9835&to_trip_id=9902&pattern=01-08
+  body: none
+  auth: bearer
+}
+
+params:query {
+  from_trip_id: 9835
+  to_trip_id: 9902
+  pattern: 01-08
+  ~action: assign
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.action: eq assign
+  res.body.data.summary.applied: eq false
+  res.body.data.assignments: isArray
+  res.body.data.conflicts: isArray
+}
+
+script:post-response {
+  const d = res.body.data;
+  const s = d.summary;
+
+  if (s.planned !== d.assignments.length) {
+    throw new Error("summary.planned passt nicht zu assignments[]");
+  }
+  if (s.unchanged !== d.unchanged.length) {
+    throw new Error("summary.unchanged passt nicht zur Liste");
+  }
+  if (s.skipped !== d.skipped.length) {
+    throw new Error("summary.skipped passt nicht zur Liste");
+  }
+  if (s.conflicts !== d.conflicts.length) {
+    throw new Error("summary.conflicts passt nicht zur Liste");
+  }
+
+  // Die Vorschau ist garantiert folgenlos.
+  if (s.applied !== false || s.written !== 0) {
+    throw new Error("Die Vorschau meldet geschriebene Zeilen");
+  }
+
+  // Fuehrende Nullen sind bedeutungstragend: "03" und "3" sind zwei verschiedene Kurse.
+  // Das Muster "01-08" muss deshalb gepolsterte Nummern liefern.
+  if (d.pattern.input === "01-08") {
+    if (d.pattern.count !== 8 || d.pattern.numbers[0] !== "01" || d.pattern.numbers[7] !== "08") {
+      throw new Error("Fuehrende Nullen gingen beim Entfalten verloren: " + JSON.stringify(d.pattern.numbers));
+    }
+  }
+
+  // Die Folge laeuft zyklisch ab der Startspalte — jede Zuweisung muss dazu passen.
+  const spannweite = d.range.to_index - d.range.from_index + 1;
+  if (spannweite !== s.columns) {
+    throw new Error("range spannt " + spannweite + " Spalten, summary.columns sagt " + s.columns);
+  }
+
+  for (const a of d.assignments) {
+    const erwartet = d.pattern.numbers[(a.column - d.range.from_index) % d.pattern.count];
+    if (a.number !== erwartet) {
+      throw new Error("Spalte " + a.column + " soll " + erwartet + " bekommen, geplant ist " + a.number);
+    }
+  }
+
+  // Die Kette zieht mit: trips_affected muss die Kettenlaengen zaehlen, nicht die Spalten.
+  const betroffen = d.assignments.reduce((n, a) => n + a.chain_trip_count, 0);
+  if (betroffen !== s.trips_affected) {
+    throw new Error("summary.trips_affected " + s.trips_affected + " passt nicht zu den Ketten " + betroffen);
+  }
+}
+
+docs {
+  # Kursnummern fortschreiben — Vorschau
+
+  **Dieser Endpunkt ist garantiert folgenlos.** `POST` auf denselben Pfad fuehrt aus, was hier
+  steht.
+
+  Haeufig laeuft eine Linie ihre Kurse in fester chronologischer Abfolge: Die 6 faehrt die Kurse
+  1–8, und bei gleichbleibendem Takt setzt sich das fort. Kennt man die Menge der Nummern, laesst
+  sie sich ueber den markierten Spaltenbereich fortschreiben, statt jede Spalte einzeln zu tippen.
+
+  **Gearbeitet wird je Richtung.** Nur dort stehen die Fahrten in der Reihenfolge, in der die
+  Nummern umlaufen. Die Richtung ist kein Parameter — sie folgt aus `from_trip_id`; liegt
+  `to_trip_id` in einer anderen, ist das ein 422.
+
+  Beispiel-Response (gekuerzt, Linie 6):
+
+  ```json
+  {
+    "data": {
+      "action": "assign",
+      "line_version": { "id": 201, "line": "6", "day_type": "mo_fr", "version_no": 2 },
+      "direction": { "key": "391>250", "start_stop": "Alt Olvenstedt", "end_stop": "Sudenburg", "trip_count": 94 },
+      "pattern": { "input": "01-08", "numbers": ["01","02","03","04","05","06","07","08"], "count": 8 },
+      "range": { "from_trip_id": 9835, "to_trip_id": 9902, "from_index": 0, "to_index": 23, "columns": 24 },
+      "summary": {
+        "columns": 24, "planned": 16, "trips_affected": 31, "outside_range": 7,
+        "unchanged": 2, "skipped": 4, "conflicts": 1,
+        "written": 0, "removed": 0, "applied": false
+      },
+      "assignments": [
+        { "column": 0, "number": "01",
+          "trip": { "id": 9835, "line": "6", "departure_time": "05:04:00" },
+          "chain_trip_ids": [9835, 10412], "chain_trip_count": 2,
+          "outside_range": [{ "id": 10412, "line": "6", "departure_time": "05:48:00" }],
+          "course": null }
+      ],
+      "unchanged": [
+        { "column": 8, "number": "01", "trip": { "id": 9902, "line": "6" } }
+      ],
+      "skipped": [
+        { "column": 3, "number": "04", "trip": { "id": 9860, "line": "6" },
+          "reason_code": "already_assigned",
+          "reason": "Die Fahrt gehoert zu einem Umlauf, der bereits Kurs 12 traegt." }
+      ],
+      "conflicts": [
+        { "numbers": ["03", "04"], "chain_trip_ids": [9851, 9855],
+          "trips": [{ "id": 9851 }, { "id": 9855 }],
+          "reason": "Zwei Fahrten desselben Umlaufs sollen verschiedene Nummern bekommen (03 und 04). Welche die richtige ist, weiss nur der Pflegende." }
+      ],
+      "warnings": []
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **Fuehrende Nullen bleiben erhalten.** `01-08` ergibt `01`…`08`, `1-8` dagegen `1`…`8`.
+  `courses.number` ist `varchar(8)`, und `03` und `3` sind fuer die Datenbank zwei verschiedene
+  Kurse. Weicht die Eingabe von der Schreibweise ab, die die Version schon traegt, meldet sich
+  `number_style_mismatch` — als Hinweis, nicht als Schranke.
+
+  Das Muster nimmt auch Komma-Listen und Mischformen: `31-35`, `1-4, 7, 9-12`, absteigend `8-1`.
+
+  **Die Nummer gehoert der Kette, nicht der Fahrt** (KURSE §2 K2). Geplant wird deshalb je Kette,
+  und eine Zuweisung zieht die ganze Kette mit — auch Fahrten der Gegenrichtung. Die stehen unter
+  `outside_range`, und `trips_affected` ist groesser als `columns`. Das ist die Zahl, die ein
+  Bedienknopf tragen muss.
+
+  **Nie ueberschreiben.** Traegt eine Kette bereits einen *anderen* Kurs, wird sie uebersprungen
+  (`already_assigned`); traegt sie genau die geplante Nummer, zaehlt das als `unchanged`. Ein
+  zweiter Lauf ist damit folgenlos. Geprueft wird auf Ketten-, nicht auf Fahrt-Ebene: Eine
+  Zuweisung schriebe sonst still genau die Nummer weg, die geschont werden soll.
+
+  **`conflicts` ist der Fall, der sich selbst ueberschriebe.** Sollen zwei Fahrten **derselben**
+  Kette verschiedene Nummern bekommen, wird die Kette gar nicht geschrieben — sequenziell
+  ausgefuehrt gewaenne sonst willkuerlich die letzte. Dieselbe Nummer mehrfach auf einer Kette ist
+  dagegen **kein** Konflikt: Das ist der Normalfall eines zyklischen Musters, das Fahrzeug kommt
+  eben wieder.
+
+  **Zwei verschiedene Ketten mit derselben Nummer sind ebenfalls kein Konflikt.** Solange die
+  Spalten noch nicht verkettet sind, landen sie (gleiche Linie, gleiche Nummer) im selben Umlauf —
+  genau das ist die Umlauf-Semantik, und beim Fortschreiben eines Taktes ist es der Regelfall.
+}

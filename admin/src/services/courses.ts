@@ -170,3 +170,87 @@ export async function applyCarryover(toVersionId: number, fromVersionId: number)
   })
   return data.data
 }
+
+// ---------------------------------------------------------------- Nummernfolge fortschreiben
+
+export type CourseSequenceAction = 'assign' | 'clear'
+
+/** Eine Fahrt in der Kurzform, die die Umlauf-Pflege überall verwendet. */
+export interface SequenceTrip {
+  id: number
+  line: string
+  mode: 'tram' | 'bus' | 'other'
+  start_stop: string | null
+  end_stop: string | null
+  departure_time: string | null
+  arrival_time: string | null
+}
+
+/**
+ * Eine geplante Vergabe oder Entnahme — geführt je **Kette**, nicht je Spalte.
+ *
+ * Die Nummer ist ein Etikett am Umlauf: Eine Zuweisung zieht die ganze Kette mit, auch Fahrten
+ * der Gegenrichtung. Genau die stehen in `outside_range`.
+ */
+export interface CourseSequenceEntry {
+  column: number
+  number: string
+  trip: SequenceTrip
+  chain_trip_ids: number[]
+  chain_trip_count: number
+  outside_range: SequenceTrip[]
+  course: { id: number; number: string; lines: string[]; duplicate: boolean } | null
+}
+
+export interface CourseSequenceResult {
+  action: CourseSequenceAction
+  line_version: { id: number; line: string; day_type: string; day_type_label: string; version_no: number }
+  direction: { key: string; start_stop: string; end_stop: string; trip_count: number }
+  /** `null` bei `clear`. Führende Nullen der Eingabe bleiben erhalten. */
+  pattern: { input: string; numbers: string[]; count: number } | null
+  range: { from_trip_id: number; to_trip_id: number; from_index: number; to_index: number; columns: number }
+  summary: {
+    columns: number
+    planned: number
+    /** Größer als `columns` — die Kette zieht mit. Das ist die Zahl für einen Bedienknopf. */
+    trips_affected: number
+    outside_range: number
+    unchanged: number
+    skipped: number
+    conflicts: number
+    written: number
+    removed: number
+    applied: boolean
+  }
+  assignments: CourseSequenceEntry[]
+  removals: CourseSequenceEntry[]
+  unchanged: { column: number; number: string; trip: SequenceTrip }[]
+  skipped: { column: number; number: string | null; trip: SequenceTrip; reason_code: string; reason: string }[]
+  /** Zwei Fahrten derselben Kette sollen verschiedene Nummern bekommen — nichts wird geschrieben. */
+  conflicts: { numbers: string[]; chain_trip_ids: number[]; trips: SequenceTrip[]; reason: string }[]
+  warnings: { code: string; message: string }[]
+}
+
+export interface CourseSequenceParams {
+  from_trip_id: number
+  to_trip_id: number
+  action?: CourseSequenceAction
+  pattern?: string
+}
+
+/** Garantiert folgenlos — die Vorschau schreibt nichts. */
+export async function previewCourseSequence(
+  lineVersionId: number,
+  params: CourseSequenceParams,
+): Promise<CourseSequenceResult> {
+  const { data } = await api.get(`/api/v1/admin/line-versions/${lineVersionId}/course-sequence`, { params })
+  return data.data
+}
+
+export async function applyCourseSequence(
+  lineVersionId: number,
+  params: CourseSequenceParams,
+): Promise<CourseSequenceResult> {
+  const { data } = await api.post(`/api/v1/admin/line-versions/${lineVersionId}/course-sequence`, params)
+  return data.data
+}

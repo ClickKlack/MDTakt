@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\AuthController;
+use App\Http\Controllers\Admin\AutoTripLinkController;
 use App\Http\Controllers\Admin\CourseCarryoverController;
 use App\Http\Controllers\Admin\CourseController;
+use App\Http\Controllers\Admin\CourseSequenceController;
 use App\Http\Controllers\Admin\CoverageController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
@@ -78,6 +80,14 @@ Route::prefix('v1')->group(function (): void {
             // Umlauf-Pflege (I-14): Haltestellen-Editor und die Entscheidungen daraus.
             // Die Kette führt, die Kursnummer ist ein Etikett daran (KURSE §2 K2).
             Route::get('stop-links', [StopLinkController::class, 'index'])->name('admin.stop-links.index');
+
+            // Mengen-Lauf ueber einen Zeitraum: die naechste Abfahrt uebernehmen (FIFO) oder die
+            // Anschluesse wieder loesen. Die Vorschau (GET) ist garantiert folgenlos.
+            Route::get('stop-links/auto', [AutoTripLinkController::class, 'show'])
+                ->name('admin.stop-links.auto.show');
+            Route::post('stop-links/auto', [AutoTripLinkController::class, 'store'])
+                ->name('admin.stop-links.auto.store');
+
             Route::post('trip-links', [TripLinkController::class, 'store'])->name('admin.trip-links.store');
             Route::delete('trip-links/{tripLink}', [TripLinkController::class, 'destroy'])->name('admin.trip-links.destroy');
 
@@ -93,6 +103,14 @@ Route::prefix('v1')->group(function (): void {
 
             // Die Umlaeufe einer Linie im Ganzen: Ketten, Risse, Fahrten ohne Kurs
             Route::get('lines/{line}/courses', [LineCourseController::class, 'index'])->name('admin.lines.courses');
+
+            // Kursnummern je Richtung ueber einen Spaltenbereich fortschreiben oder entfernen.
+            // Die Nummer haengt an der Kette — ein Lauf zieht deshalb mehr Fahrten mit, als
+            // markiert sind; die Vorschau (GET) zeigt das und ist garantiert folgenlos.
+            Route::get('line-versions/{lineVersion}/course-sequence', [CourseSequenceController::class, 'show'])
+                ->name('admin.line-versions.course-sequence.show');
+            Route::post('line-versions/{lineVersion}/course-sequence', [CourseSequenceController::class, 'store'])
+                ->name('admin.line-versions.course-sequence.store');
 
             // Uebernahme beim Versionswechsel — die Vorschau ist garantiert folgenlos (K4)
             Route::get('line-versions/{lineVersion}/course-carryover', [CourseCarryoverController::class, 'show'])

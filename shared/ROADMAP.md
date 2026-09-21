@@ -22,6 +22,7 @@
 | **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f, Fahrplan + Diff |
 | **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ✅ |
 | **I-14** | **Kurse & Umläufe** | Engine + Admin | Umlauf-Ebene manuell pflegbar: Fahrten verketten, Kursnummern vergeben | ✅ |
+| **I-15** | **Mengen-Pflege** | Engine + Admin | Wiederkehrende Muster über einen Zeitraum setzen und wieder lösen | ✅ |
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -675,6 +676,56 @@ Kursnummer dieser Umlauf trägt.
 Ein Admin kann an einer Endstelle die dort endenden mit den dort beginnenden Fahrten verketten — auch über Linien
 hinweg —, Betriebsfahrten bewusst offen lassen, der Kette eine Kursnummer geben und sie in der Kursübersicht je
 Linie wiederfinden. Perioden und Versionen bleiben dabei getrennt.
+
+---
+
+## I-15 — Mengen-Pflege (Muster über einen Zeitraum)
+
+**Ziel:** Wiederkehrende Muster werden in einem Zug gesetzt statt je Übergang geklickt — und lassen sich ebenso
+wieder lösen.
+
+> 📄 Entscheidungen **K7** (FIFO paart, der Mensch begrenzt), **K8** (Nummernfolge zyklisch über die markierten
+> Spalten) und **K9** (Auflösen und Entfernen sind zwei Richtungen): [`KURSE.md`](KURSE.md) §2.
+>
+> **Warum es das braucht:** I-14 macht die Umlauf-Ebene pflegbar, aber je Übergang einzeln. An einer Endstelle mit
+> Takt wiederholt sich derselbe Griff über einen Morgen hinweg dutzendfach, und eine Linie mit acht chronologisch
+> umlaufenden Kursen ließ sich nur Spalte für Spalte benummern. Beides ist Fleißarbeit ohne eigene Aussage.
+
+### Umgesetzt
+- [x] **Zulässigkeitsregeln geteilt statt gedoppelt:** `TripLinkRuleService` + `TripLinkRejection` — dieselben
+      Prüfungen für Einzelklick (422) und Mengen-Lauf (Zeile überspringen). `TripLinkRequest` bleibt der Ort, an
+      dem aus einem Verstoß ein 422 wird. Regressionsanker: `TripLinkTest` und `StopLinkBoardTest` blieben ohne
+      eine Zeile Teständerung grün
+- [x] **`TripChainGraph`** — die Ketten im Speicher, samt der **erst geplanten** Kanten eines Laufs. Ohne das
+      vergäbe ein Lauf dieselbe Abfahrt zweimal und liefe beim Schreiben in den Unique-Constraint statt in eine
+      Meldung; außerdem fragte `chainFor()` je Kettensprung die Datenbank
+- [x] `TripLinkAutoService` mit `action=link|unlink`, `CourseSequenceService` mit `action=assign|clear` —
+      Vorschau (**garantiert folgenlos**) und Anwenden als getrennte Endpunkte, wie bei der Versions-Übernahme
+- [x] `CourseNumberSequence` — `1-8`, `31-35`, `01-08`, `1-4, 7, 9-12`, absteigend. **Führende Nullen folgen der
+      Eingabe:** `03` und `3` sind zwei verschiedene Kurse
+- [x] `COURSE_MAX_TURNAROUND_MINUTES` (Vorgabe 20) — die Höchstwende ist der Abbruch, nicht eine Warnschwelle
+- [x] **Linienfilter auf Mehrfachauswahl** erweitert: 1 und 13 gemeinsam, die 6 daneben unberührt. Mit genau einer
+      wählbaren Linie ließe sich der gewollte Linienwechsel nur über „Alle" automatisieren
+- [x] Bereichsmodus in `StopLinkBoard.vue` (linke Spalte) und `TimetableGrid.vue` (Spaltennummern) — beide als
+      ausdrücklicher Modus neben der unveränderten Einzelbedienung
+- [x] `openapi.yaml` + Bruno (`auto-trip-links{,-apply,-unlink}.bru`, `course-sequence{,-apply,-clear}.bru`)
+- [x] Tests: `AutoTripLinkTest` (33), `CourseSequenceTest` (25), `CourseNumberSequenceTest` (14),
+      `TripChainGraphTest` (7) — inkl. folgenloser Vorschau, Idempotenz, Zeitfenster-Grenzfällen auf die Sekunde,
+      Nachtlinie über Mitternacht und dem Nacht-auf-Tag-Übergang am Morgen
+
+### Was dabei aufgefallen ist
+- **Ein Ring ist über diesen Weg nicht erreichbar.** Jeder Anschluss geht auf dem Betriebstag vorwärts, ein Zyklus
+  müsste irgendwo rückwärts — die Zyklusprüfung bleibt als Schutz gegen Altbestand, ließ sich aber nicht über die
+  Schnittstelle auslösen. Festgenagelt ist sie deshalb am `TripChainGraph`, nicht am HTTP-Lauf
+- **Der Nacht-auf-Tag-Übergang am Morgen** erzeugt scheinbar negative Wendezeiten, weil jede Seite die
+  Betriebstag-Grenze ihrer eigenen Linie trägt (N1 05:00 sortiert hinter Linie 1 um 05:20). Er wird eigens
+  gemeldet — „keine Abfahrt in 20 Minuten" schickte den Pflegenden einen Datenfehler suchen, den es nicht gibt
+
+### Abnahmekriterium
+Ein Admin markiert an einer Endstelle Start- und Endfahrt, wählt die beteiligten Linien und legt die Übergänge
+eines Morgens in einem Zug an — mit Vorschau vorher und einer Begründung für jede übersprungene Fahrt. Ebenso
+schreibt er die Kursfolge einer Linie über einen Spaltenbereich fort. Beides lässt sich über dieselbe Markierung
+wieder lösen, und ein zweiter Lauf ist jeweils folgenlos.
 
 ---
 

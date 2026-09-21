@@ -188,6 +188,37 @@ final class StopGroupService
     }
 
     /**
+     * Die Haltestellen mehrerer Halte auf einen Schlag.
+     *
+     * `groupIdFor()` ist eine Abfrage je Halt — im Einzelfall richtig, in einem Mengen-Lauf über
+     * Dutzende Kandidatenpaare aber tausende. Halte ohne Haltestelle fehlen im Ergebnis; der
+     * Aufrufer unterscheidet „nicht zugeordnet" damit selbst.
+     *
+     * @param  array<int, int>  $stopIds
+     * @return array<int, int> consolidated_stop_id => stop_group_id
+     */
+    public function groupIdsFor(array $stopIds): array
+    {
+        $eindeutig = array_values(array_unique(array_filter($stopIds)));
+
+        if ($eindeutig === []) {
+            return [];
+        }
+
+        $ergebnis = [];
+
+        foreach (array_chunk($eindeutig, 1000) as $teil) {
+            foreach (StopGroupMember::query()
+                ->whereIn('consolidated_stop_id', $teil)
+                ->pluck('stop_group_id', 'consolidated_stop_id') as $stopId => $gruppenId) {
+                $ergebnis[(int) $stopId] = (int) $gruppenId;
+            }
+        }
+
+        return $ergebnis;
+    }
+
+    /**
      * Die Halte einer Haltestelle.
      *
      * @return array<int, int>

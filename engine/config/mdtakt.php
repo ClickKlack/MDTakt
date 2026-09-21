@@ -66,6 +66,27 @@ return [
          */
         'min_turnaround_minutes' => (int) env('COURSE_MIN_TURNAROUND_MINUTES', 3),
 
+        /*
+         * Obergrenze des Suchfensters beim **automatischen** Verknüpfen: Wie weit darf die
+         * nächste Abfahrt entfernt sein, damit sie noch als Fortsetzung desselben Fahrzeugs
+         * durchgeht?
+         *
+         * Anders als die Mindestwende ist das keine Warnschwelle, sondern ein Abbruch — und
+         * zwar ein nötiger: Der Automatiklauf nimmt die früheste freie Abfahrt. Ohne Obergrenze
+         * griffe er in einer Taktlücke (Mittag, Betriebsende, Bereichsrand) nach einer Abfahrt
+         * zwei Stunden später und behauptete einen Umlauf, den es nicht gibt. Reicht nichts
+         * heran, bleibt die Fahrt lieber offen.
+         *
+         * 20 Minuten als Ausgangswert: Bei den 10- und 20-Minuten-Takten im Netz überspränge
+         * ein größeres Fenster einen ganzen Taktzyklus und paarte damit das falsche Fahrzeug.
+         * Übliche Standzeiten samt Fahrerwechsel liegen darunter. Am Realbestand noch nicht
+         * gemessen — wie die Mindestwende.
+         *
+         * Der Wert ist nur die **Vorbelegung** des Dialogs; wo es nötig ist (Schwachlastzeiten,
+         * Nachtlinien), stellt der Pflegende ihn je Lauf höher.
+         */
+        'max_turnaround_minutes' => (int) env('COURSE_MAX_TURNAROUND_MINUTES', 20),
+
     ],
 
 ];

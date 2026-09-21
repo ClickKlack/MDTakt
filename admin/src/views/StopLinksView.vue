@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
+import AutoLinkPanel from '../components/AutoLinkPanel.vue'
 import StopLinkBoard from '../components/StopLinkBoard.vue'
 import { FAHRPLAN_TYPEN, fetchLines, type FahrplanTyp, type Line } from '../services/lines'
 import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
@@ -11,6 +12,8 @@ import {
   createTripLink,
   deleteTripLink,
   fetchStopLinkBoard,
+  type AutoLinkParams,
+  type AutoLinkResult,
   type StopLinkBoard as Board,
   type TripLinkWarning,
 } from '../services/stopLinks'
@@ -29,7 +32,13 @@ const gewaehltePeriode = ref<number | null>(null)
 const dayType = ref<FahrplanTyp>('mo_fr')
 const gewaehlterStand = ref<number | null>(null)
 const modeFilter = ref<'tram' | 'bus' | null>(null)
-const lineFilter = ref<string | null>(null)
+/**
+ * Leer = alle Linien. Bewusst eine Mehrfachauswahl: Ein Linienwechsel 1 → 13 ist manchmal
+ * Absicht und manchmal nicht, und nur wer pflegt, weiss welcher Fall vorliegt. Mit genau einer
+ * waehlbaren Linie liesse sich der gewollte Wechsel nur ueber „Alle" automatisieren — und damit
+ * liefen alle uebrigen Linien der Haltestelle mit.
+ */
+const lineFilter = ref<string[]>([])
 
 const board = ref<Board | null>(null)
 const auswahl = ref<number | null>(null)
@@ -147,7 +156,8 @@ function meldung(e: unknown, fallback: string): string {
 async function waehleHaltestelle(id: number): Promise<void> {
   gewaehlteHaltestelle.value = id
   // Ein anderer Halt hat andere Linien — ein mitgeschleppter Linienfilter zeigte dort nichts.
-  lineFilter.value = null
+  lineFilter.value = []
+  leereBereich()
   // Eine andere Haltestelle hat eigene Versionsstände — der alte Index sagt dort nichts.
   gewaehlterStand.value = null
   await ladeBoard()
@@ -258,13 +268,115 @@ async function loese(linkId: number): Promise<void> {
   }
 }
 
+/** Eine Linie zu- oder abwaehlen. Keine mehr gewaehlt heisst wieder „Alle". */
+function schalteLinie(linie: string): void {
+  lineFilter.value = lineFilter.value.includes(linie)
+    ? lineFilter.value.filter((l) => l !== linie)
+    : [...lineFilter.value, linie]
+
+  // Ein anderer Filter zeigt einen anderen Ausschnitt — eine Markierung darin waere Zufall.
+  leereBereich()
+}
+
+// ---------------------------------------------------------------- Bereichsmodus
+
+const autoModus = ref(false)
+const bereichVon = ref<number | null>(null)
+const bereichBis = ref<number | null>(null)
+
+function leereBereich(): void {
+  bereichVon.value = null
+  bereichBis.value = null
+}
+
+function schalteAutoModus(): void {
+  autoModus.value = !autoModus.value
+  leereBereich()
+  // Die beiden Bedienarten duerfen nie gleichzeitig scharf sein: Im Bereichsmodus waere eine
+  // stehengebliebene Einzelauswahl ein Klick vom ungewollten Anschluss entfernt.
+  auswahl.value = null
+}
+
+/**
+ * Erster Klick setzt den Start, zweiter das Ende, dritter beginnt neu. Ein Klick auf den
+ * gesetzten Start hebt ihn auf — so kommt man ohne Umweg aus einem Fehlgriff heraus.
+ */
+function waehleBereich(tripId: number): void {
+  if (bereichVon.value === null) {
+    bereichVon.value = tripId
+    return
+  }
+
+  if (bereichBis.value === null) {
+    if (bereichVon.value === tripId) {
+      bereichVon.value = null
+      return
+    }
+    bereichBis.value = tripId
+    return
+  }
+
+  bereichVon.value = tripId
+  bereichBis.value = null
+}
+
+/** Der Ausschnitt fuer den Mengen-Lauf; `null`, solange der Bereich unvollstaendig ist. */
+const autoParams = computed<AutoLinkParams | null>(() => {
+  if (
+    gewaehlteHaltestelle.value === null ||
+    gewaehltePeriode.value === null ||
+    bereichVon.value === null ||
+    bereichBis.value === null
+  ) {
+    return null
+  }
+
+  return {
+    stop_group: gewaehlteHaltestelle.value,
+    period: gewaehltePeriode.value,
+    day_type: dayType.value,
+    stand: gewaehlterStand.value,
+    from_trip_id: bereichVon.value,
+    to_trip_id: bereichBis.value,
+    lines: lineFilter.value,
+    mode: modeFilter.value,
+  }
+})
+
+async function autoFertig(ergebnis: AutoLinkResult): Promise<void> {
+  hinweise.value = []
+
+  erfolg.value =
+    ergebnis.action === 'link'
+      ? `${ergebnis.summary.created} Anschlüsse angelegt, ${ergebnis.summary.skipped} übersprungen.` +
+        (ergebnis.summary.courses_unified > 0
+          ? ` Dabei wurde die Kursnummer auf ${ergebnis.summary.courses_unified} weitere Fahrten übertragen.`
+          : '')
+      : `${ergebnis.summary.removed} Anschlüsse aufgelöst. Die Kursnummern bleiben an beiden Kettenhälften stehen.`
+
+  if (ergebnis.summary.course_conflicts > 0) {
+    hinweise.value = [
+      {
+        code: 'course_conflict',
+        message:
+          `Bei ${ergebnis.summary.course_conflicts} Übergängen trugen beide Ketten bereits verschiedene ` +
+          'Kursnummern. Es wurde nichts überschrieben — die richtige ist von Hand einzutragen.',
+      },
+    ]
+  }
+
+  leereBereich()
+  await ladeBoard()
+}
+
 watch([gewaehltePeriode, dayType], () => {
   if (loading.value) {
     return
   }
   // Perioden und Fahrplantypen haben je eigene Versionsstände und je eigene Linien.
   gewaehlterStand.value = null
-  lineFilter.value = null
+  lineFilter.value = []
+  leereBereich()
   void ladeBoard()
 })
 
@@ -447,7 +559,7 @@ watch(gewaehlterStand, (neu, alt) => {
                   ? `Noch offen: ${board.open_count} Fahrten`
                   : 'Alle Fahrten an dieser Haltestelle sind entschieden.'
               }}
-              <span v-if="modeFilter !== null || lineFilter !== null" class="text-slate-500">
+              <span v-if="modeFilter !== null || lineFilter.length > 0" class="text-slate-500">
                 (ganze Haltestelle)
               </span>
             </p>
@@ -475,7 +587,7 @@ watch(gewaehlterStand, (neu, alt) => {
                 type="button"
                 class="rounded-md px-3 py-1 text-sm transition"
                 :class="modeFilter === null ? 'bg-white font-medium text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/60'"
-                @click="modeFilter = null; lineFilter = null"
+                @click="modeFilter = null; lineFilter = []; leereBereich()"
               >
                 Alle
               </button>
@@ -485,7 +597,7 @@ watch(gewaehlterStand, (neu, alt) => {
                 type="button"
                 class="rounded-md px-3 py-1 text-sm transition"
                 :class="modeFilter === mittel ? 'bg-white font-medium text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/60'"
-                @click="modeFilter = mittel; lineFilter = null"
+                @click="modeFilter = mittel; lineFilter = []; leereBereich()"
               >
                 {{ mittel === 'tram' ? 'Tram' : 'Bus' }}
               </button>
@@ -496,8 +608,8 @@ watch(gewaehlterStand, (neu, alt) => {
               <button
                 type="button"
                 class="rounded-md border px-2.5 py-1 text-sm transition"
-                :class="lineFilter === null ? 'border-slate-800 bg-slate-800 font-medium text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'"
-                @click="lineFilter = null"
+                :class="lineFilter.length === 0 ? 'border-slate-800 bg-slate-800 font-medium text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'"
+                @click="lineFilter = []"
               >
                 Alle
               </button>
@@ -506,13 +618,48 @@ watch(gewaehlterStand, (neu, alt) => {
                 :key="linie"
                 type="button"
                 class="rounded-md border px-2.5 py-1 text-sm tabular-nums transition"
-                :class="lineFilter === linie ? 'border-slate-800 bg-slate-800 font-medium text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'"
-                @click="lineFilter = linie"
+                :class="lineFilter.includes(linie) ? 'border-slate-800 bg-slate-800 font-medium text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'"
+                @click="schalteLinie(linie)"
               >
                 {{ linie }}
               </button>
             </div>
           </div>
+
+          <p v-if="linienAmHalt.length > 1" class="mt-1.5 max-w-3xl text-xs text-slate-500">
+            Mehrere Linien lassen sich gleichzeitig wählen — so bleibt der gewollte Linienwechsel (1 → 13) im Blick,
+            ein ungewollter aber außen vor.
+          </p>
+
+          <!-- Der Mengen-Lauf. Bewusst ein eigener Modus: Solange er aus ist, verhält sich der
+               Editor wie bisher, und ein Klick links ist ein Klick links. -->
+          <div class="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              class="rounded-md border px-3 py-1.5 text-sm transition"
+              :class="
+                autoModus
+                  ? 'border-emerald-600 bg-emerald-600 font-medium text-white'
+                  : 'border-slate-300 text-slate-700 hover:border-slate-500'
+              "
+              @click="schalteAutoModus"
+            >
+              {{ autoModus ? 'Bereichsmodus beenden' : 'Mehrere auf einmal …' }}
+            </button>
+            <p v-if="!autoModus" class="max-w-2xl text-xs text-slate-500">
+              Wenn an dieser Haltestelle immer dieselbe Bahn die nächste Abfahrt übernimmt, lässt sich das für einen
+              Zeitraum in einem Zug setzen — statt jeden Übergang einzeln zu klicken.
+            </p>
+          </div>
+
+          <AutoLinkPanel
+            v-if="autoModus"
+            :params="autoParams"
+            :lines="linienVerzeichnis"
+            :busy="busy"
+            @done="autoFertig"
+            @fehler="error = $event"
+          />
 
           <StopLinkBoard
             :board="board"
@@ -521,6 +668,10 @@ watch(gewaehlterStand, (neu, alt) => {
             :busy="busy"
             :mode-filter="modeFilter"
             :line-filter="lineFilter"
+            :range-mode="autoModus"
+            :range-from="bereichVon"
+            :range-to="bereichBis"
+            @range-pick="waehleBereich"
             @select="auswahl = $event"
             @link="verknuepfe"
             @mark="markiere"

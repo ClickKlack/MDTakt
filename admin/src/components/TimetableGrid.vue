@@ -3,12 +3,60 @@ import { computed, nextTick, ref, type VNode } from 'vue'
 import type { TimetableDirection, TimetableTrip } from '../services/timetable'
 import { formatClock } from '../utils/timezone'
 
-const props = defineProps<{ direction: TimetableDirection; busy: boolean }>()
+const props = defineProps<{
+  direction: TimetableDirection
+  busy: boolean
+  /**
+   * Bereichsmodus: Start- und Endspalte markieren, um eine Nummernfolge fortzuschreiben. Die
+   * Markierung haengt an der **Spaltennummer-Kopfzeile**, nicht an der Kurszeile — so bleibt
+   * das Inline-Edit einer einzelnen Nummer ohne Moduswechsel moeglich.
+   */
+  rangeMode?: boolean
+  rangeFrom?: number | null
+  rangeTo?: number | null
+}>()
 
 const emit = defineEmits<{
   assign: [tripId: number, number: string]
   detach: [tripId: number]
+  rangePick: [tripId: number]
 }>()
+
+/**
+ * Liegt diese Spalte im markierten Bereich?
+ *
+ * Ueber den **Index** in `direction.trips` — dieselbe Reihenfolge, die die Engine aus dem
+ * Fahrplan bekommt (entlang des Betriebstags, nicht der Uhr). Verkehrt herum markiert wird
+ * getauscht, wie in der Engine auch.
+ */
+function imBereich(index: number): boolean {
+  const grenzen = bereichGrenzen.value
+
+  return grenzen !== null && index >= grenzen[0] && index <= grenzen[1]
+}
+
+const bereichGrenzen = computed<[number, number] | null>(() => {
+  const von = props.direction.trips.findIndex((t) => t.id === props.rangeFrom)
+
+  if (von === -1) {
+    return null
+  }
+
+  const bis = props.direction.trips.findIndex((t) => t.id === props.rangeTo)
+
+  // Erst eine Grenze gesetzt: Der Bereich ist diese eine Spalte.
+  if (bis === -1) {
+    return [von, von]
+  }
+
+  return von <= bis ? [von, bis] : [bis, von]
+})
+
+function istGrenze(index: number): boolean {
+  const grenzen = bereichGrenzen.value
+
+  return grenzen !== null && (index === grenzen[0] || index === grenzen[1])
+}
 
 /** Die Fahrt, deren Kursnummer gerade bearbeitet wird. */
 const bearbeitet = ref<number | null>(null)
@@ -85,6 +133,13 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
         </template>
       </p>
 
+      <slot name="werkzeuge" />
+
+      <p v-if="rangeMode" class="mt-2 text-xs text-emerald-800">
+        Klicke die <strong>Spaltennummern</strong> an: erst die Startspalte, dann die letzte. Die Kursnummer einer
+        einzelnen Spalte lässt sich weiterhin direkt ändern.
+      </p>
+
       <!-- Die Ausrichtung ist eine Heuristik. Läuft sie auseinander, muss die Anzeige das sagen,
            statt eine womöglich irreführende Tabelle unkommentiert zu zeigen. -->
       <p
@@ -115,11 +170,22 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
             >
               Halt
             </th>
+            <!-- Im Bereichsmodus ist diese Zelle der Griff; ohne ihn bleibt sie inert wie bisher. -->
             <th
               v-for="(trip, i) in direction.trips"
               :key="trip.id"
-              class="sticky top-0 z-20 min-w-14 bg-slate-50 px-2 py-2 text-center text-xs font-medium text-slate-500 ring-1 ring-slate-200"
-              :title="`Fahrt ${i + 1} · Signatur ${trip.signature.slice(0, 12)}…`"
+              class="sticky top-0 z-20 min-w-14 px-2 py-2 text-center text-xs font-medium ring-1 ring-slate-200 transition"
+              :class="[
+                rangeMode && imBereich(i) ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-50 text-slate-500',
+                rangeMode ? 'cursor-pointer hover:bg-emerald-200' : '',
+                rangeMode && istGrenze(i) ? 'ring-2 ring-emerald-600' : '',
+              ]"
+              :title="
+                rangeMode
+                  ? `Fahrt ${i + 1} als Bereichsgrenze wählen`
+                  : `Fahrt ${i + 1} · Signatur ${trip.signature.slice(0, 12)}…`
+              "
+              @click="rangeMode && emit('rangePick', trip.id)"
             >
               {{ i + 1 }}
             </th>
@@ -136,9 +202,10 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
               Kurs
             </th>
             <th
-              v-for="trip in direction.trips"
+              v-for="(trip, i) in direction.trips"
               :key="`kurs-${trip.id}`"
-              class="sticky top-9 z-20 bg-slate-50 px-1 py-1 text-center ring-1 ring-slate-200"
+              class="sticky top-9 z-20 px-1 py-1 text-center ring-1 ring-slate-200"
+              :class="rangeMode && imBereich(i) ? 'bg-emerald-50' : 'bg-slate-50'"
             >
               <input
                 v-if="bearbeitet === trip.id"

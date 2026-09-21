@@ -14,8 +14,16 @@ const props = defineProps<{
   busy: boolean
   /** `null` = alle Verkehrsmittel. */
   modeFilter: 'tram' | 'bus' | null
-  /** `null` = alle Linien. */
-  lineFilter: string | null
+  /** Leer = alle Linien. Mehrfachauswahl, damit ein gewollter Linienwechsel sichtbar bleibt. */
+  lineFilter: string[]
+  /**
+   * Bereichsmodus: Statt einzeln zu verknuepfen werden Start- und Endfahrt der **linken**
+   * Spalte markiert. Die beiden Bedienarten sind nie gleichzeitig scharf — im Bereichsmodus ist
+   * `selected` immer `null`, womit die rechte Spalte von selbst inert wird.
+   */
+  rangeMode: boolean
+  rangeFrom: number | null
+  rangeTo: number | null
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +33,7 @@ const emit = defineEmits<{
   unlink: [linkId: number]
   assignCourse: [tripId: number, number: string]
   detachCourse: [tripId: number]
+  rangePick: [tripId: number]
 }>()
 
 /** Die Fahrt, deren Kursnummer gerade bearbeitet wird. */
@@ -78,6 +87,12 @@ interface Zeile {
   starting: StopLinkTrip | null
   /** Betriebstag-Sortierschlüssel aus der Engine — nicht die angezeigte Uhrzeit. */
   sort: number
+  /**
+   * Die Fahrt, die diese Zeile fuehrt. Stichentscheid bei zeitgleichen Fahrten — **numerisch**,
+   * wie in der Engine: Ein String-Vergleich auf dem Schluessel sortierte `e10412` vor `e9835`,
+   * und die Bereichsmarkierung faende dann eine andere Grenze als der Mengen-Lauf.
+   */
+  id: number
 }
 
 /** Fällt das Verzeichnis aus, trägt das Signet wenigstens die richtige Form. */
@@ -101,7 +116,7 @@ function passt(trip: StopLinkTrip | null): boolean {
   if (props.modeFilter !== null && trip.mode !== props.modeFilter) {
     return false
   }
-  return props.lineFilter === null || trip.line === props.lineFilter
+  return props.lineFilter.length === 0 || props.lineFilter.includes(trip.line)
 }
 
 /**
@@ -134,6 +149,7 @@ const zeilen = computed<Zeile[]>(() => {
       ending: endet,
       starting: partner,
       sort: endet.arrival_sort,
+      id: endet.id,
     })
   }
 
@@ -146,14 +162,15 @@ const zeilen = computed<Zeile[]>(() => {
       ending: null,
       starting: beginnt,
       sort: beginnt.departure_sort,
+      id: beginnt.id,
     })
   }
 
   // Die Ankunft fuehrt: Zeilen mit linker Seite stehen nach ihr sortiert, damit die linke
   // Spalte lueckenlos aufsteigt. Kreuzen sich zwei Anschluesse, springt dafuer die rechte —
   // beides zugleich geht nicht.
-  mitAnkunft.sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key))
-  nurAbfahrt.sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key))
+  mitAnkunft.sort((a, b) => a.sort - b.sort || a.id - b.id)
+  nurAbfahrt.sort((a, b) => a.sort - b.sort || a.id - b.id)
 
   // Eine Abfahrt **ohne** Ankunft kreuzt dagegen nichts: Sie hat keine linke Seite, also
   // verschiebt ihre Position dort nichts. Sie wird deshalb dort eingehaengt, wo sie
@@ -190,10 +207,78 @@ function istZiel(trip: StopLinkTrip | null): boolean {
 }
 
 function klickEndend(trip: StopLinkTrip): void {
+  // Im Bereichsmodus ist auch eine bereits entschiedene Fahrt als Grenze waehlbar — sie wird
+  // im Lauf ohnehin uebersprungen, waere als Markierung aber unverzichtbar, wenn der Bereich
+  // genau dort beginnen soll.
+  if (props.rangeMode) {
+    emit('rangePick', trip.id)
+    return
+  }
+
   if (trip.decision !== null) {
     return
   }
   emit('select', props.selected === trip.id ? null : trip.id)
+}
+
+/** Sortierschluessel einer Fahrt — dieselbe Regel wie in der Engine. */
+function schluessel(trip: StopLinkTrip): number[] {
+  return [trip.arrival_sort, trip.id]
+}
+
+function vergleiche(a: number[], b: number[]): number {
+  return a[0] - b[0] || a[1] - b[1]
+}
+
+/**
+ * Die markierten Grenzen in **wirksamer** Reihenfolge.
+ *
+ * Verkehrt herum markiert ist kein Fehler, sondern eine Handbewegung von unten nach oben — die
+ * Engine tauscht ebenso. Die Beschriftung folgt deshalb der Wirkung, nicht der Klickfolge.
+ */
+const bereichGrenzen = computed<{ von: StopLinkTrip; bis: StopLinkTrip } | null>(() => {
+  const a = props.board.ending.find((f) => f.id === props.rangeFrom) ?? null
+  const b = props.board.ending.find((f) => f.id === props.rangeTo) ?? null
+
+  if (a === null) {
+    return null
+  }
+
+  // Erst eine Grenze gesetzt: Der Bereich ist diese eine Fahrt.
+  if (b === null) {
+    return { von: a, bis: a }
+  }
+
+  return vergleiche(schluessel(a), schluessel(b)) <= 0 ? { von: a, bis: b } : { von: b, bis: a }
+})
+
+/**
+ * Liegt diese Fahrt im markierten Bereich? **Inklusive** beider Grenzen — wortgleich zur Engine.
+ * Laufen die beiden auseinander, fasst der Lauf eine andere Menge an als die hier hervorgehobene.
+ */
+function imBereich(trip: StopLinkTrip | null): boolean {
+  const grenzen = bereichGrenzen.value
+
+  if (trip === null || grenzen === null) {
+    return false
+  }
+
+  return (
+    vergleiche(schluessel(grenzen.von), schluessel(trip)) <= 0 &&
+    vergleiche(schluessel(trip), schluessel(grenzen.bis)) <= 0
+  )
+}
+
+function istGrenze(trip: StopLinkTrip | null): 'von' | 'bis' | null {
+  const grenzen = bereichGrenzen.value
+
+  if (trip === null || grenzen === null) {
+    return null
+  }
+  if (trip.id === grenzen.von.id) {
+    return 'von'
+  }
+  return trip.id === grenzen.bis.id ? 'bis' : null
 }
 
 function klickBeginnend(trip: StopLinkTrip): void {
@@ -229,7 +314,7 @@ function kurz(wendezeit: number | null): boolean {
       v-if="zeilen.length === 0"
       class="mt-3 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600"
     >
-      <template v-if="modeFilter !== null || lineFilter !== null">
+      <template v-if="modeFilter !== null || lineFilter.length > 0">
         Keine Fahrt passt zu diesem Filter. Setz ihn zurück, um alles zu sehen.
       </template>
       <template v-else>
@@ -250,9 +335,18 @@ function kurz(wendezeit: number | null): boolean {
               // Beim Ueberfahren wieder voll lesbar — aendern muss man sie ja koennen.
               : 'border-slate-100 bg-white opacity-55',
             selected === zeile.ending.id ? 'border-slate-800 ring-2 ring-slate-800' : '',
+            // Im Bereichsmodus ist jede Zeile anklickbar, auch eine entschiedene: Sie wird im
+            // Lauf uebersprungen, muss aber als Grenze waehlbar bleiben.
+            rangeMode ? 'cursor-pointer opacity-100' : '',
+            rangeMode && imBereich(zeile.ending)
+              ? 'border-l-4 border-l-emerald-500 bg-emerald-50/40'
+              : '',
           ]"
           @click="klickEndend(zeile.ending)"
         >
+          <div v-if="rangeMode && istGrenze(zeile.ending)" class="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-700">
+            {{ istGrenze(zeile.ending) === 'von' ? 'Start' : 'Ende' }}
+          </div>
           <div class="flex items-center gap-2">
             <LineBadge :line="signet(zeile.ending)" size="sm" />
             <!-- Der Kurs ist die eigentliche Auskunft dieser Ansicht: Er sagt, zu welchem

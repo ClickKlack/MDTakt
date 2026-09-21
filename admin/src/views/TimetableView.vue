@@ -2,9 +2,10 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
+import CourseSequencePanel from '../components/CourseSequencePanel.vue'
 import LineBadge from '../components/LineBadge.vue'
 import TimetableGrid from '../components/TimetableGrid.vue'
-import { assignCourse, detachCourse } from '../services/courses'
+import { assignCourse, detachCourse, type CourseSequenceResult } from '../services/courses'
 import { fetchLines, FAHRPLAN_TYPEN, type FahrplanTyp, type Line } from '../services/lines'
 import { fetchLineVersions, type LineVersion } from '../services/scheduleVersions'
 import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
@@ -173,6 +174,64 @@ async function ladeFahrplan(): Promise<void> {
   timetable.value = await fetchTimetable(selectedVersion.value)
 }
 
+// ---------------------------------------------------------------- Nummernfolge fortschreiben
+
+/**
+ * Nur **eine** Richtung kann gleichzeitig markiert sein: Eine Nummernfolge läuft innerhalb einer
+ * Richtung um, und zwei gleichzeitige Bereiche wären nicht anwendbar.
+ */
+const bereich = ref<{ key: string; von: number | null; bis: number | null } | null>(null)
+
+function schalteBereich(key: string): void {
+  bereich.value = bereich.value?.key === key ? null : { key, von: null, bis: null }
+}
+
+/** Erster Klick setzt die Startspalte, zweiter die letzte, dritter beginnt neu. */
+function waehleSpalte(tripId: number): void {
+  if (bereich.value === null) {
+    return
+  }
+
+  if (bereich.value.von === null) {
+    bereich.value = { ...bereich.value, von: tripId }
+    return
+  }
+
+  if (bereich.value.bis === null) {
+    bereich.value =
+      bereich.value.von === tripId
+        ? { ...bereich.value, von: null }
+        : { ...bereich.value, bis: tripId }
+    return
+  }
+
+  bereich.value = { ...bereich.value, von: tripId, bis: null }
+}
+
+async function folgeFertig(ergebnis: CourseSequenceResult): Promise<void> {
+  hinweis.value =
+    ergebnis.action === 'assign'
+      ? `${ergebnis.summary.written} Umläufe benummert — ${ergebnis.summary.trips_affected} Fahrten betroffen.` +
+        (ergebnis.summary.skipped > 0 ? ` ${ergebnis.summary.skipped} übersprungen.` : '') +
+        (ergebnis.summary.conflicts > 0
+          ? ` ${ergebnis.summary.conflicts} Umläufe blieben wegen widersprüchlicher Nummern unangetastet.`
+          : '')
+      : `Kursnummern von ${ergebnis.summary.trips_affected} Fahrten entfernt. Die Anschlüsse bleiben bestehen.`
+
+  if (ergebnis.warnings.length > 0) {
+    hinweis.value += ` ${ergebnis.warnings[0].message}`
+  }
+
+  bereich.value = null
+  await ladeFahrplan()
+}
+
+// Ein Versions-, Linien- oder Periodenwechsel zeigt andere Spalten — eine Markierung darin
+// wäre Zufall.
+watch([selectedVersion, selectedLine, dayType, selectedPeriod], () => {
+  bereich.value = null
+})
+
 watch([selectedLine, dayType], () => {
   if (!loading.value) {
     void loadVersions()
@@ -319,9 +378,44 @@ function gueltigkeit(version: LineVersion): string {
         :key="richtung.key"
         :direction="richtung"
         :busy="busy"
+        :range-mode="bereich?.key === richtung.key"
+        :range-from="bereich?.key === richtung.key ? bereich.von : null"
+        :range-to="bereich?.key === richtung.key ? bereich.bis : null"
         @assign="setzeKurs"
         @detach="loeseKurs"
-      />
+        @range-pick="waehleSpalte"
+      >
+        <template #werkzeuge>
+          <div class="mt-2 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              class="rounded-md border px-3 py-1.5 text-sm transition"
+              :class="
+                bereich?.key === richtung.key
+                  ? 'border-emerald-600 bg-emerald-600 font-medium text-white'
+                  : 'border-slate-300 text-slate-700 hover:border-slate-500'
+              "
+              @click="schalteBereich(richtung.key)"
+            >
+              {{ bereich?.key === richtung.key ? 'Fertig' : 'Kursnummern fortschreiben …' }}
+            </button>
+            <p v-if="bereich?.key !== richtung.key" class="max-w-2xl text-xs text-slate-500">
+              Laufen die Kurse dieser Linie in fester Abfolge (etwa 1–8), lässt sich das über einen Spaltenbereich
+              fortschreiben — statt jede Spalte einzeln zu tippen.
+            </p>
+          </div>
+
+          <CourseSequencePanel
+            v-if="bereich?.key === richtung.key && timetable"
+            :line-version-id="timetable.line_version.id"
+            :from-trip-id="bereich.von"
+            :to-trip-id="bereich.bis"
+            :busy="busy"
+            @done="folgeFertig"
+            @fehler="error = $event"
+          />
+        </template>
+      </TimetableGrid>
     </main>
   </div>
 </template>

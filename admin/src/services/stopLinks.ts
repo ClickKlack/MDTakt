@@ -134,3 +134,98 @@ export async function createTripLink(input: TripLinkInput): Promise<TripLinkResu
 export async function deleteTripLink(id: number): Promise<void> {
   await api.delete(`/api/v1/admin/trip-links/${id}`)
 }
+
+// ---------------------------------------------------------------- Mengen-Lauf über einen Zeitraum
+
+export type AutoLinkAction = 'link' | 'unlink'
+
+/** Ein geplanter oder angelegter Übergang. */
+export interface AutoLinkPair {
+  from_trip: StopLinkTrip
+  to_trip: StopLinkTrip
+  turnaround_seconds: number | null
+  warnings: { code: 'short_turnaround' | 'line_change'; message: string }[]
+  course: { id: number; number: string; lines: string[]; duplicate: boolean } | null
+  course_trips_assigned: number
+  /** Beide Ketten trugen bereits verschiedene Nummern — nichts wurde überschrieben. */
+  course_conflict: boolean
+}
+
+/** Eine Entscheidung, die aufgelöst wird. */
+export interface AutoLinkRemoval {
+  trip_link_id: number
+  kind: TripLinkKind
+  from_trip: StopLinkTrip | null
+  to_trip: StopLinkTrip | null
+  turnaround_seconds: number | null
+  /** Die Gegenfahrt liegt außerhalb des markierten Bereichs — gelöst wird trotzdem. */
+  partner_outside_range: boolean
+}
+
+export interface AutoLinkSkip {
+  side: 'ending' | 'starting'
+  trip: StopLinkTrip
+  partner: StopLinkTrip | null
+  reason_code: string
+  reason: string
+}
+
+export interface AutoLinkResult {
+  action: AutoLinkAction
+  stop_group: { id: number; name: string }
+  period: { id: number; label: string; status: 'current' | 'frozen' }
+  day_type: FahrplanTyp
+  day_type_label: string
+  stand: StopLinkStand | null
+  filter: {
+    lines: string[]
+    mode: 'tram' | 'bus' | null
+    from_trip_id: number
+    to_trip_id: number
+    min_turnaround_seconds: number
+    max_turnaround_seconds: number
+    include_terminals: boolean
+  }
+  /** Die konfigurierten Vorgabewerte — damit der Dialog sie nicht doppelt kennen muss. */
+  defaults: { min_turnaround_seconds: number; max_turnaround_seconds: number }
+  range: { from_trip: StopLinkTrip; to_trip: StopLinkTrip; trips: number }
+  summary: {
+    candidates: number
+    planned: number
+    created: number
+    removed: number
+    skipped: number
+    courses_unified: number
+    course_conflicts: number
+    applied: boolean
+  }
+  pairs: AutoLinkPair[]
+  removals: AutoLinkRemoval[]
+  skipped: AutoLinkSkip[]
+}
+
+export interface AutoLinkParams {
+  stop_group: number
+  period: number
+  day_type: FahrplanTyp
+  from_trip_id: number
+  to_trip_id: number
+  stand?: number | null
+  action?: AutoLinkAction
+  lines?: string[]
+  mode?: 'tram' | 'bus' | null
+  min_turnaround_minutes?: number
+  max_turnaround_minutes?: number
+  include_terminals?: boolean
+}
+
+/** Garantiert folgenlos — die Vorschau schreibt nichts. */
+export async function previewAutoLinks(params: AutoLinkParams): Promise<AutoLinkResult> {
+  const { data } = await api.get('/api/v1/admin/stop-links/auto', { params })
+  return data.data
+}
+
+export async function applyAutoLinks(params: AutoLinkParams): Promise<AutoLinkResult> {
+  const { data } = await api.post('/api/v1/admin/stop-links/auto', params)
+  return data.data
+}

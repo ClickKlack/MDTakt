@@ -866,6 +866,190 @@ components:
                   kind: { type: string, enum: [link, start, end] }
                   trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
 
+    CourseSequenceEntry:
+      type: object
+      required: [column, number, trip, chain_trip_ids, chain_trip_count, outside_range]
+      description: >
+        Eine geplante Kursvergabe bzw. -entnahme. Gefuehrt wird sie je **Kette**, nicht je Spalte:
+        Der Kurs ist ein Etikett am Umlauf, und `CourseService::assign()`/`detach()` schreiben
+        immer die ganze Kette (KURSE §2 K2). `column` nennt die Spalte, an der die Kette im
+        markierten Bereich haengt.
+      properties:
+        column:
+          type: integer
+          description: Nullbasierter Index in `direction.trips` — dieselbe Reihenfolge, die die Matrix zeigt.
+        number: { type: string, example: '03' }
+        trip: { $ref: '#/components/schemas/StopLinkTrip' }
+        chain_trip_ids:
+          type: array
+          items: { type: integer }
+        chain_trip_count: { type: integer }
+        outside_range:
+          type: array
+          description: >
+            Die Fahrten dieser Kette, die **nicht** im markierten Spaltenbereich liegen — die
+            Gegenrichtung, oder eine andere Linie der Kette. Sie werden mitgeschrieben, und genau
+            deshalb stehen sie hier: Vier markierte Spalten koennen zwoelf Fahrten treffen.
+          items: { $ref: '#/components/schemas/StopLinkTrip' }
+        course:
+          allOf: [{ $ref: '#/components/schemas/Course' }]
+          nullable: true
+          description: Nur beim Anwenden gesetzt; bei `action=clear` immer `null`.
+
+    CourseSequenceResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [action, line_version, direction, range, summary, unchanged, skipped, conflicts, warnings]
+          properties:
+            action:
+              type: string
+              enum: [assign, clear]
+              description: >
+                `assign` schreibt die Nummernfolge zyklisch ueber die markierten Spalten, `clear`
+                nimmt die Kursnummern wieder ab. **Nicht symmetrisch zu `unlink`:** `clear` nimmt
+                das Etikett und laesst die Kette stehen, `unlink` zerschneidet die Kette und laesst
+                das Etikett stehen. Beides folgt dem Bestand.
+            line_version:
+              type: object
+              properties:
+                id: { type: integer }
+                line: { type: string }
+                day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+                day_type_label: { type: string }
+                version_no: { type: integer }
+            direction:
+              type: object
+              description: >
+                Die Richtung, in der beide Markierungen liegen. Sie ist **kein Parameter**, sondern
+                folgt aus `from_trip_id`; liegt `to_trip_id` in einer anderen Richtung, ist das ein
+                422.
+              properties:
+                key: { type: string, description: '`first_stop_id>last_stop_id`' }
+                start_stop: { type: string }
+                end_stop: { type: string }
+                trip_count: { type: integer }
+            pattern:
+              type: object
+              nullable: true
+              description: '`null` bei `action=clear`.'
+              properties:
+                input: { type: string, example: '01-08' }
+                numbers:
+                  type: array
+                  description: >
+                    Die entfaltete Folge. **Fuehrende Nullen der Eingabe bleiben erhalten:**
+                    `01-08` ergibt `01`…`08`, `1-8` dagegen `1`…`8`. `courses.number` ist
+                    `varchar(8)`, und `03` und `3` sind zwei verschiedene Kurse.
+                  items: { type: string }
+                count: { type: integer }
+            range:
+              type: object
+              description: >
+                Der markierte Spaltenbereich, **inklusive** beider Grenzen. Verkehrt herum
+                markiert wird getauscht. Die Indizes gibt die Engine zurueck, damit das Frontend
+                seine eigene Rechnung dagegen pruefen kann.
+              properties:
+                from_trip_id: { type: integer }
+                to_trip_id: { type: integer }
+                from_index: { type: integer }
+                to_index: { type: integer }
+                columns: { type: integer }
+            summary:
+              type: object
+              properties:
+                columns: { type: integer, description: Markierte Spalten. }
+                planned: { type: integer, description: Ketten, die eine Nummer bekommen bzw. verlieren. }
+                trips_affected:
+                  type: integer
+                  description: >
+                    Fahrten, die dabei geschrieben werden — **groesser als `columns`**, weil die
+                    Kette mitzieht. Das ist die Zahl, die der ausfuehrende Knopf tragen muss.
+                outside_range: { type: integer }
+                unchanged: { type: integer }
+                skipped: { type: integer }
+                conflicts: { type: integer }
+                written: { type: integer, description: Nur beim Anwenden belegt (`action=assign`). }
+                removed: { type: integer, description: Nur beim Anwenden belegt (`action=clear`). }
+                applied: { type: boolean, description: '`false` bei der Vorschau — sie ist garantiert folgenlos.' }
+            assignments:
+              type: array
+              description: Nur bei `action=assign`.
+              items: { $ref: '#/components/schemas/CourseSequenceEntry' }
+            removals:
+              type: array
+              description: Nur bei `action=clear`.
+              items: { $ref: '#/components/schemas/CourseSequenceEntry' }
+            unchanged:
+              type: array
+              description: >
+                Die Kette traegt bereits genau die geplante Nummer. Kein Fehler — damit ist ein
+                zweiter Lauf folgenlos.
+              items:
+                type: object
+                properties:
+                  column: { type: integer }
+                  number: { type: string }
+                  trip: { $ref: '#/components/schemas/StopLinkTrip' }
+            skipped:
+              type: array
+              items:
+                type: object
+                required: [column, trip, reason_code, reason]
+                properties:
+                  column: { type: integer }
+                  number: { type: string, nullable: true }
+                  trip: { $ref: '#/components/schemas/StopLinkTrip' }
+                  reason_code:
+                    type: string
+                    enum: [already_assigned, no_course]
+                    description: >
+                      `already_assigned`: Die Kette traegt schon einen **anderen** Kurs — nie
+                      ueberschreiben, wer aendern will, entfernt erst. Geprueft wird auf
+                      Ketten-, nicht auf Fahrt-Ebene: `assign()` schriebe sonst still genau die
+                      Nummer weg, die geschont werden soll. `no_course`: bei `action=clear` eine
+                      Spalte ohne Kurs.
+                  reason: { type: string }
+            conflicts:
+              type: array
+              description: >
+                Zwei Fahrten **derselben Kette** sollen verschiedene Nummern bekommen. Sequenziell
+                geschrieben ueberschrieben sie sich gegenseitig, also wird die ganze Kette nicht
+                geschrieben. Dieselbe Nummer mehrfach auf einer Kette ist **kein** Konflikt — das
+                ist der Normalfall eines zyklischen Musters.
+              items:
+                type: object
+                properties:
+                  numbers:
+                    type: array
+                    items: { type: string }
+                  chain_trip_ids:
+                    type: array
+                    items: { type: integer }
+                  trips:
+                    type: array
+                    items: { $ref: '#/components/schemas/StopLinkTrip' }
+                  reason: { type: string }
+            warnings:
+              type: array
+              items:
+                type: object
+                required: [code, message]
+                properties:
+                  code:
+                    type: string
+                    enum: [number_style_mismatch, course_empty_after]
+                    description: >
+                      `number_style_mismatch`: Die Version traegt bereits Kurse mit anderer
+                      Nullpolsterung (`03` gegen `3`) — es entstuenden zwei Kurse, die fuer den
+                      Menschen derselbe sind. `course_empty_after`: Nach `clear` bleibt ein Kurs
+                      ohne jede Fahrt zurueck; er meldet sich dann in beiden Uebersichten als
+                      `duplicate`. Geloescht wird er **nicht** — dafuer gibt es
+                      `DELETE /api/v1/admin/courses/{course}`.
+                  message: { type: string }
+
     StopGroupStop:
       type: object
       required: [id, name, assigned_via]
@@ -1166,6 +1350,179 @@ components:
                 properties:
                   code: { type: string, enum: [short_turnaround, line_change, course_conflict] }
                   message: { type: string }
+
+    AutoTripLinkResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [action, stop_group, day_type, filter, defaults, range, summary, skipped]
+          properties:
+            action:
+              type: string
+              enum: [link, unlink]
+              description: >
+                `link` legt Anschluesse nach FIFO an, `unlink` loest die Anschluesse im Bereich
+                wieder auf. **Das Aufloesen fasst Kursnummern nicht an:** Die zerschnittene Kette
+                zerfaellt in zwei Teile, die beide weiter dieselbe Nummer tragen — gewollt, weil
+                die Zuordnung bewahrt und nicht geraten wird. Wer die Nummer auch los werden will,
+                nutzt `action=clear` an `course-sequence`.
+            stop_group:
+              type: object
+              properties:
+                id: { type: integer }
+                name: { type: string }
+            period:
+              type: object
+              properties:
+                id: { type: integer }
+                label: { type: string }
+                status: { type: string, enum: [current, frozen] }
+            day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+            day_type_label: { type: string }
+            stand:
+              allOf: [{ $ref: '#/components/schemas/StopLinkStand' }]
+              nullable: true
+            filter:
+              type: object
+              description: >
+                Der Lauf fasst **nur an, was der Filter zeigt** — das ist der Punkt der Funktion:
+                Ein Linienwechsel 1 -> 13 ist manchmal Absicht und manchmal nicht, und nur der
+                Pflegende weiss, welcher Fall vorliegt. Die Regel ist wortgleich zur Anzeige:
+                `mode` muss passen, und `lines` ist leer oder enthaelt die Linie der Fahrt.
+              properties:
+                lines:
+                  type: array
+                  description: Leer = alle Linien der Haltestelle. Mehrfachauswahl ist der Regelfall.
+                  items: { type: string }
+                mode:
+                  type: string
+                  enum: [tram, bus]
+                  nullable: true
+                  description: Verkehrsmittel-Filter. Nicht zu verwechseln mit `action`.
+                from_trip_id: { type: integer }
+                to_trip_id: { type: integer }
+                min_turnaround_seconds: { type: integer }
+                max_turnaround_seconds: { type: integer }
+                include_terminals:
+                  type: boolean
+                  description: >
+                    Nur bei `action=unlink`: Auch Aus- und Einruecken loesen. Vorgabe `false` —
+                    „Verbindungen aufloesen" meint die Anschluesse, und eine Betriebsfahrt ist
+                    eine eigenstaendige Aussage, die nicht nebenbei verschwinden soll.
+            defaults:
+              type: object
+              description: >
+                Die konfigurierten Vorgabewerte (`COURSE_MIN_TURNAROUND_MINUTES`,
+                `COURSE_MAX_TURNAROUND_MINUTES`), damit der Dialog sich daraus vorbelegen kann und
+                die Konfiguration nur an einer Stelle steht.
+              properties:
+                min_turnaround_seconds: { type: integer }
+                max_turnaround_seconds: { type: integer }
+            range:
+              type: object
+              nullable: true
+              description: >
+                Der markierte Bereich der **linken Spalte** (endende Fahrten), **inklusive** beider
+                Grenzen. Zugehoerigkeit ueber `arrival_sort`, bei Gleichstand ueber `id` — entlang
+                des Betriebstags, nie nach der Uhrzeit. Verkehrt herum markiert wird getauscht.
+                `null`, wenn eine Markierung nicht in der gefilterten Liste liegt; der Endpunkt
+                antwortet dann mit 422.
+              properties:
+                from_trip: { $ref: '#/components/schemas/StopLinkTrip' }
+                to_trip: { $ref: '#/components/schemas/StopLinkTrip' }
+                trips: { type: integer, description: Endende Fahrten im Bereich, nach Filter. }
+            summary:
+              type: object
+              properties:
+                candidates: { type: integer }
+                planned: { type: integer }
+                created: { type: integer, description: Nur beim Anwenden belegt (`action=link`). }
+                removed: { type: integer, description: Nur beim Anwenden belegt (`action=unlink`). }
+                skipped: { type: integer }
+                courses_unified:
+                  type: integer
+                  description: >
+                    Fahrten, auf die dabei eine Kursnummer uebertragen wurde. Zwei verknuepfte
+                    Fahrten sind dasselbe Fahrzeug, also derselbe Kurs (KURSE §2 K2).
+                course_conflicts:
+                  type: integer
+                  description: >
+                    Anschluesse, bei denen beide Ketten bereits **verschiedene** Nummern trugen.
+                    Es wird nichts ueberschrieben, der Anschluss bleibt trotzdem bestehen — er ist
+                    eine Aussage ueber das Fahrzeug, der Kurs nur sein Etikett.
+                applied: { type: boolean, description: '`false` bei der Vorschau — sie ist garantiert folgenlos.' }
+            pairs:
+              type: array
+              description: Nur bei `action=link`.
+              items:
+                type: object
+                required: [from_trip, to_trip]
+                properties:
+                  from_trip: { $ref: '#/components/schemas/StopLinkTrip' }
+                  to_trip: { $ref: '#/components/schemas/StopLinkTrip' }
+                  turnaround_seconds: { type: integer, nullable: true }
+                  warnings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string, enum: [short_turnaround, line_change] }
+                        message: { type: string }
+                  course:
+                    allOf: [{ $ref: '#/components/schemas/Course' }]
+                    nullable: true
+                  course_trips_assigned: { type: integer }
+                  course_conflict: { type: boolean }
+            removals:
+              type: array
+              description: Nur bei `action=unlink`.
+              items:
+                type: object
+                required: [trip_link_id, kind]
+                properties:
+                  trip_link_id: { type: integer }
+                  kind: { type: string, enum: [link, start, end] }
+                  from_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
+                  to_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
+                  turnaround_seconds: { type: integer, nullable: true }
+                  partner_outside_range:
+                    type: boolean
+                    description: >
+                      Die Gegenfahrt liegt ausserhalb des markierten Bereichs. Geloest wird
+                      trotzdem: Ein Anschluss steht in der Zeile seiner **endenden** Fahrt, und
+                      geloest wird, was man markiert sieht.
+            skipped:
+              type: array
+              items:
+                type: object
+                required: [side, trip, reason_code, reason]
+                properties:
+                  side: { type: string, enum: [ending, starting] }
+                  trip: { $ref: '#/components/schemas/StopLinkTrip' }
+                  partner:
+                    allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }]
+                    nullable: true
+                    description: Bei einer Ablehnung der gepruefte Kandidat.
+                  reason_code:
+                    type: string
+                    enum:
+                      [trip_decided, departure_decided, no_partner, not_decided, terminal_decision,
+                       same_trip, different_period, different_day_type, mode_change,
+                       stop_group_mismatch, no_common_validity, cycle, negative_turnaround]
+                    description: >
+                      Die letzten acht sind die Gruende, aus denen ein Anschluss unzulaessig ist —
+                      dieselben, die der Einzelklick mit 422 abweist. Im Lauf brechen sie nichts
+                      ab, sondern ueberspringen eine Zeile.
+
+
+                      `negative_turnaround` trifft am Morgen regelmaessig den Uebergang vom Nacht-
+                      auf das Tagnetz: Jede Seite traegt die Betriebstag-Grenze **ihrer eigenen**
+                      Linie, eine N1-Ankunft um 05:00 sortiert deshalb hinter eine Abfahrt der
+                      Linie 1 um 05:20. Kein Fehler dieser Funktion, aber der Grund, warum Nacht-
+                      und Taglinien selten gemeinsam im Filter stehen sollten.
+                  reason: { type: string }
 
     TimetableRow:
       type: object
@@ -1982,6 +2339,133 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/admin/line-versions/{lineVersion}/course-sequence:
+    parameters:
+      - name: lineVersion
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      operationId: previewCourseSequence
+      summary: Vorschau — Kursnummern ueber einen Spaltenbereich fortschreiben oder entfernen
+      description: >
+        **Garantiert folgenlos.** Schreibt eine erkannte Nummernfolge ueber die markierten Spalten
+        der Fahrplan-Matrix fort: Linie 6 faehrt die Kurse 1–8 in chronologischer Abfolge, und bei
+        gleichbleibendem Takt laesst sich das logisch fortsetzen, statt jede Spalte einzeln zu
+        tippen.
+
+
+        **Gearbeitet wird je Richtung.** Nur dort stehen die Fahrten in der Reihenfolge, in der die
+        Nummern umlaufen. Die Richtung ist kein Parameter — sie folgt aus `from_trip_id`; liegt
+        `to_trip_id` in einer anderen, ist das ein 422. Die Spaltenreihenfolge ist die der Matrix
+        (entlang des Betriebstags, nicht der Uhr).
+
+
+        **Die Nummer gehoert der Kette, nicht der Fahrt** (KURSE §2 K2). Geplant wird deshalb je
+        Kette, und eine Zuweisung zieht die ganze Kette mit — auch Fahrten der Gegenrichtung. Diese
+        stehen unter `outside_range`, und `summary.trips_affected` ist groesser als
+        `summary.columns`. Bei `action=clear` gilt dasselbe in die andere Richtung: `detach()`
+        raeumt die ganze Kette ab.
+
+
+        **Nie ueberschreiben.** Traegt eine Kette bereits einen anderen Kurs, wird sie uebersprungen
+        (`already_assigned`); traegt sie genau die geplante Nummer, zaehlt das als `unchanged`. Ein
+        zweiter Lauf ist damit folgenlos. Sollen zwei Fahrten **derselben** Kette verschiedene
+        Nummern bekommen, wird die Kette gar nicht geschrieben (`conflicts`) — welche die richtige
+        ist, weiss nur der Pflegende.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: from_trip_id
+          in: query
+          required: true
+          description: Die markierte **Startspalte** (`consolidated_trips.id`).
+          schema: { type: integer }
+        - name: to_trip_id
+          in: query
+          required: true
+          description: Die markierte **letzte Spalte**. Verkehrt herum markiert wird getauscht.
+          schema: { type: integer }
+        - name: action
+          in: query
+          required: false
+          description: Vorgabe `assign`.
+          schema: { type: string, enum: [assign, clear] }
+        - name: pattern
+          in: query
+          required: false
+          description: >
+            Die Nummernfolge, z. B. `1-8`, `31-35`, `01-08` oder `1-4, 7, 9-12`. Sie laeuft ab der
+            Startspalte **zyklisch** ueber die markierten Spalten. Pflicht bei `action=assign`,
+            ohne Wirkung bei `action=clear`.
+
+
+            **Fuehrende Nullen bleiben erhalten:** `01-08` ergibt `01`…`08`, `1-8` dagegen `1`…`8`.
+            `courses.number` ist `varchar(8)`, und `03` und `3` sind zwei verschiedene Kurse.
+          schema: { type: string, maxLength: 120, example: '01-08' }
+      responses:
+        '200':
+          description: Was der Lauf bewirken wuerde
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CourseSequenceResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: >
+            Unbekannte Fahrt, Fahrt aus einer anderen Version, Markierungen in verschiedenen
+            Richtungen, oder unlesbares Muster
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: applyCourseSequence
+      summary: Kursnummern setzen oder entfernen
+      description: >
+        Fuehrt aus, was die Vorschau angekuendigt hat, und antwortet in derselben Form — die Zahlen
+        sind dann die tatsaechlich geschriebenen. Der Plan wird neu gerechnet, weil zwischen
+        Vorschau und Anwenden etwas anderes geschrieben worden sein kann.
+
+
+        Geschrieben wird ueber die Ketten-Semantik (`findOrCreateForChain` + `assign`, bzw.
+        `detach`), nie roh in `course_trips`. **Mehrfach anwendbar:** Ein zweiter Lauf aendert
+        nichts mehr.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_trip_id, to_trip_id]
+              properties:
+                from_trip_id: { type: integer }
+                to_trip_id: { type: integer }
+                action: { type: string, enum: [assign, clear], default: assign }
+                pattern: { type: string, maxLength: 120, example: '01-08' }
+      responses:
+        '200':
+          description: Geschrieben
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CourseSequenceResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: >
+            Unbekannte Fahrt, Fahrt aus einer anderen Version, Markierungen in verschiedenen
+            Richtungen, oder unlesbares Muster
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/admin/courses:
     get:
       operationId: listCourses
@@ -2508,6 +2992,180 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: Unbekannte Haltestelle, unbekannte Periode, unbekannter Fahrplantyp oder Stand außerhalb des Bereichs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/stop-links/auto:
+    get:
+      operationId: previewAutoTripLinks
+      summary: Vorschau — Anschlüsse über einen Zeitraum automatisch verknüpfen oder auflösen
+      description: >
+        **Garantiert folgenlos.** Schreibt das Muster fort, das an einer Endstelle mit Takt
+        offensichtlich ist: Die Bahn kommt an und übernimmt die nächste Abfahrt. Über einen Morgen
+        hinweg wiederholt sich das dutzendfach identisch; jeden Übergang einzeln zu klicken ist
+        Fleißarbeit ohne eigene Aussage.
+
+
+        **Die Paarung ist FIFO.** Jede Ankunft im markierten Bereich bekommt die früheste noch
+        freie Abfahrt, deren Wendezeit zwischen `min_turnaround_minutes` und
+        `max_turnaround_minutes` liegt. Die Höchstwende ist der Abbruch: Reicht keine Abfahrt
+        heran, bleibt die Fahrt offen, statt über eine Taktlücke hinweg das falsche Fahrzeug zu
+        greifen. Wird ein Kandidat als unzulässig abgewiesen, rückt der nächste nach; erst wenn
+        keiner trägt, erscheint die Fahrt unter `skipped`.
+
+
+        **Der Filter entscheidet mit, und das ist der Punkt.** Ein Linienwechsel 1 -> 13 ist
+        manchmal Absicht und manchmal nicht. Verknüpft wird ausschließlich, was der Filter zeigt —
+        `lines` ist deshalb eine Mehrfachauswahl: 1 und 13 gemeinsam, die 6 daneben unberührt.
+
+
+        **Nie überschreiben.** Fahrten, die bereits eine Entscheidung tragen, werden übersprungen
+        und gemeldet; ein zweiter Lauf ist folgenlos. Nach jedem Anschluss läuft dieselbe
+        Kurs-Angleichung wie beim Einzelklick (KURSE §2 K2).
+
+
+        **`action=unlink` ist der Rückweg** über dieselbe Markierung: Es löst die Anschlüsse im
+        Bereich wieder auf. Kursnummern bleiben dabei stehen — die zerschnittene Kette zerfällt in
+        zwei Teile, die **beide** weiter dieselbe Nummer tragen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: stop_group
+          in: query
+          required: true
+          description: '`stop_groups.id` — die Haltestelle als Betriebspunkt.'
+          schema: { type: integer }
+        - name: period
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: day_type
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/FahrplanTyp' }
+        - name: stand
+          in: query
+          required: false
+          description: Index eines Versionsstands. Ohne Angabe wird vorausgewählt — wie am Board.
+          schema: { type: integer, minimum: 0 }
+        - name: from_trip_id
+          in: query
+          required: true
+          description: >
+            Die markierte **Startfahrt** der linken Spalte (endende Fahrten). Muss im aktiven
+            Filter liegen, sonst 422.
+          schema: { type: integer }
+        - name: to_trip_id
+          in: query
+          required: true
+          description: Die markierte **letzte Fahrt**. Verkehrt herum markiert wird getauscht.
+          schema: { type: integer }
+        - name: action
+          in: query
+          required: false
+          description: Vorgabe `link`.
+          schema: { type: string, enum: [link, unlink] }
+        - name: 'lines[]'
+          in: query
+          required: false
+          description: Linien, die mitlaufen. Ohne Angabe alle Linien der Haltestelle.
+          schema:
+            type: array
+            items: { type: string, maxLength: 8 }
+        - name: mode
+          in: query
+          required: false
+          description: Verkehrsmittel-Filter. Nicht zu verwechseln mit `action`.
+          schema: { type: string, enum: [tram, bus] }
+        - name: min_turnaround_minutes
+          in: query
+          required: false
+          description: Vorgabe aus `COURSE_MIN_TURNAROUND_MINUTES`. Nur bei `action=link`.
+          schema: { type: integer, minimum: 0, maximum: 600 }
+        - name: max_turnaround_minutes
+          in: query
+          required: false
+          description: >
+            Vorgabe aus `COURSE_MAX_TURNAROUND_MINUTES`. Darf nicht unter der Mindestwende liegen.
+            Nur bei `action=link`.
+          schema: { type: integer, minimum: 1, maximum: 600 }
+        - name: include_terminals
+          in: query
+          required: false
+          description: >
+            Nur bei `action=unlink`: auch Aus- und Einrücken lösen. Vorgabe `false` — eine
+            Betriebsfahrt ist eine eigenständige Aussage und soll nicht nebenbei verschwinden.
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Was der Lauf bewirken würde
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoTripLinkResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: >
+            Unbekannte Haltestelle/Periode/Fahrplantyp, Stand außerhalb des Bereichs, eine
+            Markierung liegt nicht in der gefilterten Liste, oder Höchstwende unter Mindestwende
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: applyAutoTripLinks
+      summary: Anschlüsse anlegen oder auflösen
+      description: >
+        Führt aus, was die Vorschau angekündigt hat, und antwortet in derselben Form — die Zahlen
+        sind dann die tatsächlich geschriebenen. Der Plan wird neu gerechnet, weil zwischen
+        Vorschau und Anwenden etwas anderes geschrieben worden sein kann.
+
+
+        Trägt eine Fahrt inzwischen doch eine Entscheidung, wird sie **übersprungen**, nicht mit
+        409 abgewiesen: Ein einzelner Zwischenfall darf einen Lauf über 40 Übergänge nicht
+        abbrechen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stop_group, period, day_type, from_trip_id, to_trip_id]
+              properties:
+                stop_group: { type: integer }
+                period: { type: integer }
+                day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+                stand: { type: integer, nullable: true, minimum: 0 }
+                from_trip_id: { type: integer }
+                to_trip_id: { type: integer }
+                action: { type: string, enum: [link, unlink], default: link }
+                lines:
+                  type: array
+                  items: { type: string, maxLength: 8 }
+                mode: { type: string, enum: [tram, bus], nullable: true }
+                min_turnaround_minutes: { type: integer, minimum: 0, maximum: 600 }
+                max_turnaround_minutes: { type: integer, minimum: 1, maximum: 600 }
+                include_terminals: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Geschrieben — `skipped` kann trotzdem belegt sein
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoTripLinkResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: >
+            Unbekannte Haltestelle/Periode/Fahrplantyp, Stand außerhalb des Bereichs, eine
+            Markierung liegt nicht in der gefilterten Liste, oder Höchstwende unter Mindestwende
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

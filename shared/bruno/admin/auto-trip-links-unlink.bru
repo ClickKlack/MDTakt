@@ -1,0 +1,127 @@
+meta {
+  name: Auto Trip Links (Aufloesen)
+  type: http
+  seq: 26
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/stop-links/auto
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "stop_group": 117,
+    "period": 1,
+    "day_type": "mo_fr",
+    "from_trip_id": 9835,
+    "to_trip_id": 9902,
+    "action": "unlink",
+    "lines": ["1", "13"],
+    "include_terminals": false
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.action: eq unlink
+  res.body.data.removals: isArray
+}
+
+script:post-response {
+  const d = res.body.data;
+  const s = d.summary;
+
+  if (s.removed !== d.removals.length) {
+    throw new Error("summary.removed " + s.removed + " passt nicht zu removals[] " + d.removals.length);
+  }
+  if (s.skipped !== d.skipped.length) {
+    throw new Error("summary.skipped passt nicht zur Liste");
+  }
+
+  // Beim Aufloesen wird nie etwas angelegt — die Gegenrichtung muss leer bleiben.
+  if (s.created !== 0 || (d.pairs || []).length !== 0) {
+    throw new Error("Ein Aufloesen meldet angelegte Anschluesse");
+  }
+
+  // Ohne den Schalter bleiben Aus- und Einruecken stehen.
+  if (!d.filter.include_terminals) {
+    for (const zeile of d.removals) {
+      if (zeile.kind !== "link") {
+        throw new Error("Entscheidung " + zeile.kind + " geloest, obwohl include_terminals aus ist");
+      }
+    }
+  }
+}
+
+docs {
+  # Anschluesse ueber einen Zeitraum aufloesen
+
+  Der Rueckweg zu `action=link`, ueber **dieselbe** Bereichsmarkierung und denselben Filter:
+  Startfahrt und letzte Fahrt in der linken Spalte anklicken, alle Verbindungen dazwischen werden
+  geloest. `GET` auf denselben Pfad mit `action=unlink` zeigt vorher, was das trifft.
+
+  ## Worauf zu achten ist
+
+  **Kursnummern bleiben stehen — und zwar an beiden Haelften.** Das ist keine Nachlaessigkeit,
+  sondern die Entscheidung des Bestands: Loest man einen Anschluss in der Mitte, bleibt der Kurs
+  an beiden Teilen haengen, weil die Zuordnung bewahrt und nicht geraten wird. Ein Umlauf muss
+  keine durchgehende Kette sein. Wer die Nummer auch los werden will, nutzt `action=clear` an
+  `line-versions/{id}/course-sequence`.
+
+  **Die beiden Loeschwege sind bewusst nicht symmetrisch:**
+
+  | Aktion | Kette | Kursnummer |
+  |---|---|---|
+  | `unlink` | zerschnitten | bleibt, an beiden Haelften |
+  | `clear`  | bleibt       | entfernt, ueber die ganze Kette |
+
+  **Aus- und Einruecken bleiben ohne `include_terminals` stehen.** „Verbindungen aufloesen" meint
+  die Anschluesse; eine Betriebsfahrt ist eine eigenstaendige Aussage und soll nicht nebenbei
+  verschwinden. Mit dem Schalter werden sie mitgeloest — das ist zugleich der einzige Weg, eine
+  falsch gesetzte `start`/`end`-Entscheidung wieder loszuwerden.
+
+  **Der Bereich ist der des Bildschirms.** Ein Anschluss wird in der Zeile seiner *endenden*
+  Fahrt angezeigt; zum Bereich gehoert er ueber deren `arrival_sort`. Liegt die zugehoerige
+  Abfahrt ausserhalb, wird trotzdem geloest — `partner_outside_range` sagt es vorher. Geloest
+  wird, was man markiert sieht.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": {
+      "action": "unlink",
+      "filter": { "lines": ["1", "13"], "include_terminals": false },
+      "summary": {
+        "candidates": 18, "planned": 12, "created": 0, "removed": 12, "skipped": 6,
+        "courses_unified": 0, "course_conflicts": 0, "applied": true
+      },
+      "removals": [
+        { "trip_link_id": 7, "kind": "link",
+          "from_trip": { "id": 9835, "line": "1", "arrival_time": "06:48:00" },
+          "to_trip":   { "id": 10412, "line": "13", "departure_time": "06:52:00" },
+          "turnaround_seconds": 240, "partner_outside_range": false }
+      ],
+      "skipped": [
+        { "side": "ending", "trip": { "id": 9877, "line": "1" }, "partner": null,
+          "reason_code": "not_decided",
+          "reason": "An dieser Fahrt haengt keine Entscheidung." },
+        { "side": "ending", "trip": { "id": 9851, "line": "1" }, "partner": null,
+          "reason_code": "terminal_decision",
+          "reason": "Die Fahrt rueckt ein. Betriebsfahrten werden nur mit „auch Aus-/Einruecken loesen" entfernt." }
+      ]
+    }
+  }
+  ```
+}

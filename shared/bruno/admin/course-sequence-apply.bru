@@ -1,0 +1,109 @@
+meta {
+  name: Course Sequence (Anwenden)
+  type: http
+  seq: 28
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/line-versions/201/course-sequence
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "from_trip_id": 9835,
+    "to_trip_id": 9902,
+    "action": "assign",
+    "pattern": "01-08"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.action: eq assign
+  res.body.data.summary.applied: eq true
+}
+
+script:post-response {
+  const d = res.body.data;
+  const s = d.summary;
+
+  if (s.written !== d.assignments.length) {
+    throw new Error("summary.written " + s.written + " passt nicht zu assignments[] " + d.assignments.length);
+  }
+  if (s.planned !== s.written) {
+    throw new Error("Beim Anwenden muessen planned und written uebereinstimmen");
+  }
+
+  // Ein Konflikt darf nie geschrieben worden sein — sonst gewaenne willkuerlich die letzte Nummer.
+  for (const a of d.assignments) {
+    for (const k of d.conflicts) {
+      if (k.chain_trip_ids.includes(a.trip.id)) {
+        throw new Error("Kette " + a.trip.id + " steht in conflicts und wurde trotzdem geschrieben");
+      }
+    }
+  }
+
+  // Geschrieben wird ueber die Ketten-Semantik: Jede Zuweisung traegt ihren Kurs zurueck.
+  for (const a of d.assignments) {
+    if (a.course === null || a.course.number !== a.number) {
+      throw new Error("Spalte " + a.column + " meldet keinen passenden Kurs");
+    }
+  }
+}
+
+docs {
+  # Kursnummern fortschreiben — Anwenden
+
+  Fuehrt aus, was `GET` auf denselben Pfad angekuendigt hat, und antwortet in derselben Form.
+  Der Plan wird **neu gerechnet**, weil zwischen Vorschau und Anwenden etwas anderes geschrieben
+  worden sein kann. Anzuzeigen sind die Zahlen dieser Antwort.
+
+  ## Worauf zu achten ist
+
+  **Geschrieben wird ueber die Ketten-Semantik**, nie roh in `course_trips`: je Kette
+  `findOrCreateForChain()` und `assign()`. Eine Nummer, die es im Strang noch nicht gibt, entsteht
+  dabei — wer sie am Fahrzeug abliest, soll sie eintippen und nicht erst einen Kurs anlegen
+  muessen.
+
+  **Nachgeschlagen wird linienbezogen** (KURSE §2 K3): Ein bestehender Kurs wird nur
+  wiederverwendet, wenn er mindestens eine Linie mit der Kette gemeinsam hat. Die „2" der Linie 8
+  ist ein anderer Umlauf als die „2" der Linie 6.
+
+  **Alles laeuft in einer Transaktion.** Entweder stehen alle Nummern oder keine.
+
+  **Mehrfach anwendbar.** Ein zweiter Lauf meldet alles als `unchanged` und schreibt nichts.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": {
+      "action": "assign",
+      "pattern": { "input": "01-08", "numbers": ["01","02","03","04","05","06","07","08"], "count": 8 },
+      "summary": {
+        "columns": 24, "planned": 16, "trips_affected": 31, "outside_range": 7,
+        "unchanged": 2, "skipped": 4, "conflicts": 1,
+        "written": 16, "removed": 0, "applied": true
+      },
+      "assignments": [
+        { "column": 0, "number": "01",
+          "trip": { "id": 9835, "line": "6" },
+          "chain_trip_ids": [9835, 10412], "chain_trip_count": 2,
+          "outside_range": [{ "id": 10412, "line": "6" }],
+          "course": { "id": 51, "number": "01", "lines": ["6"], "trip_count": 2 } }
+      ]
+    }
+  }
+  ```
+}

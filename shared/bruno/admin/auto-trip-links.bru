@@ -1,0 +1,188 @@
+meta {
+  name: Auto Trip Links (Vorschau)
+  type: http
+  seq: 24
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/stop-links/auto?stop_group=117&period=1&day_type=mo_fr&from_trip_id=9835&to_trip_id=9902&lines[]=1&lines[]=13
+  body: none
+  auth: bearer
+}
+
+params:query {
+  stop_group: 117
+  period: 1
+  day_type: mo_fr
+  from_trip_id: 9835
+  to_trip_id: 9902
+  lines[]: 1
+  lines[]: 13
+  ~stand: 0
+  ~mode: tram
+  ~min_turnaround_minutes: 3
+  ~max_turnaround_minutes: 20
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.action: eq link
+  res.body.data.summary.applied: eq false
+  res.body.data.pairs: isArray
+  res.body.data.skipped: isArray
+}
+
+script:post-response {
+  const d = res.body.data;
+  const s = d.summary;
+
+  if (s.planned !== d.pairs.length) {
+    throw new Error("summary.planned " + s.planned + " passt nicht zu pairs[] " + d.pairs.length);
+  }
+  if (s.skipped !== d.skipped.length) {
+    throw new Error("summary.skipped passt nicht zur Liste");
+  }
+
+  // Die Vorschau ist garantiert folgenlos — sie darf nie etwas geschrieben haben.
+  if (s.applied !== false || s.created !== 0) {
+    throw new Error("Die Vorschau meldet geschriebene Zeilen");
+  }
+
+  // Jede Abfahrt darf hoechstens einmal vergeben sein: Ein Fahrzeug hat einen Nachfolger.
+  const ziele = d.pairs.map(p => p.to_trip.id);
+  if (new Set(ziele).size !== ziele.length) {
+    throw new Error("Eine Abfahrt ist zweimal verplant");
+  }
+
+  // FIFO heisst: Die Paare stehen in Ankunftsreihenfolge, und keine Wendezeit faellt aus
+  // dem gewaehlten Fenster. Gerechnet wird ueber die Betriebstag-Sortierschluessel, nie
+  // ueber die Uhrzeit — auf der N1 folgt auf 23:20 eine Abfahrt um 00:19.
+  const min = d.filter.min_turnaround_seconds;
+  const max = d.filter.max_turnaround_seconds;
+
+  let vorher = -1;
+
+  for (const paar of d.pairs) {
+    if (paar.from_trip.arrival_sort < vorher) {
+      throw new Error("pairs[] steht nicht in Ankunftsreihenfolge");
+    }
+    vorher = paar.from_trip.arrival_sort;
+
+    const wende = paar.to_trip.departure_sort - paar.from_trip.arrival_sort;
+
+    if (wende !== paar.turnaround_seconds) {
+      throw new Error("turnaround_seconds passt nicht zu den Sortierschluesseln");
+    }
+    if (wende < min || wende > max) {
+      throw new Error("Wendezeit " + wende + " liegt ausserhalb von " + min + ".." + max);
+    }
+  }
+
+  // Der Filter ist die halbe Funktion: Was er nicht zeigt, darf der Lauf nicht anfassen.
+  if (d.filter.lines.length > 0) {
+    for (const paar of d.pairs) {
+      if (!d.filter.lines.includes(paar.from_trip.line) || !d.filter.lines.includes(paar.to_trip.line)) {
+        throw new Error("Ein Paar beruehrt eine Linie ausserhalb des Filters");
+      }
+    }
+  }
+}
+
+docs {
+  # Anschluesse automatisch verknuepfen — Vorschau
+
+  **Dieser Endpunkt ist garantiert folgenlos.** `POST` auf denselben Pfad fuehrt aus, was hier
+  steht, und antwortet in derselben Form — die Zahlen sind dann die tatsaechlich geschriebenen.
+
+  An einer Endstelle mit Takt ist das Muster offensichtlich: Die Bahn kommt an und uebernimmt die
+  naechste Abfahrt. Ueber einen Morgen hinweg wiederholt sich das dutzendfach identisch. Jeden
+  Uebergang einzeln zu klicken ist Fleissarbeit ohne eigene Aussage — genau die nimmt dieser
+  Endpunkt ab, begrenzt durch eine vom Menschen gesetzte Start- und Endfahrt.
+
+  Beispiel-Response (gekuerzt, Sudenburg):
+
+  ```json
+  {
+    "data": {
+      "action": "link",
+      "stop_group": { "id": 117, "name": "Sudenburg" },
+      "period": { "id": 1, "label": "Ausgangsperiode ab 15.08.2026", "status": "current" },
+      "day_type": "mo_fr",
+      "day_type_label": "Mo-Fr",
+      "stand": { "index": 1, "valid_from": "2026-09-21", "valid_to": "2026-09-28", "line_count": 2 },
+      "filter": {
+        "lines": ["1", "13"], "mode": null,
+        "from_trip_id": 9835, "to_trip_id": 9902,
+        "min_turnaround_seconds": 180, "max_turnaround_seconds": 1200,
+        "include_terminals": false
+      },
+      "defaults": { "min_turnaround_seconds": 180, "max_turnaround_seconds": 1200 },
+      "range": {
+        "from_trip": { "id": 9835, "line": "1", "arrival_time": "06:48:00", "arrival_sort": 24480 },
+        "to_trip":   { "id": 9902, "line": "1", "arrival_time": "09:42:00", "arrival_sort": 34920 },
+        "trips": 18
+      },
+      "summary": {
+        "candidates": 18, "planned": 16, "created": 0, "removed": 0, "skipped": 2,
+        "courses_unified": 0, "course_conflicts": 0, "applied": false
+      },
+      "pairs": [
+        { "from_trip": { "id": 9835, "line": "1", "arrival_time": "06:48:00", "arrival_sort": 24480 },
+          "to_trip":   { "id": 10412, "line": "13", "departure_time": "06:52:00", "departure_sort": 24720 },
+          "turnaround_seconds": 240,
+          "warnings": [{ "code": "line_change", "message": "Die Kette wechselt von Linie 1 auf Linie 13." }],
+          "course": null, "course_trips_assigned": 0, "course_conflict": false }
+      ],
+      "skipped": [
+        { "side": "ending", "trip": { "id": 9851, "line": "1" }, "partner": null,
+          "reason_code": "trip_decided",
+          "reason": "Die Fahrt traegt bereits eine Entscheidung (Einruecken)." },
+        { "side": "ending", "trip": { "id": 9877, "line": "1" }, "partner": null,
+          "reason_code": "no_partner",
+          "reason": "Innerhalb von 20 Minuten beginnt hier keine passende Fahrt." }
+      ]
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **Die Paarung ist FIFO.** Jede Ankunft im Bereich bekommt die frueheste noch freie Abfahrt,
+  deren Wendezeit zwischen Mindest- und Hoechstwende liegt. Die Hoechstwende ist der Abbruch:
+  Reicht keine Abfahrt heran, bleibt die Fahrt offen, statt ueber eine Taktluecke hinweg das
+  falsche Fahrzeug zu greifen. Wird ein Kandidat als unzulaessig abgewiesen, rueckt der naechste
+  nach; erst wenn keiner traegt, erscheint die Fahrt unter `skipped`.
+
+  **Der Filter entscheidet mit, und das ist der Punkt.** Ein Linienwechsel 1 -> 13 ist manchmal
+  Absicht und manchmal nicht — das weiss nur der Pflegende. `lines` ist deshalb eine
+  Mehrfachauswahl: 1 und 13 gemeinsam, die 6 daneben unberuehrt. Ohne `lines` laufen alle Linien
+  der Haltestelle mit.
+
+  **Der Bereich haengt an der linken Spalte.** `from_trip_id` und `to_trip_id` sind *endende*
+  Fahrten; zugehoerig ist, was nach `arrival_sort` dazwischenliegt, **inklusive** beider Grenzen,
+  bei Gleichstand nach `id`. Verkehrt herum markiert wird getauscht. Liegt eine Markierung nicht
+  in der gefilterten Liste, ist das ein 422 — sonst bearbeitete der Lauf etwas, das man gar nicht
+  sieht.
+
+  **Nie ueberschreiben.** Was bereits eine Entscheidung traegt, wird uebersprungen und gemeldet.
+  Ein zweiter Lauf ist deshalb folgenlos. Wer etwas aendern will, loest es erst — dafuer gibt es
+  `action=unlink`.
+
+  **`negative_turnaround` trifft am Morgen den Nacht-auf-Tag-Uebergang.** Jede Seite traegt die
+  Betriebstag-Grenze **ihrer eigenen** Linie: Eine N1-Ankunft um 05:00 sortiert hinter eine
+  Abfahrt der Linie 1 um 05:20, die Differenz ist stark negativ. Kein Fehler dieser Funktion,
+  aber der Grund, warum Nacht- und Taglinien selten gemeinsam im Filter stehen sollten.
+
+  **Die Kursnummer folgt dem Anschluss.** Nach jedem angelegten Uebergang laeuft dieselbe
+  Angleichung wie beim Einzelklick: Traegt eine Seite bereits eine Nummer, gilt sie fuer die ganze
+  zusammengewachsene Kette (KURSE §2 K2). Tragen beide **verschiedene**, wird nichts
+  ueberschrieben — `course_conflict` meldet es, der Anschluss bleibt bestehen.
+}

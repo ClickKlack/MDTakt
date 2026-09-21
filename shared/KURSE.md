@@ -1,7 +1,8 @@
 # Konzept: Kurse & Umläufe
 
-> **Stand: 2026-09-20.** Konzept für die Umlauf-Ebene: welche Fahrten dasselbe Fahrzeug
-> nacheinander fährt und welche Kursnummer dieser Umlauf trägt. Umsetzung als ROADMAP **I-14**.
+> **Stand: 2026-09-21.** Konzept für die Umlauf-Ebene: welche Fahrten dasselbe Fahrzeug
+> nacheinander fährt und welche Kursnummer dieser Umlauf trägt. Umsetzung als ROADMAP **I-14**,
+> die Mengen-Läufe (K7–K9) als **I-15**.
 > Die Sichtungs-API (I-04) liefert Kursnummern später **in dieses Gefüge hinein** — sie baut es nicht.
 
 ---
@@ -158,6 +159,91 @@ verbleibenden Abstände (201 m, 484 m, 612 m, 675 m) gehören zu **echten Betrie
 Aus- und Einrücken festgehalten und nicht zu einer Haltestelle verschmolzen werden. Der Abstand
 dient deshalb nur als **Vorschlag** im Editor (Umkreis 350 m), nie als Automatik.
 
+### K7 — FIFO paart, der Mensch begrenzt
+
+**Entschieden 21.09.2026.** An einer Endstelle mit Takt wiederholt sich derselbe Übergang über einen
+Morgen hinweg dutzendfach: Die Bahn kommt an und übernimmt die nächste Abfahrt. Das je Übergang von
+Hand zu klicken ist Fleißarbeit ohne eigene Aussage. Der Haltestellen-Editor bekommt deshalb einen
+Mengen-Lauf über einen markierten Zeitraum.
+
+**Gepaart wird nach FIFO:** Jede Ankunft im Bereich bekommt die früheste noch freie Abfahrt, deren
+Wendezeit zwischen einer Mindest- und einer **Höchstwende** liegt. Die Obergrenze ist keine
+Kosmetik, sondern der Abbruch — ohne sie griffe der Lauf in einer Taktlücke (Mittag, Betriebsende,
+Bereichsrand) nach einer Abfahrt zwei Stunden später und behauptete einen Umlauf, den es nicht gibt.
+Vorgabe `COURSE_MAX_TURNAROUND_MINUTES` = 20; bei den 10‑ und 20‑Minuten-Takten im Netz überspränge
+ein größeres Fenster einen ganzen Taktzyklus. Je Lauf einstellbar.
+
+**Die Grenzen setzt der Mensch, nicht die Automatik.** Das Muster bricht irgendwann — ab einer
+bestimmten Uhrzeit wird der Linienwechsel eben doch gefahren. Deshalb markiert der Pflegende Start-
+und Endfahrt, und deshalb **entscheidet sein Filter mit**: Verknüpft wird ausschließlich, was der
+Filter zeigt. Der Linienfilter wurde dafür von Einfach- auf **Mehrfachauswahl** erweitert — 1 und 13
+gemeinsam, die 6 daneben unberührt. Mit genau einer wählbaren Linie ließe sich der gewollte
+Linienwechsel nur über „Alle" automatisieren, und damit liefen alle übrigen Linien mit.
+
+Geprüft wird je Paar dieselbe Zulässigkeit wie beim Einzelklick (§4) — nur bricht ein Nein den Lauf
+nicht ab, sondern überspringt eine Zeile mit Begründung. Wird ein Kandidat abgewiesen, rückt der
+nächste nach; erst wenn keiner trägt, erscheint der Grund. Beim ersten Nein aufzugeben ließe an
+einer Haltestelle mit Tram und Bus die halbe Spalte liegen.
+
+**Geprüft wird gegen den laufenden Plan, nicht nur gegen die Datenbank.** Die erst geplanten Paare
+stehen im selben Kettengraphen; sonst vergäbe der Lauf dieselbe Abfahrt zweimal und liefe beim
+Schreiben in den Unique-Constraint statt in eine Meldung.
+
+Ein Sonderfall, der am Morgen regelmäßig auftritt und deshalb eigens gemeldet wird: Beim Übergang
+vom Nacht- auf das Tagnetz trägt jede Seite die Betriebstag-Grenze **ihrer eigenen** Linie. Eine
+N1-Ankunft um 05:00 sortiert hinter eine Abfahrt der Linie 1 um 05:20. „Keine Abfahrt in 20 Minuten"
+schickte den Pflegenden hier einen Datenfehler suchen, den es nicht gibt.
+
+### K8 — Die Nummernfolge läuft zyklisch über die markierten Spalten
+
+**Entschieden 21.09.2026.** Häufig läuft eine Linie ihre Kurse in fester chronologischer Abfolge:
+Die 6 fährt die Kurse 1–8, und bei gleichbleibendem Takt setzt sich das fort. Kennt der Pflegende
+die Menge der Nummern, schreibt er sie über einen markierten Spaltenbereich der Fahrplan-Matrix
+fort, statt jede Spalte einzeln zu tippen.
+
+**Je Richtung.** Nur dort stehen die Fahrten in der Reihenfolge, in der die Nummern umlaufen — über
+beide Richtungen hinweg wechselten sie einander ab und ergäben kein Muster. Die Richtung ist kein
+Parameter, sondern folgt aus der markierten Startfahrt; liegt die zweite Markierung woanders, wird
+abgewiesen.
+
+**Führende Nullen folgen der Eingabe.** `01-08` ergibt `01`…`08`, `1-8` dagegen `1`…`8`.
+`courses.number` ist `varchar(8)`; `03` und `3` sind zwei verschiedene Kurse, und geraten wird
+nichts. Weicht die Schreibweise vom Bestand der Linie ab, erscheint ein Hinweis — keine Schranke.
+
+**Geplant wird je Kette, nicht je Spalte** (folgt aus K2). Daraus folgt dreierlei: Eine Zuweisung
+zieht Fahrten mit, die gar nicht markiert sind (Gegenrichtung, andere Linie der Kette) — sie stehen
+als `outside_range` in der Vorschau, und die Zahl der betroffenen **Fahrten** ist größer als die der
+Spalten. Die „trägt schon einen Kurs"-Prüfung liegt auf Kettenebene, weil eine Zuweisung sonst still
+genau die Nummer wegschriebe, die geschont werden soll. Und sollen zwei Fahrten **derselben** Kette
+verschiedene Nummern bekommen, wird die Kette gar nicht geschrieben: Sequenziell ausgeführt gewänne
+willkürlich die letzte. Dieselbe Nummer mehrfach auf einer Kette ist dagegen der Normalfall eines
+zyklischen Musters — das Fahrzeug kommt eben wieder.
+
+### K9 — Auflösen und Entfernen sind zwei Richtungen, nicht eine
+
+**Entschieden 21.09.2026.** Beide Mengen-Läufe bekommen einen Rückweg über dieselbe Markierung. Sie
+sind aber **nicht spiegelbildlich**, und das ist keine Nachlässigkeit, sondern folgt aus K2:
+
+| Aktion | Kette | Kursnummer |
+|---|---|---|
+| Anschlüsse **auflösen** | zerschnitten | bleibt — an **beiden** Hälften |
+| Kursnummern **entfernen** | bleibt | entfernt, über die ganze Kette |
+
+Das Auflösen lässt die Nummer stehen, weil ein Umlauf keine durchgehende Kette sein muss: Die
+Zuordnung wird bewahrt und nicht geraten. Das Entfernen lässt die Kette stehen, weil sie die Aussage
+über das Fahrzeug ist und der Kurs nur ihr Etikett. Wer beides will, führt beides aus.
+
+Zwei Folgen, die sichtbar gemacht werden müssen: Das Entfernen wirkt über die ganze Kette — vier
+markierte Spalten können zwölf Fahrten treffen, und der Bedienknopf trägt deshalb die Zahl der
+Fahrten, nicht der Spalten. Und bleibt ein Kurs danach ohne jede Fahrt, ist seine Nummer zwar frei,
+die leere Hülle meldet sich aber als Dublette (sie hängt an keiner Linie und kollidiert mit jeder).
+Gelöscht wird sie **nicht** — das bleibt eine ausdrückliche Entscheidung über den Kurs-Endpunkt.
+
+Aus- und Einrücken bleiben beim Auflösen stehen, solange man sie nicht ausdrücklich einschließt:
+„Verbindungen auflösen" meint die Anschlüsse, und eine Betriebsfahrt ist eine eigenständige Aussage,
+die nicht nebenbei verschwinden soll. Der Schalter dafür schließt zugleich eine Lücke — bis dahin
+ließ sich eine einmal gesetzte `start`/`end`-Entscheidung in der Oberfläche gar nicht mehr lösen.
+
 ---
 
 ## 3. Datenmodell
@@ -276,6 +362,24 @@ die Grenze ihrer eigenen Linie.
 Nie lexikalisch vergleichen: Die GTFS-Spezifikation erlaubt `7:00:00` neben `07:00:00`, und als
 String ist `"7:00:00" > "23:50:00"`.
 
+### 4.1 Im Mengen-Lauf gelten dieselben Regeln — mit anderer Folge
+
+Die Zulässigkeitsprüfung liegt im `TripLinkRuleService` und wird von beiden Wegen benutzt. Sie
+**wirft nie**, sondern antwortet mit einem Grund; erst der Aufrufer entscheidet, was daraus wird:
+
+| | Einzelklick | Mengen-Lauf |
+|---|---|---|
+| Regelverstoß | 422, nichts geschieht | Zeile übersprungen, Grund gemeldet, Lauf läuft weiter |
+| Fahrt schon entschieden | 409 | Zeile übersprungen (`trip_decided`) |
+| Kurs-Widerspruch | Warnung, Anschluss bleibt | Warnung, Anschluss bleibt, gezählt in `course_conflicts` |
+
+Ein einzelner Zwischenfall darf einen Lauf über vierzig Übergänge nicht abbrechen. Gedoppelte
+Regeln liefen dagegen auseinander — und dann verknüpfte der Lauf, was der Einzelklick abweist.
+
+**Nie überschreiben, in beide Richtungen.** Was bereits eine Entscheidung oder eine Kursnummer
+trägt, wird übersprungen und gemeldet. Ein zweiter Lauf ist damit folgenlos. Wer etwas ändern will,
+löst oder entfernt es erst — dafür gibt es K9.
+
 ---
 
 ## 5. Offene Punkte
@@ -293,7 +397,8 @@ String ist `"7:00:00" > "23:50:00"`.
 
 ## 6. Bezug
 
-- ROADMAP **I-14**; schließt I-13 (D) „Kurs je Fahrt anzeigen".
+- ROADMAP **I-14** (Pflege je Übergang), **I-15** (Mengen-Läufe, K7–K9); schließt I-13 (D)
+  „Kurs je Fahrt anzeigen".
 - Versionen und Perioden: [`FAHRPLANPERIODEN.md`](FAHRPLANPERIODEN.md) §4, §5.4, §6.
 - Sichtungs-Anbindung: [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §4,
   [`MDKURSTRACKER_REQUIREMENTS.md`](MDKURSTRACKER_REQUIREMENTS.md) (Annahme E2 durch K3 korrigiert).

@@ -4,27 +4,24 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
-use App\Enums\RouteType;
 use App\Enums\TripLinkKind;
 use App\Models\ConsolidatedTrip;
-use App\Models\LineVersionInterval;
-use App\Services\StopGroupService;
-use App\Services\TripLinkService;
+use App\Services\TripLinkRuleService;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
  * Validiert eine Umlauf-Entscheidung (KURSE §4).
  *
- * Die fachlichen Prüfungen liegen bewusst hier und nicht im Service: So landet jeder Verstoß
- * im einheitlichen 422-Envelope mit einer deutschen Meldung, statt als Exception.
+ * **Hier wird aus einem Verstoß ein 422** — mit einer deutschen Meldung im einheitlichen
+ * Envelope, statt als Exception. Die Regeln selbst liegen im {@see TripLinkRuleService}: Der
+ * Mengen-Lauf über einen ganzen Zeitraum braucht dieselben Prüfungen, darf aber nicht abbrechen,
+ * sondern überspringt eine Zeile. Gedoppelt liefen die beiden Fassungen auseinander, und dann
+ * verknüpfte der Lauf etwas, das dieser Request abweist.
  *
- * Nicht geprüft wird der **Linienwechsel** — eine 1 wird in Sudenburg zur 13, das ist der
- * Normalfall einer Fahrzeugkette (K1). Er erscheint als Hinweis im Ergebnis, nicht als Fehler.
- *
- * Der **Gattungswechsel** dagegen wird abgewiesen: Ein Fahrzeug wird nie vom Tram zum Bus.
- * Beides auseinanderzuhalten ist wesentlich, weil dieselbe Linie beides sein kann — N2 liegt
- * zeitweise als Tram und als Bus vor (Schienenersatzverkehr).
+ * Was hier bleibt, ist die Formregel: Welche Fahrt eine Entscheidung trägt, folgt aus ihrer Art.
+ * Eine `start`-Zeile mit Vorgänger wäre ein Widerspruch in sich, und das hat mit der
+ * Zulässigkeit eines Anschlusses nichts zu tun.
  */
 final class TripLinkRequest extends ApiFormRequest
 {
@@ -88,131 +85,13 @@ final class TripLinkRequest extends ApiFormRequest
 
     private function pruefeAnschluss(Validator $validator, ConsolidatedTrip $von, ConsolidatedTrip $nach): void
     {
-        if ($von->id === $nach->id) {
-            $validator->errors()->add('to_trip_id', 'Eine Fahrt kann nicht an sich selbst anschließen.');
+        $grund = app(TripLinkRuleService::class)->rejectionFor($von, $nach);
 
-            return;
+        if ($grund !== null) {
+            // Alle Ablehnungen hängen am selben Feld: Sie betreffen die Paarung, nicht eine
+            // einzelne Angabe — und die zweite Fahrt ist die, die der Pflegende gerade wählt.
+            $validator->errors()->add('to_trip_id', $grund->message);
         }
-
-        $vonVersion = $von->lineVersion;
-        $nachVersion = $nach->lineVersion;
-
-        if ($vonVersion->period_id !== $nachVersion->period_id) {
-            $validator->errors()->add('to_trip_id', 'Die Fahrten gehören zu verschiedenen Fahrplanperioden.');
-
-            return;
-        }
-
-        if ($vonVersion->day_type !== $nachVersion->day_type) {
-            $validator->errors()->add('to_trip_id', 'Die Fahrten gehören zu verschiedenen Fahrplantypen.');
-
-            return;
-        }
-
-        // Ein Fahrzeug wechselt die Gattung nicht. Der Linienwechsel ist erlaubt und der
-        // Normalfall (K1) — eine Tram wird aber nie zum Bus. Das Verkehrsmittel hängt an der
-        // Fahrt, nicht an der Linie: N2 liegt zeitweise als Tram und als Bus vor
-        // (Schienenersatzverkehr), und genau dort träfe die Verwechslung zu.
-        $vonMittel = RouteType::modeFor($von->route_type);
-        $nachMittel = RouteType::modeFor($nach->route_type);
-
-        if ($vonMittel !== $nachMittel) {
-            $validator->errors()->add(
-                'to_trip_id',
-                sprintf(
-                    'Ein Fahrzeug wechselt die Gattung nicht: Die erste Fahrt ist %s, die zweite %s.',
-                    $this->mittelName($vonMittel),
-                    $this->mittelName($nachMittel),
-                ),
-            );
-
-            return;
-        }
-
-        // Geprüft wird die **Haltestelle**, nicht der einzelne Halt. An einer Endstelle liegen
-        // Ankunft und Abfahrt oft auf verschiedenen Punkten: An „Herrenkrug" enden Fahrten auf
-        // dem einen Bahnsteig und beginnen 72 m weiter auf dem anderen. Netzweit sind 64 von
-        // 104 Endstellen so gebaut — auf Halt-Identität zu prüfen hieße, an über der Hälfte
-        // aller Fahrt-Endpunkte keinen Anschluss zulassen zu können (KURSE §3.1).
-        $gruppen = app(StopGroupService::class);
-
-        $ende = $von->last_stop_id === null ? null : $gruppen->groupIdFor($von->last_stop_id);
-        $anfang = $nach->first_stop_id === null ? null : $gruppen->groupIdFor($nach->first_stop_id);
-
-        if ($ende === null || $anfang === null || $ende !== $anfang) {
-            $validator->errors()->add(
-                'to_trip_id',
-                'Die zweite Fahrt beginnt nicht an der Haltestelle, an der die erste endet. '
-                .'Gehören die beiden Bahnsteige zusammen, sind sie unter „Haltestellen" derselben Haltestelle zuzuordnen.',
-            );
-
-            return;
-        }
-
-        // Überschneiden sich die Gültigkeiten an keinem Tag, könnte der Anschluss nie
-        // zustande kommen — die beiden Fahrpläne standen nie gleichzeitig in Kraft.
-        if (! $this->gueltigkeitenUeberschneidenSich($vonVersion->id, $nachVersion->id)) {
-            $validator->errors()->add(
-                'to_trip_id',
-                'Die Fahrplan-Versionen der beiden Fahrten gelten an keinem gemeinsamen Tag.',
-            );
-
-            return;
-        }
-
-        $links = app(TripLinkService::class);
-
-        if ($links->wouldCreateCycle($von->id, $nach->id)) {
-            $validator->errors()->add('to_trip_id', 'Dieser Anschluss würde die Kette zu einem Ring schließen.');
-
-            return;
-        }
-
-        $wendezeit = $links->turnaroundSeconds($von, $nach);
-
-        if ($wendezeit !== null && $wendezeit < 0) {
-            $validator->errors()->add(
-                'to_trip_id',
-                'Die zweite Fahrt beginnt vor dem Ende der ersten — das ergibt eine negative Wendezeit.',
-            );
-        }
-    }
-
-    private function mittelName(string $mode): string
-    {
-        return match ($mode) {
-            'tram' => 'eine Tram',
-            'bus' => 'ein Bus',
-            default => 'ein anderes Verkehrsmittel',
-        };
-    }
-
-    /**
-     * Überschneiden sich die beobachteten Gültigkeiten zweier Versionen an mindestens einem Tag?
-     *
-     * Bewusst in PHP statt als SQL-Join: Die `date`-Spalten tragen unter SQLite eine Uhrzeit,
-     * unter PostgreSQL nicht (siehe CLAUDE.md). Ein Spaltenvergleich in SQL wäre damit von der
-     * Schreibweise abhängig. Je Version stehen ohnehin nur wenige Intervalle an.
-     */
-    private function gueltigkeitenUeberschneidenSich(int $vonVersionId, int $nachVersionId): bool
-    {
-        $intervalle = LineVersionInterval::query()
-            ->whereIn('line_version_id', [$vonVersionId, $nachVersionId])
-            ->get()
-            ->groupBy('line_version_id');
-
-        $a = $intervalle->get($vonVersionId, collect());
-        $b = $intervalle->get($nachVersionId, collect());
-
-        foreach ($a as $links) {
-            foreach ($b as $rechts) {
-                if ($links->valid_from <= $rechts->valid_to && $rechts->valid_from <= $links->valid_to) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     public function kind(): TripLinkKind

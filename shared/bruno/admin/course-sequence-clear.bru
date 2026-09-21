@@ -1,0 +1,125 @@
+meta {
+  name: Course Sequence (Entfernen)
+  type: http
+  seq: 29
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/line-versions/201/course-sequence
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "from_trip_id": 9835,
+    "to_trip_id": 9902,
+    "action": "clear"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.action: eq clear
+  res.body.data.removals: isArray
+}
+
+script:post-response {
+  const d = res.body.data;
+  const s = d.summary;
+
+  if (s.removed !== d.removals.length) {
+    throw new Error("summary.removed " + s.removed + " passt nicht zu removals[] " + d.removals.length);
+  }
+
+  // Beim Entfernen wird nie etwas gesetzt.
+  if (s.written !== 0 || (d.assignments || []).length !== 0) {
+    throw new Error("Ein Entfernen meldet gesetzte Kursnummern");
+  }
+
+  // Ohne Muster gibt es keine Folge.
+  if (d.pattern !== null) {
+    throw new Error("clear darf kein pattern zurueckgeben");
+  }
+
+  // Die eigentliche Ueberraschung dieser Aktion: detach() raeumt die ganze Kette ab.
+  // trips_affected muss das zeigen, sonst loescht der Knopf mehr, als er ankuendigt.
+  const betroffen = d.removals.reduce((n, r) => n + r.chain_trip_count, 0);
+  if (betroffen !== s.trips_affected) {
+    throw new Error("summary.trips_affected " + s.trips_affected + " passt nicht zu den Ketten " + betroffen);
+  }
+}
+
+docs {
+  # Kursnummern ueber einen Spaltenbereich entfernen
+
+  Der Rueckweg zu `action=assign`, ueber **dieselbe** Spaltenmarkierung: Startspalte und
+  Endspalte anklicken, bei allen Fahrten dazwischen werden die Kursnummern entfernt. `GET` auf
+  denselben Pfad mit `action=clear` zeigt vorher, was das trifft. `pattern` entfaellt.
+
+  ## Worauf zu achten ist
+
+  **Diese Aktion wirkt ueber die Kette hinaus — das ist ihre eigentliche Ueberraschung.**
+  `detach()` entfernt die Nummer von **allen** Fahrten der Kette, auch von denen in der
+  Gegenrichtung oder auf einer anderen Linie. Wer vier Spalten markiert, loescht unter Umstaenden
+  die Nummer von zwoelf Fahrten. `outside_range` je Kette und `trips_affected` in der `summary`
+  machen das vorher sichtbar; ein Bedienknopf muss `trips_affected` tragen, nicht die Spaltenzahl.
+
+  **Anschluesse bleiben unangetastet.** `clear` nimmt das Etikett ab, nicht die Kette — der Umlauf
+  bleibt verkettet und kann sofort neu benummert werden.
+
+  **Die beiden Loeschwege sind bewusst nicht symmetrisch:**
+
+  | Aktion | Kette | Kursnummer |
+  |---|---|---|
+  | `unlink` (an `stop-links/auto`) | zerschnitten | bleibt, an beiden Haelften |
+  | `clear` | bleibt | entfernt, ueber die ganze Kette |
+
+  **Der Umlauf selbst bleibt bestehen.** `detach()` loest nur die Zuordnung; die Nummer ist damit
+  nicht verbraucht und kann erneut vergeben werden. Bleibt ein Kurs dabei ohne jede Fahrt, meldet
+  ihn `course_empty_after`: Eine leere Huelle haengt an keiner Linie und kollidiert deshalb in
+  beiden Uebersichten mit jedem gleichnamigen Kurs. Geloescht wird sie hier **nicht** — dafuer
+  gibt es `DELETE /api/v1/admin/courses/{course}`.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": {
+      "action": "clear",
+      "pattern": null,
+      "range": { "from_trip_id": 9835, "to_trip_id": 9902, "from_index": 0, "to_index": 23, "columns": 24 },
+      "summary": {
+        "columns": 24, "planned": 12, "trips_affected": 27, "outside_range": 9,
+        "unchanged": 0, "skipped": 12, "conflicts": 0,
+        "written": 0, "removed": 12, "applied": true
+      },
+      "removals": [
+        { "column": 0, "number": "01",
+          "trip": { "id": 9835, "line": "6", "departure_time": "05:04:00" },
+          "chain_trip_ids": [9835, 10412], "chain_trip_count": 2,
+          "outside_range": [{ "id": 10412, "line": "6", "departure_time": "05:48:00" }],
+          "course": null }
+      ],
+      "skipped": [
+        { "column": 4, "number": null, "trip": { "id": 9866, "line": "6" },
+          "reason_code": "no_course",
+          "reason": "Diese Fahrt gehoert zu keinem Umlauf." }
+      ],
+      "warnings": [
+        { "code": "course_empty_after",
+          "message": "3 Umlaeufe bleiben danach ohne Fahrten (01, 02, 03). Sie melden sich als Dublette, bis sie unter „Kurse\" geloescht werden." }
+      ]
+    }
+  }
+  ```
+}

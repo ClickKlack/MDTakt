@@ -8,6 +8,7 @@ use App\Enums\TripLinkKind;
 use App\Http\Requests\TripLinkRequest;
 use App\Models\ConsolidatedTrip;
 use App\Models\TripLink;
+use App\Support\TripChainGraph;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -203,6 +204,65 @@ final class TripLinkService
         }
 
         return [...$rueckwaerts, $trip->id, ...$vorwaerts];
+    }
+
+    /**
+     * Die Ketten rund um eine Menge von Fahrten — **einmal geladen**, statt je Sprung gefragt.
+     *
+     * Für einen Einzelklick ist {@see chainFor()} richtig: zwei, drei Abfragen, immer aktuell.
+     * Ein Mengen-Lauf über 60 Ankünfte oder 120 Fahrplanspalten löst damit tausende aus, und —
+     * schwerer wiegend — er sieht seine **eigenen, erst geplanten** Paare nicht. Der Graph nimmt
+     * sie auf ({@see TripChainGraph::link()}) und prüft Ringe und Belegung dagegen mit.
+     *
+     * Ausgehend von der Saat wird über die gefundenen Partner expandiert, bis nichts Neues mehr
+     * dazukommt: Eine Kette reicht über die Saat hinaus, und eine halbe Kette beantwortete die
+     * Frage „gehört diese Fahrt schon zu einem Umlauf?" falsch.
+     *
+     * @param  array<int, int>  $seedTripIds
+     */
+    public function graphFor(array $seedTripIds): TripChainGraph
+    {
+        $offen = array_values(array_unique(array_filter($seedTripIds)));
+        $bekannt = [];
+        $zeilen = [];
+        $gesehene = [];
+
+        while ($offen !== []) {
+            $gefunden = [];
+
+            foreach (array_chunk($offen, 500) as $teil) {
+                $treffer = DB::table('trip_links')
+                    ->where(function ($q) use ($teil): void {
+                        $q->whereIn('from_trip_id', $teil)->orWhereIn('to_trip_id', $teil);
+                    })
+                    ->get(['id', 'from_trip_id', 'to_trip_id']);
+
+                foreach ($treffer as $zeile) {
+                    // Eine Zeile wird über beide Enden gefunden — ohne dieses Set stünde sie
+                    // zweimal im Graphen und die Expansion liefe im Kreis.
+                    if (isset($gesehene[$zeile->id])) {
+                        continue;
+                    }
+
+                    $gesehene[$zeile->id] = true;
+                    $zeilen[] = $zeile;
+
+                    foreach ([$zeile->from_trip_id, $zeile->to_trip_id] as $partner) {
+                        if ($partner !== null) {
+                            $gefunden[(int) $partner] = true;
+                        }
+                    }
+                }
+            }
+
+            foreach ($offen as $id) {
+                $bekannt[$id] = true;
+            }
+
+            $offen = array_values(array_diff(array_keys($gefunden), array_keys($bekannt)));
+        }
+
+        return TripChainGraph::fromRows($zeilen);
     }
 
     /**

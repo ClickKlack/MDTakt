@@ -1,0 +1,112 @@
+meta {
+  name: Auto Trip Links (Anwenden)
+  type: http
+  seq: 25
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/stop-links/auto
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "stop_group": 117,
+    "period": 1,
+    "day_type": "mo_fr",
+    "from_trip_id": 9835,
+    "to_trip_id": 9902,
+    "action": "link",
+    "lines": ["1", "13"],
+    "min_turnaround_minutes": 3,
+    "max_turnaround_minutes": 20
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.action: eq link
+  res.body.data.summary.applied: eq true
+}
+
+script:post-response {
+  const d = res.body.data;
+  const s = d.summary;
+
+  if (s.created !== d.pairs.length) {
+    throw new Error("summary.created " + s.created + " passt nicht zu pairs[] " + d.pairs.length);
+  }
+  if (s.skipped !== d.skipped.length) {
+    throw new Error("summary.skipped passt nicht zur Liste");
+  }
+  if (s.planned !== s.created) {
+    throw new Error("Beim Anwenden muessen planned und created uebereinstimmen");
+  }
+
+  // course_conflicts muss zaehlen, was die Paare melden — sonst verschwindet ein
+  // Widerspruch in einer Zahl, die niemand nachrechnen kann.
+  const konflikte = d.pairs.filter(p => p.course_conflict).length;
+  if (konflikte !== s.course_conflicts) {
+    throw new Error("summary.course_conflicts passt nicht zu den Paaren");
+  }
+}
+
+docs {
+  # Anschluesse automatisch verknuepfen — Anwenden
+
+  Fuehrt aus, was `GET` auf denselben Pfad angekuendigt hat, und antwortet in derselben Form.
+  Der Plan wird dabei **neu gerechnet**: Zwischen Vorschau und Anwenden kann jemand anderes etwas
+  geschrieben haben. Anzuzeigen sind deshalb die Zahlen dieser Antwort, nicht die der Vorschau.
+
+  ## Worauf zu achten ist
+
+  **Ein Zwischenfall bricht den Lauf nicht ab.** Traegt eine Fahrt inzwischen doch eine
+  Entscheidung, wird sie uebersprungen und erscheint unter `skipped` — nicht als 409 wie beim
+  Einzelklick. Ein Lauf ueber 40 Uebergaenge darf nicht an der einen Zeile scheitern, die jemand
+  in der Zwischenzeit gesetzt hat.
+
+  **Alles laeuft in einer Transaktion.** Entweder stehen alle Anschluesse oder keiner.
+
+  **Mehrfach anwendbar.** Ein zweiter Lauf legt nichts an: Alle Fahrten tragen dann eine
+  Entscheidung und landen unter `skipped` mit `trip_decided`.
+
+  **Die Kurs-Angleichung laeuft mit.** `courses_unified` nennt die Fahrten, auf die dabei eine
+  bestehende Kursnummer uebertragen wurde. Das ist keine Eigenmaechtigkeit, sondern folgt aus der
+  Verknuepfung: Zwei verknuepfte Fahrten sind dasselbe Fahrzeug, also derselbe Kurs (KURSE §2 K2).
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": {
+      "action": "link",
+      "summary": {
+        "candidates": 18, "planned": 16, "created": 16, "removed": 0, "skipped": 2,
+        "courses_unified": 4, "course_conflicts": 1, "applied": true
+      },
+      "pairs": [
+        { "from_trip": { "id": 9835, "line": "1" }, "to_trip": { "id": 10412, "line": "13" },
+          "turnaround_seconds": 240,
+          "warnings": [{ "code": "line_change", "message": "Die Kette wechselt von Linie 1 auf Linie 13." }],
+          "course": { "id": 42, "number": "03", "lines": ["1", "13"] },
+          "course_trips_assigned": 2, "course_conflict": false }
+      ],
+      "skipped": [
+        { "side": "ending", "trip": { "id": 9851, "line": "1" }, "partner": null,
+          "reason_code": "trip_decided",
+          "reason": "Die Fahrt traegt bereits eine Entscheidung (Einruecken)." }
+      ]
+    }
+  }
+  ```
+}

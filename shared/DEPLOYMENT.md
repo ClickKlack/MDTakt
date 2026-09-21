@@ -34,6 +34,32 @@ nicht. Deshalb lohnt der Live-Betrieb, sobald Backup und Archiv stehen — unabh
 
 ---
 
+### 1a. Composer löst gegen die *lokale* PHP-Version auf
+
+`composer update` wählt Paketversionen passend zu dem PHP, das auf dem ausführenden Rechner
+läuft — nicht zu dem des Zielsystems. Ist der Entwicklungsrechner neuer als der Server, landen
+Pakete in der `composer.lock`, die dort nicht installierbar sind. Das fällt erst beim Deployment
+auf, mitten im `composer install` auf dem Server.
+
+Beide PHP-Projekte legen die Zielplattform deshalb in `composer.json` fest:
+
+| Projekt | `config.platform.php` | Warum dieser Wert |
+|---|---|---|
+| `engine` | `8.4.24` | gemessene PHP-Version des Hosting-Pakets |
+| `collector` | `8.4.0` | läuft im Container auf `php:8.4-cli-alpine` — ein **gleitender** Tag; der Rebuild kann jeden Patchstand der 8.4er-Linie ziehen, also gilt der Branch-Boden |
+
+Damit löst `composer update` überall so auf, wie das Zielsystem es installieren kann. Der Wert ist
+eine reine Auflösungsvorgabe — lokal darf ruhig ein neueres PHP laufen.
+
+**Beim Wechsel der Server-PHP-Version den Pin nachziehen**, sonst bleiben Pakete unnötig alt.
+Die tatsächliche Version zeigt `ssh <ziel> 'php -v'`; ob eine Lockfile zu einer Version passt,
+beantwortet `composer why-not php <version>`.
+
+> Sauberer wäre beim Collector ein exakter Patch-Tag im `Dockerfile` statt `php:8.4-cli-alpine`.
+> Dann wäre der Rebuild reproduzierbar und der Pin könnte dem Image exakt folgen.
+
+---
+
 ## 2. Engine
 
 ```bash

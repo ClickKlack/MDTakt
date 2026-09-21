@@ -27,7 +27,10 @@
     },
     "bin": ["bin/collector"],
     "config": {
-        "sort-packages": true
+        "sort-packages": true,
+        "platform": {
+            "php": "8.4.0"
+        }
     },
     "minimum-stability": "stable",
     "prefer-stable": true

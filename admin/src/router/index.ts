@@ -12,6 +12,7 @@ import TimetableView from '../views/TimetableView.vue'
 import ScheduleDiffView from '../views/ScheduleDiffView.vue'
 import StopLinksView from '../views/StopLinksView.vue'
 import StopGroupsView from '../views/StopGroupsView.vue'
+import CoursesView from '../views/CoursesView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -30,6 +31,8 @@ export const router = createRouter({
     { path: '/anschluesse', name: 'stop-links', component: StopLinksView },
     // Pflege der Haltestellen-Klammer: welche Halte sind im Betrieb derselbe Ort.
     { path: '/haltestellen', name: 'stop-groups', component: StopGroupsView },
+    // Umlaeufe je Linie; Auswahl in der Query, damit eine Kursliste verlinkbar bleibt.
+    { path: '/kurse', name: 'courses', component: CoursesView },
     { path: '/periods', name: 'periods', component: SchedulePeriodsView },
     { path: '/coverage', name: 'coverage', component: CoverageView },
     { path: '/', redirect: '/imports' },

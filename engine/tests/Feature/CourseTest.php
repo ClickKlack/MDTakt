@@ -10,8 +10,10 @@ use App\Models\Course;
 use App\Models\CourseTrip;
 use App\Models\LineVersion;
 use App\Models\SchedulePeriod;
+use App\Models\TripLink;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\ConsolidatedFixtures;
 use Tests\TestCase;
@@ -51,6 +53,20 @@ final class CourseTest extends TestCase
     {
         return $this->withToken($this->token())
             ->putJson("/api/v1/admin/consolidated-trips/{$trip->id}/course", $body);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function linienVon(int $kursId): array
+    {
+        return DB::table('course_trips as k')
+            ->join('consolidated_trips as ct', 'ct.id', '=', 'k.consolidated_trip_id')
+            ->join('line_versions as lv', 'lv.id', '=', 'ct.line_version_id')
+            ->where('k.course_id', $kursId)
+            ->distinct()
+            ->pluck('lv.line')
+            ->all();
     }
 
     private function verknuepfe(ConsolidatedTrip $von, ConsolidatedTrip $nach): void
@@ -343,6 +359,100 @@ final class CourseTest extends TestCase
         $this->assertSame(2, Course::query()->where('number', '03')->count());
     }
 
+    /**
+     * K3: Die Kursnummer ist **je Linie** eindeutig, nicht netzweit. Die „2" der Linie 8 ist ein
+     * anderer Umlauf als die „2" der Linie 6 — wer sie auf der 8 eintippt, darf nicht in den
+     * fremden Umlauf der 6 hineinrutschen.
+     */
+    public function test_the_same_number_on_an_unrelated_line_is_a_different_course(): void
+    {
+        $periode = $this->f->periode();
+        $sechs = $this->version('6', $periode);
+        $acht = $this->version('8', $periode);
+
+        $aufSechs = $this->f->fahrt($sechs, ['A', 'B'], ['06:00:00', '06:30:00']);
+        $aufAcht = $this->f->fahrt($acht, ['C', 'D'], ['07:00:00', '07:30:00']);
+
+        $ersteId = $this->setzeKurs($aufSechs, ['number' => '2'])->assertOk()->json('data.course.id');
+        $zweiteId = $this->setzeKurs($aufAcht, ['number' => '2'])->assertOk()->json('data.course.id');
+
+        $this->assertNotSame($ersteId, $zweiteId, 'Die 6 und die 8 teilen sich keinen Umlauf');
+        $this->assertSame(2, Course::query()->where('number', '2')->count());
+
+        $this->assertSame(['6'], $this->linienVon($ersteId));
+        $this->assertSame(['8'], $this->linienVon($zweiteId));
+    }
+
+    /**
+     * Die Kehrseite: Berührt die Kette eine Linie, auf der die Nummer schon liegt, ist es
+     * derselbe Umlauf. Eine 1, die in Sudenburg zur 13 wird, trägt weiter dieselbe „03".
+     */
+    public function test_the_same_number_on_a_touched_line_reuses_the_course(): void
+    {
+        $periode = $this->f->periode();
+        $eins = $this->version('1', $periode);
+        $dreizehn = $this->version('13', $periode);
+
+        $aufEins = $this->f->fahrt($eins, ['Kannenstieg', 'Sudenburg'], ['06:14:00', '06:48:00']);
+        $aufDreizehn = $this->f->fahrt($dreizehn, ['Sudenburg', 'Westerhüsen'], ['06:52:00', '07:24:00']);
+        $spaeterAufEins = $this->f->fahrt($eins, ['Kannenstieg', 'Sudenburg'], ['09:14:00', '09:48:00']);
+
+        $this->verknuepfe($aufEins, $aufDreizehn);
+        $ersteId = $this->setzeKurs($aufEins, ['number' => '03'])->assertOk()->json('data.course.id');
+
+        // Der Umlauf liegt jetzt auf 1 **und** 13 — beide Linien treffen ihn wieder.
+        $wieder = $this->setzeKurs($spaeterAufEins, ['number' => '03'])->assertOk()->json('data.course.id');
+
+        $this->assertSame($ersteId, $wieder);
+        $this->assertSame(1, Course::query()->where('number', '03')->count());
+    }
+
+    /**
+     * Eine Dublette ist dieselbe Nummer auf **derselben** Linie. Zwei Linien, die sich nie
+     * berühren, dürfen die „2" beide führen, ohne dass die Übersicht Alarm schlägt.
+     */
+    public function test_the_same_number_on_separate_lines_is_no_duplicate(): void
+    {
+        $periode = $this->f->periode();
+        $sechs = $this->version('6', $periode);
+        $acht = $this->version('8', $periode);
+
+        $this->setzeKurs($this->f->fahrt($sechs, ['A', 'B'], ['06:00:00', '06:30:00']), ['number' => '2'])->assertOk();
+        $this->setzeKurs($this->f->fahrt($acht, ['C', 'D'], ['07:00:00', '07:30:00']), ['number' => '2'])->assertOk();
+
+        $kurse = $this->withToken($this->token())
+            ->getJson("/api/v1/admin/courses?period={$periode->id}&day_type=mo_fr")
+            ->assertOk()
+            ->json('data');
+
+        $this->assertCount(2, $kurse);
+        $this->assertSame([false, false], array_column($kurse, 'duplicate'));
+    }
+
+    /** Auf derselben Linie ist die doppelte Nummer sehr wohl ein Widerspruch. */
+    public function test_the_same_number_on_one_line_stays_a_duplicate(): void
+    {
+        $periode = $this->f->periode();
+        $sechs = $this->version('6', $periode);
+
+        $a = $this->f->fahrt($sechs, ['A', 'B'], ['06:00:00', '06:30:00']);
+        $b = $this->f->fahrt($sechs, ['C', 'D'], ['08:00:00', '08:30:00']);
+
+        $kursId = $this->setzeKurs($a, ['number' => '2'])->assertOk()->json('data.course.id');
+
+        // Zweiter Umlauf mit derselben Nummer, bewusst ueber die Kurs-Id gesetzt.
+        $zweiter = Course::query()->create(['period_id' => $periode->id, 'day_type' => 'mo_fr', 'number' => '2']);
+        $this->setzeKurs($b, ['course_id' => $zweiter->id])->assertOk();
+
+        $kurse = collect($this->withToken($this->token())
+            ->getJson("/api/v1/admin/courses?period={$periode->id}&day_type=mo_fr")
+            ->assertOk()
+            ->json('data'))->keyBy('id');
+
+        $this->assertTrue($kurse[$kursId]['duplicate']);
+        $this->assertTrue($kurse[$zweiter->id]['duplicate']);
+    }
+
     public function test_the_same_number_in_another_strand_is_a_different_course(): void
     {
         $periode = $this->f->periode();
@@ -454,7 +564,7 @@ final class CourseTest extends TestCase
             ->assertNoContent();
 
         $this->assertSame(0, CourseTrip::query()->count());
-        $this->assertSame(1, \App\Models\TripLink::query()->count(), 'Die Verkettung bleibt');
+        $this->assertSame(1, TripLink::query()->count(), 'Die Verkettung bleibt');
         $this->assertNotNull(ConsolidatedTrip::query()->find($a->id));
     }
 

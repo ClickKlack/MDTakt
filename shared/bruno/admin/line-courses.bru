@@ -1,0 +1,118 @@
+meta {
+  name: Line Courses (Umlaeufe je Linie)
+  type: http
+  seq: 21
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/lines/1/courses?period=1&day_type=mo_fr
+  body: none
+  auth: bearer
+}
+
+params:query {
+  period: 1
+  day_type: mo_fr
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.courses: isArray
+  res.body.data.unassigned: isArray
+}
+
+script:post-response {
+  const d = res.body.data;
+
+  for (const kurs of d.courses) {
+    if (kurs.trips.length !== kurs.trip_count) {
+      throw new Error("Kurs " + kurs.number + ": trip_count passt nicht zur Fahrtenliste");
+    }
+
+    // Die erste Fahrt hat keine Vorfahrt - alles andere waere ein Rechenfehler.
+    if (kurs.trips.length > 0 && kurs.trips[0].gap_before_seconds !== null) {
+      throw new Error("Kurs " + kurs.number + ": erste Fahrt hat einen Abstand zur Vorfahrt");
+    }
+
+    // Risse sind genau die Fahrten ohne Anschluss zur Vorfahrt.
+    const risse = kurs.trips.filter((t, i) => i > 0 && !t.linked_to_previous).length;
+    if (risse !== kurs.breaks) {
+      throw new Error("Kurs " + kurs.number + ": breaks " + kurs.breaks + " passt nicht zu " + risse);
+    }
+
+    // Die Fahrten stehen in Betriebstag-Reihenfolge.
+    for (let i = 1; i < kurs.trips.length; i++) {
+      if (kurs.trips[i].gap_before_seconds !== null && kurs.trips[i].gap_before_seconds < 0) {
+        throw new Error("Kurs " + kurs.number + ": negativer Abstand vor Fahrt " + kurs.trips[i].id);
+      }
+    }
+  }
+
+  const summe = d.courses.reduce((n, k) => n + k.trip_count, 0);
+  if (summe !== d.summary.assigned_trips) {
+    throw new Error("summary.assigned_trips passt nicht zur Summe der Kurse");
+  }
+}
+
+docs {
+  # Die Umlaeufe einer Linie im Ganzen
+
+  Je Kurs seine Fahrten in Fahrreihenfolge, die Stellen, an denen die Kette reisst, und die
+  Fahrten dieser Linie ohne Umlauf.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": {
+      "line": "1",
+      "period": { "id": 1, "label": "Ausgangsperiode ab 15.08.2026", "status": "current" },
+      "day_type": "mo_fr", "day_type_label": "Mo-Fr",
+      "courses": [
+        {
+          "id": 4, "number": "03", "note": null, "duplicate": false,
+          "trip_count": 3, "lines": ["1", "13"],
+          "first_departure": "06:14:00", "last_arrival": "08:02:00",
+          "breaks": 1,
+          "trips": [
+            { "id": 9835, "line": "1",  "departure_time": "06:14:00", "arrival_time": "06:48:00",
+              "gap_before_seconds": null, "linked_to_previous": false },
+            { "id": 10412, "line": "13", "departure_time": "06:52:00", "arrival_time": "07:24:00",
+              "gap_before_seconds": 240, "linked_to_previous": true },
+            { "id": 10688, "line": "1",  "departure_time": "07:30:00", "arrival_time": "08:02:00",
+              "gap_before_seconds": 360, "linked_to_previous": false }
+          ]
+        }
+      ],
+      "unassigned": [],
+      "summary": { "courses": 1, "assigned_trips": 3, "unassigned_trips": 0, "breaks": 1 }
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **Ein Umlauf erscheint bei jeder Linie, die er beruehrt — mit allen seinen Fahrten.** Im
+  Beispiel steht unter Linie 1 auch die 13er-Fahrt. Wer einen Umlauf pflegt, muss ihn ganz
+  sehen; eine 1 wird in Sudenburg zur 13.
+
+  **`gap_before_seconds` und `linked_to_previous` gehoeren zusammen gelesen.** Ein grosser
+  Abstand *mit* Anschluss ist eine lange Wende. Ein Abstand *ohne* Anschluss ist eine gerissene
+  Kette — im Beispiel die dritte Fahrt. Ein Umlauf muss keine durchgehende Kette sein: Loest man
+  einen Anschluss in der Mitte, bleibt der Kurs an beiden Teilen haengen. Das ist gewollt, weil
+  die Zuordnung bewahrt und nicht geraten wird; `breaks` zaehlt genau diese Stellen.
+
+  **Abstaende sind Betriebstag-Sekunden.** Auf einer Nachtlinie ist 23:20 -> 00:19 ein Abstand
+  von 3540 Sekunden, kein Ruecksprung um 23 Stunden.
+
+  **`unassigned` sind nur die Fahrten dieser Linie.** Fahrten anderer Linien ohne Kurs stehen
+  unter ihrer eigenen.
+}

@@ -8,7 +8,6 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\TripCourseRequest;
 use App\Models\ConsolidatedTrip;
 use App\Models\Course;
-use App\Models\SchedulePeriod;
 use App\Services\CourseService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -28,11 +27,7 @@ final class TripCourseController extends Controller
 
         $kurs = $request->courseId() !== null
             ? Course::query()->findOrFail($request->courseId())
-            : $this->courses->findOrCreate(
-                SchedulePeriod::query()->findOrFail($version->period_id),
-                $version->day_type,
-                (string) $request->number(),
-            );
+            : $this->courses->findOrCreateForChain($consolidatedTrip, (string) $request->number());
 
         // Ein Kurs aus einem anderen Strang waere an keinem Tag wirksam.
         if (! $this->courses->matchesStrand($kurs, $consolidatedTrip)) {

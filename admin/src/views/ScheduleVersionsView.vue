@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import { fetchLineVersions, type LineVersions } from '../services/scheduleVersions'
 import { FAHRPLAN_TYPEN } from '../services/lines'
+import { applyCarryover, previewCarryover, type CarryoverResult } from '../services/courses'
 import { formatDate } from '../utils/timezone'
 
 const data = ref<LineVersions | null>(null)
@@ -65,6 +66,71 @@ function markiere(version: { id: number; line: string; day_type: string; version
     vergleichA.value = version
     vergleichB.value = null
   }
+}
+
+/**
+ * Übernahme der Pflege von der älteren auf die neuere Version (KURSE §2 K4).
+ *
+ * Bewusst zweistufig: erst die Vorschau, die garantiert nichts ändert, dann das Anwenden. Eine
+ * neue Version bedeutet geänderte Zeiten, und ob ein Anschluss das überlebt, hängt an der
+ * Wendezeit — deshalb überträgt der Import von sich aus nichts.
+ */
+const vorschau = ref<CarryoverResult | null>(null)
+const uebernahmeLaeuft = ref(false)
+const uebernommen = ref(false)
+const uebernahmeFehler = ref<string | null>(null)
+
+/** Quelle ist immer die ältere, Ziel die neuere Version. */
+const uebernahmePaar = computed(() => {
+  if (!vergleichA.value || !vergleichB.value) {
+    return null
+  }
+  const [von, nach] = [vergleichA.value, vergleichB.value].sort((x, y) => x.version_no - y.version_no)
+  return { von, nach }
+})
+
+async function zeigeVorschau(): Promise<void> {
+  if (uebernahmePaar.value === null) {
+    return
+  }
+
+  uebernahmeLaeuft.value = true
+  uebernahmeFehler.value = null
+  uebernommen.value = false
+
+  try {
+    vorschau.value = await previewCarryover(uebernahmePaar.value.nach.id, uebernahmePaar.value.von.id)
+  } catch (e: unknown) {
+    const antwort = (e as { response?: { data?: { error?: { message?: string } } } }).response
+    uebernahmeFehler.value = antwort?.data?.error?.message ?? 'Die Vorschau konnte nicht geladen werden.'
+  } finally {
+    uebernahmeLaeuft.value = false
+  }
+}
+
+async function wendeAn(): Promise<void> {
+  if (uebernahmePaar.value === null) {
+    return
+  }
+
+  uebernahmeLaeuft.value = true
+  uebernahmeFehler.value = null
+
+  try {
+    vorschau.value = await applyCarryover(uebernahmePaar.value.nach.id, uebernahmePaar.value.von.id)
+    uebernommen.value = true
+  } catch (e: unknown) {
+    const antwort = (e as { response?: { data?: { error?: { message?: string } } } }).response
+    uebernahmeFehler.value = antwort?.data?.error?.message ?? 'Die Übernahme ist fehlgeschlagen.'
+  } finally {
+    uebernahmeLaeuft.value = false
+  }
+}
+
+function verwirfVorschau(): void {
+  vorschau.value = null
+  uebernommen.value = false
+  uebernahmeFehler.value = null
 }
 
 /** Die ältere Version steht links — sonst läse sich der Vergleich rückwärts. */
@@ -148,11 +214,98 @@ onMounted(load)
           </RouterLink>
 
           <button
+            v-if="uebernahmePaar"
+            class="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50"
+            :disabled="uebernahmeLaeuft"
+            @click="zeigeVorschau"
+          >
+            Kurse übernehmen …
+          </button>
+
+          <button
             class="text-sm text-slate-500 hover:text-slate-800"
-            @click="vergleichA = null; vergleichB = null"
+            @click="vergleichA = null; vergleichB = null; verwirfVorschau()"
           >
             Auswahl aufheben
           </button>
+        </div>
+
+        <!-- Übernahme: erst die folgenlose Vorschau, dann das Anwenden -->
+        <div
+          v-if="uebernahmeFehler"
+          class="mt-3 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-700"
+        >
+          {{ uebernahmeFehler }}
+        </div>
+
+        <div v-if="vorschau" class="mt-3 rounded-lg border border-slate-300 bg-white px-4 py-3">
+          <h3 class="text-sm font-medium text-slate-900">
+            {{ uebernommen ? 'Übernommen' : 'Vorschau' }}: Linie {{ vorschau.from.line }},
+            v{{ vorschau.from.version_no }} → v{{ vorschau.to.version_no }}
+          </h3>
+
+          <p v-if="!uebernommen" class="mt-1 text-xs text-slate-500">
+            Diese Ansicht ändert nichts. Erst „Übernehmen" schreibt.
+          </p>
+
+          <dl class="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+            <div class="flex justify-between gap-2">
+              <dt class="text-slate-600">Kurse</dt>
+              <dd class="font-medium tabular-nums text-slate-900">{{ vorschau.summary.courses_carried }}</dd>
+            </div>
+            <div class="flex justify-between gap-2">
+              <dt class="text-slate-600">Anschlüsse</dt>
+              <dd class="font-medium tabular-nums text-slate-900">{{ vorschau.summary.links_carried }}</dd>
+            </div>
+            <div class="flex justify-between gap-2">
+              <dt class="text-slate-600">Aus-/Einrücken</dt>
+              <dd class="font-medium tabular-nums text-slate-900">{{ vorschau.summary.terminals_carried }}</dd>
+            </div>
+            <div class="flex justify-between gap-2">
+              <dt class="text-slate-600">verschobene Fahrten</dt>
+              <dd class="tabular-nums text-slate-700">{{ vorschau.summary.changed }}</dd>
+            </div>
+            <div class="flex justify-between gap-2">
+              <dt class="text-slate-600">neue Fahrten</dt>
+              <dd class="tabular-nums text-slate-700">{{ vorschau.summary.added }}</dd>
+            </div>
+            <div class="flex justify-between gap-2">
+              <dt class="text-slate-600">entfallene Fahrten</dt>
+              <dd class="tabular-nums text-slate-700">{{ vorschau.summary.removed }}</dd>
+            </div>
+          </dl>
+
+          <p
+            v-if="vorschau.summary.blocked > 0"
+            class="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          >
+            <strong>{{ vorschau.summary.blocked }} Anschlüsse lassen sich nicht übertragen.</strong>
+            Sie zeigen auf eine Fahrt außerhalb dieser Version — der Linienwechsel-Fall. Die Gegenfahrt hängt noch an
+            der alten Fahrt, und ein Fahrzeug hat höchstens einen Vorgänger. Diese Anschlüsse sind unter „Anschlüsse"
+            neu zu setzen.
+          </p>
+
+          <p
+            v-if="vorschau.summary.lost > 0"
+            class="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          >
+            {{ vorschau.summary.lost }} Entscheidungen hängen an Fahrten, die es in der neuen Version nicht mehr gibt.
+            Sie gehen mit ihnen verloren.
+          </p>
+
+          <div class="mt-3 flex flex-wrap gap-3">
+            <button
+              v-if="!uebernommen"
+              class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+              :disabled="uebernahmeLaeuft"
+              @click="wendeAn"
+            >
+              Übernehmen
+            </button>
+            <button class="text-sm text-slate-500 hover:text-slate-800" @click="verwirfVorschau">
+              {{ uebernommen ? 'Schließen' : 'Abbrechen' }}
+            </button>
+          </div>
         </div>
 
         <!-- Typ-Filter -->

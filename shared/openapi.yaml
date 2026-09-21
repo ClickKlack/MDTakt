@@ -671,9 +671,11 @@ components:
         duplicate:
           type: boolean
           description: >
-            Ein anderer Umlauf im selben (Periode, Fahrplantyp) traegt dieselbe Nummer. Das ist
-            **kein Fehler**: Ob die Kursnummer netzweit eindeutig ist, ist offen (KURSE §2 K3).
-            Gemeldet wird es trotzdem — es findet Tippfehler.
+            Ein anderer Umlauf im selben (Periode, Fahrplantyp) traegt dieselbe Nummer **auf einer
+            gemeinsamen Linie**. Die Kursnummer ist je Linie bzw. Linienkombination eindeutig, nicht
+            netzweit (KURSE §2 K3): Die „2" der Linie 8 ist ein anderer Umlauf als die „2" der Linie
+            6 und wird hier nicht gemeldet. Gemeldet wird auch ein Kurs ohne Fahrten — er haengt an
+            keiner Linie und kollidiert deshalb mit jeder.
 
     CourseListResponse:
       type: object
@@ -703,6 +705,146 @@ components:
             trip_ids:
               type: array
               items: { type: integer }
+
+    CourseChainTrip:
+      type: object
+      description: Eine Fahrt innerhalb eines Umlaufs, in Fahrreihenfolge.
+      required: [id, line, mode, departure_time, arrival_time, linked_to_previous]
+      properties:
+        id: { type: integer }
+        line: { type: string }
+        mode: { type: string, enum: [tram, bus, other] }
+        version_no: { type: integer }
+        start_stop: { type: string, nullable: true }
+        end_stop: { type: string, nullable: true }
+        departure_time: { type: string, nullable: true }
+        arrival_time: { type: string, nullable: true }
+        gap_before_seconds:
+          type: integer
+          nullable: true
+          description: >
+            Abstand zur Vorfahrt in Betriebstag-Sekunden; `null` bei der ersten Fahrt. Auf einer
+            Nachtlinie richtig ueber Mitternacht hinweg (23:20 -> 00:19 ergibt 3540).
+        linked_to_previous:
+          type: boolean
+          description: >
+            Steht zwischen dieser und der Vorfahrt ein Anschluss? **Zusammen mit
+            `gap_before_seconds` zu lesen:** Ein grosser Abstand *mit* Anschluss ist eine lange
+            Wende, ein Abstand *ohne* Anschluss eine gerissene Kette. Ein Umlauf muss keine
+            durchgehende Kette sein — loest man einen Anschluss, bleibt der Kurs an beiden Teilen.
+
+    LineCourseOverviewResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [line, day_type, courses, unassigned, summary]
+          properties:
+            line: { type: string }
+            period:
+              type: object
+              properties:
+                id: { type: integer }
+                label: { type: string }
+                status: { type: string, enum: [current, frozen] }
+            day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+            day_type_label: { type: string }
+            courses:
+              type: array
+              items:
+                type: object
+                required: [id, number, trip_count, lines, trips, breaks]
+                properties:
+                  id: { type: integer }
+                  number: { type: string }
+                  note: { type: string, nullable: true }
+                  duplicate: { type: boolean }
+                  trip_count: { type: integer }
+                  lines:
+                    type: array
+                    description: Mehr als eine ist der Normalfall — ein Umlauf laeuft ueber Linien hinweg.
+                    items: { type: string }
+                  first_departure: { type: string, nullable: true }
+                  last_arrival: { type: string, nullable: true }
+                  breaks:
+                    type: integer
+                    description: Stellen, an denen die Kette reisst — Fahrten ohne Anschluss zur Vorfahrt.
+                  trips:
+                    type: array
+                    items: { $ref: '#/components/schemas/CourseChainTrip' }
+            unassigned:
+              type: array
+              description: Fahrten dieser Linie im Strang, die zu keinem Umlauf gehoeren.
+              items: { $ref: '#/components/schemas/CourseChainTrip' }
+            summary:
+              type: object
+              properties:
+                courses: { type: integer }
+                assigned_trips: { type: integer }
+                unassigned_trips: { type: integer }
+                breaks: { type: integer }
+
+    CourseCarryoverResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [from, to, summary, blocked, lost]
+          properties:
+            from:
+              type: object
+              properties:
+                id: { type: integer }
+                line: { type: string }
+                day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+                day_type_label: { type: string }
+                version_no: { type: integer }
+            to:
+              type: object
+              properties:
+                id: { type: integer }
+                line: { type: string }
+                day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+                day_type_label: { type: string }
+                version_no: { type: integer }
+            summary:
+              type: object
+              properties:
+                paired: { type: integer, description: Fahrten mit einer Entsprechung in der alten Version. }
+                unchanged: { type: integer }
+                changed: { type: integer, description: Gepaart, aber zeitlich verschoben. }
+                added: { type: integer, description: Neue Fahrten ohne Entsprechung — bleiben ohne Pflege. }
+                removed: { type: integer }
+                courses_carried: { type: integer }
+                course_numbers: { type: integer, description: Zahl der verschiedenen Kursnummern darin. }
+                links_carried: { type: integer }
+                terminals_carried: { type: integer, description: Aus- und Einruecken. }
+                blocked: { type: integer }
+                lost: { type: integer }
+            blocked:
+              type: array
+              description: >
+                Anschluesse, die sich nicht uebertragen lassen. Das trifft jeden Anschluss, dessen
+                Gegenfahrt **ausserhalb** dieser Version liegt — also den Linienwechsel-Fall: Die
+                Gegenfahrt haengt noch an der alten Fahrt, und ein Fahrzeug hat hoechstens einen
+                Vorgaenger. Sie zu verschieben naehme der alten Version ihre Kette, die fuer ihre
+                verbliebenen Gueltigkeitstage weiter stimmt.
+              items:
+                type: object
+                properties:
+                  trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
+                  partner: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
+                  reason: { type: string }
+            lost:
+              type: array
+              description: Entscheidungen an Fahrten, die es in der neuen Version nicht mehr gibt.
+              items:
+                type: object
+                properties:
+                  kind: { type: string, enum: [link, start, end] }
+                  trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
 
     StopGroupStop:
       type: object
@@ -1661,6 +1803,146 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/admin/lines/{line}/courses:
+    parameters:
+      - name: line
+        in: path
+        required: true
+        description: Linienbezeichnung (`route_short_name`), z. B. "1" oder "N5".
+        schema: { type: string }
+    get:
+      operationId: getLineCourses
+      summary: Die Umlaeufe einer Linie im Ganzen
+      description: >
+        Je Kurs seine Fahrten in Fahrreihenfolge, die Stellen, an denen die Kette reisst, und
+        die Fahrten dieser Linie, die noch zu keinem Umlauf gehoeren.
+
+
+        **Ein Umlauf kann mehrere Linien umfassen** und erscheint dann bei jeder von ihnen — mit
+        **allen** seinen Fahrten, auch denen der anderen Linien. Eine 1 wird in Sudenburg zur 13;
+        wer den Umlauf pflegt, muss ihn ganz sehen.
+
+
+        **`gap_before_seconds` und `linked_to_previous` gehoeren zusammen gelesen.** Ein grosser
+        Abstand *mit* Anschluss ist eine lange Wende; ein Abstand *ohne* Anschluss ist eine
+        gerissene Kette. Ein Umlauf muss keine durchgehende Kette sein: Loest man einen Anschluss
+        in der Mitte, bleibt der Kurs an beiden Teilen haengen — gewollt, weil die Zuordnung
+        bewahrt und nicht geraten wird.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: day_type
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/FahrplanTyp' }
+      responses:
+        '200':
+          description: Umlaeufe, Ketten und offene Fahrten
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineCourseOverviewResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannte Periode oder unbekannter Fahrplantyp
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/line-versions/{lineVersion}/course-carryover:
+    parameters:
+      - name: lineVersion
+        in: path
+        required: true
+        description: Die **Ziel**-Version, auf die uebernommen wird.
+        schema: { type: integer }
+    get:
+      operationId: previewCourseCarryover
+      summary: Vorschau — was eine Uebernahme bewirken wuerde
+      description: >
+        **Garantiert folgenlos.** Bewusst ein eigener Endpunkt statt eines Schalters am POST: Wer
+        die Vorschau aufruft, soll sich darauf verlassen koennen, dass nichts geschrieben wird.
+
+
+        Der Import uebertraegt von sich aus **nichts** (KURSE §2 K4). Eine neue Version bedeutet
+        geaenderte Zeiten; ob ein Anschluss das ueberlebt, haengt an der Wendezeit — eine um zehn
+        Minuten verschobene Abfahrt kann ihn unmoeglich machen. Eine stille Uebernahme schriebe
+        solche Faelle fort.
+
+
+        Was uebertragen wird: die **Kursnummer**, sobald es eine Partnerfahrt gibt (auch bei
+        verschobener Zeit — eine andere Zeit macht keinen anderen Umlauf); **Aus- und Einruecken**,
+        weil sie an einer Fahrt allein haengen; und **Anschluesse innerhalb dieser Version**.
+        Anschluesse auf eine andere Linie stehen unter `blocked`.
+
+
+        Bereits gesetzte Pflege an der neuen Version gewinnt: Sie ist die juengere Aussage.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Die **Quell**-Version. Muss dieselbe Linie, denselben Fahrplantyp und dieselbe Periode tragen.
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Was eine Uebernahme bewirken wuerde
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CourseCarryoverResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannte Quelle, identische Versionen, oder verschiedene Linie/Fahrplantyp/Periode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: applyCourseCarryover
+      summary: Uebernahme anwenden
+      description: >
+        Fuehrt aus, was die Vorschau angekuendigt hat, und antwortet in derselben Form — die
+        Zahlen sind dann die tatsaechlich geschriebenen. **Mehrfach anwendbar:** Ein zweiter Lauf
+        aendert nichts mehr, weil bereits gesetzte Pflege gewinnt.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from]
+              properties:
+                from: { type: integer }
+      responses:
+        '200':
+          description: Uebernommen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CourseCarryoverResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Unbekannte Quelle, identische Versionen, oder verschiedene Linie/Fahrplantyp/Periode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/admin/courses:
     get:
       operationId: listCourses
@@ -1708,8 +1990,9 @@ paths:
         Zuordnen an einer Fahrt legt einen noch unbekannten Kurs selbst an.
 
 
-        **Keine Eindeutigkeitspruefung** — ob die Nummer netzweit eindeutig ist, ist offen
-        (KURSE §2 K3). Eine Dublette wird im Feld `duplicate` gemeldet, nicht abgewiesen.
+        **Keine Eindeutigkeitspruefung.** Die Nummer ist je Linie bzw. Linienkombination eindeutig,
+        nicht netzweit (KURSE §2 K3) — und die Linien eines Kurses stehen erst fest, wenn ihm
+        Fahrten zugeordnet sind. Ein Widerspruch wird im Feld `duplicate` gemeldet, nicht abgewiesen.
       tags: [Admin]
       security: [{ AdminToken: [] }]
       requestBody:

@@ -67,7 +67,7 @@ final class LineVersionDiffService
             'from' => $this->versionInfo($from, count($vonFahrten)),
             'to' => $this->versionInfo($to, count($nachFahrten)),
             'summary' => [
-                'unchanged' => $unveraendert,
+                'unchanged' => count($unveraendert),
                 'changed' => count($paare),
                 'added' => count($nachRest),
                 'removed' => count($vonRest),
@@ -87,6 +87,44 @@ final class LineVersionDiffService
         ] + $ergebnis['summary']);
 
         return $ergebnis;
+    }
+
+    /**
+     * Die Zuordnung Fahrt → Fahrt zwischen zwei Versionen, ohne die Anzeige-Aufbereitung.
+     *
+     * {@see diff()} zählt „unverändert" nur — für die Kurs-Übernahme (KURSE §2 K4) wird aber
+     * die konkrete Paarung gebraucht: Welche Fahrt der neuen Version entspricht welcher der
+     * alten. Die Vergleichslogik ist dieselbe und bleibt an einer Stelle.
+     *
+     * @return array{pairs: array<int, array{to_trip_id: int, status: string}>, added: array<int, int>, removed: array<int, int>}
+     */
+    public function pairing(LineVersion $from, LineVersion $to): array
+    {
+        $vonFahrten = $this->trips($from);
+        $nachFahrten = $this->trips($to);
+
+        [$unveraendert, $vonRest, $nachRest, $geaendert] = $this->matchBySignature($vonFahrten, $nachFahrten);
+
+        foreach ($this->pairRemainder($vonRest, $nachRest) as [$a, $b]) {
+            $geaendert[] = [$a, $b];
+            unset($vonRest[$a['id']], $nachRest[$b['id']]);
+        }
+
+        $paare = [];
+
+        foreach ($unveraendert as [$alt, $neu]) {
+            $paare[(int) $alt['id']] = ['to_trip_id' => (int) $neu['id'], 'status' => 'unchanged'];
+        }
+
+        foreach ($geaendert as [$alt, $neu]) {
+            $paare[(int) $alt['id']] = ['to_trip_id' => (int) $neu['id'], 'status' => 'changed'];
+        }
+
+        return [
+            'pairs' => $paare,
+            'added' => array_map(intval(...), array_keys($nachRest)),
+            'removed' => array_map(intval(...), array_keys($vonRest)),
+        ];
     }
 
     /**
@@ -147,7 +185,7 @@ final class LineVersionDiffService
      *
      * @param  array<int, array<string, mixed>>  $von
      * @param  array<int, array<string, mixed>>  $nach
-     * @return array{0: int, 1: array<int, array<string, mixed>>, 2: array<int, array<string, mixed>>, 3: array<int, array{0: array<string, mixed>, 1: array<string, mixed>}>}
+     * @return array{0: array<int, array{0: array<string, mixed>, 1: array<string, mixed>}>, 1: array<int, array<string, mixed>>, 2: array<int, array<string, mixed>>, 3: array<int, array{0: array<string, mixed>, 1: array<string, mixed>}>}
      */
     private function matchBySignature(array $von, array $nach): array
     {
@@ -157,7 +195,7 @@ final class LineVersionDiffService
             $nachSignaturen[$fahrt['signature']][] = $fahrt['id'];
         }
 
-        $unveraendert = 0;
+        $unveraendert = [];
         $geaendert = [];
         $vonRest = $von;
         $nachRest = $nach;
@@ -175,7 +213,7 @@ final class LineVersionDiffService
             unset($vonRest[$fahrt['id']], $nachRest[$partnerId]);
 
             if ($fahrt['stops'] === $partner['stops']) {
-                $unveraendert++;
+                $unveraendert[] = [$fahrt, $partner];
 
                 continue;
             }

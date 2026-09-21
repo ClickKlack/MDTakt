@@ -65,17 +65,31 @@ eine ungepflegte Fahrt nicht von einer bewusst offen gelassenen unterscheiden. A
 Kette nicht davon ab, dass überhaupt schon eine Nummer bekannt ist: Der Haltestellen-Editor ist
 benutzbar, bevor die erste Kursnummer vergeben wird.
 
-### K3 — Die Kursnummer ist nicht als eindeutig erzwungen
+### K3 — Die Kursnummer ist je Linie eindeutig, nicht netzweit
 
-Ob eine Kursnummer netzweit eindeutig ist oder nur je Linie, ist **offen**. Aus K1 folgt, dass ein
-Umlauf seine Nummer über Linien hinweg trägt — daraus folgt aber nicht zwingend, dass nicht
-gleichzeitig ein anderer Umlauf dieselbe Nummer führt.
+**Geklärt am 21.09.2026 am Realbestand.** Die Kursnummer ist nur je Linie beziehungsweise je
+Linienkombination eindeutig: Die „2" der Linie 8 und die „2" der Linie 6 sind zwei verschiedene
+Umläufe. Aus K1 folgt lediglich, dass ein Umlauf seine Nummer über einen Linienwechsel hinweg
+behält — nicht, dass die Nummer netzweit nur einmal vorkommt.
 
-**Entschieden: kein Unique-Index.** Das System meldet Dubletten sichtbar — zwei Umläufe mit
-derselben Nummer im selben (Periode, Fahrplantyp), verschärft bei zeitlicher Überschneidung. Zeigt
-die Pflege, dass die Nummer eindeutig ist, lässt sich der Index in einer Migration nachziehen. Der
-umgekehrte Weg — einen zu früh gesetzten Index wieder loszuwerden, nachdem er echte Fälle blockiert
-hat — ist der teurere.
+Anlass war ein Fehlverhalten: Die erste Fassung suchte beim Eintippen einer Nummer netzweit nach
+`(period_id, day_type, number)` und hängte damit eine 8er-Kette an den bestehenden Umlauf „2" der
+Linie 6. Entstanden war ein Umlauf über zwei Linien, die an keiner Stelle verknüpft sind.
+
+**Entschieden: kein Unique-Index, aber ein linienbezogenes Nachschlagen.** Beim Eintippen einer
+Nummer wird ein bestehender Kurs nur dann wiederverwendet, wenn er mindestens **eine Linie mit der
+Kette gemeinsam** hat; sonst entsteht ein neuer Kurs. Geprüft wird auf Überschneidung, nicht auf
+Gleichheit der Linienmengen — eine Kette wächst: Liegt Kurs `1/03` heute nur auf der 1 und hängt
+morgen eine 13er-Fahrt daran, muss das nächste Eintippen auf der 1 weiterhin denselben Umlauf
+treffen.
+
+Ein Unique-Index bleibt aus, weil die tragfähige Bedingung („dieselbe Nummer auf einander
+berührenden Linien") keine Spaltenkombination ist — die Linienmenge eines Kurses steht in
+`course_trips` und ändert sich mit jeder Verknüpfung. Die Prüfung gehört deshalb in den Service.
+Als **Dublette** gemeldet wird entsprechend nur, was sich wirklich widerspricht: dieselbe Nummer
+auf überschneidenden Linien (oder ein Kurs ohne Fahrten, der an keine Linie gebunden ist und
+deshalb mit jedem kollidiert). Zwei Nummern „2" auf 6 und 8 sind der Normalfall und lösen keine
+Warnung mehr aus.
 
 Dies **korrigiert die Annahme E2** in `MDKURSTRACKER_REQUIREMENTS.md` („Umlauf =
 `(line, course_number, service_date)`"). Ein Umlauf kann mehrere Linien umfassen; das Tripel
@@ -266,7 +280,6 @@ String ist `"7:00:00" > "23:50:00"`.
 
 ## 5. Offene Punkte
 
-- **Eindeutigkeit der Kursnummer** (K3) — bleibt Warnung, bis die Pflege zeigt, was gilt.
 - **Nachtlinien-Betriebstag** — FAHRPLANPERIODEN §8: N1 fährt montags anders als Di–Fr, weil die
   Nacht von Sonntag auf Montag eine Sonntagsnacht ist. Der `mo_fr`-Strang fasst für Nachtlinien
   zwei Fahrpläne zusammen; der Editor erbt diese Unschärfe.

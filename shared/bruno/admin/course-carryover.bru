@@ -1,0 +1,101 @@
+meta {
+  name: Course Carryover (Vorschau)
+  type: http
+  seq: 22
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/line-versions/201/course-carryover?from=174
+  body: none
+  auth: bearer
+}
+
+params:query {
+  from: 174
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.summary: isDefined
+  res.body.data.blocked: isArray
+}
+
+script:post-response {
+  const s = res.body.data.summary;
+
+  if (s.unchanged + s.changed !== s.paired) {
+    throw new Error("paired " + s.paired + " passt nicht zu unchanged+changed");
+  }
+  if (s.blocked !== res.body.data.blocked.length) {
+    throw new Error("summary.blocked passt nicht zur Liste");
+  }
+  if (s.lost !== res.body.data.lost.length) {
+    throw new Error("summary.lost passt nicht zur Liste");
+  }
+}
+
+docs {
+  # Uebernahme beim Versionswechsel — Vorschau
+
+  **Dieser Endpunkt ist garantiert folgenlos.** Er ist bewusst vom Anwenden getrennt, statt ein
+  Schalter am POST zu sein: Wer die Vorschau aufruft, soll sich darauf verlassen koennen.
+
+  `POST` auf denselben Pfad mit `{ "from": 174 }` fuehrt aus, was hier steht, und antwortet in
+  derselben Form — die Zahlen sind dann die tatsaechlich geschriebenen.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": {
+      "from": { "id": 174, "line": "1", "day_type": "mo_fr", "version_no": 1 },
+      "to":   { "id": 201, "line": "1", "day_type": "mo_fr", "version_no": 2 },
+      "summary": {
+        "paired": 391, "unchanged": 388, "changed": 3,
+        "added": 2, "removed": 1,
+        "courses_carried": 180, "course_numbers": 14,
+        "links_carried": 165, "terminals_carried": 12,
+        "blocked": 9, "lost": 1
+      },
+      "blocked": [
+        { "trip": { "id": 9835, "line": "1" },
+          "partner": { "id": 10412, "line": "13" },
+          "reason": "Der Anschlusspartner liegt ausserhalb dieser Version und haengt noch an der alten Fahrt. Nach dem Wechsel von Hand neu setzen." }
+      ],
+      "lost": [ { "kind": "end", "trip": { "id": 9999, "line": "1" } } ]
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **Der Import uebertraegt von sich aus nichts** (KURSE §2 K4). Eine neue Version bedeutet
+  geaenderte Zeiten; ob ein Anschluss das ueberlebt, haengt an der Wendezeit — eine um zehn
+  Minuten verschobene Abfahrt kann ihn unmoeglich machen. Eine stille Uebernahme schriebe solche
+  Faelle fort. Der Knopf macht daraus eine datierte Entscheidung.
+
+  **Die Kursnummer wandert auch zu einer verschobenen Fahrt.** Eine andere Zeit macht keinen
+  anderen Umlauf — nur ihre Anschluesse sind neu zu pruefen.
+
+  **`blocked` ist der Linienwechsel-Fall.** Ein Anschluss auf eine Fahrt ausserhalb dieser
+  Version laesst sich nicht kopieren: Die Gegenfahrt haengt noch an der alten Fahrt, und ein
+  Fahrzeug hat hoechstens einen Vorgaenger. Ihn zu *verschieben* waere die Alternative — das
+  naehme der alten Version aber ihre Kette, die fuer ihre verbliebenen Gueltigkeitstage weiter
+  stimmt. Deshalb wird er gemeldet und nach dem Wechsel von Hand neu gesetzt. Sollte das im
+  Betrieb haeufig auftreten, ist es den Entwurf wert, neu bedacht zu werden.
+
+  **`lost` haengt an entfallenen Fahrten.** Deren Entscheidungen gibt es nach dem Wechsel nicht
+  mehr — die Vorschau sagt es vorher.
+
+  **Bereits gesetzte Pflege gewinnt.** Traegt die neue Fahrt schon einen Kurs oder eine
+  Entscheidung, bleibt sie unangetastet: Sie ist die juengere Aussage. Deshalb ist ein zweiter
+  Lauf folgenlos.
+}

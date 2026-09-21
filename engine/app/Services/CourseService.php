@@ -9,6 +9,7 @@ use App\Models\ConsolidatedTrip;
 use App\Models\Course;
 use App\Models\CourseTrip;
 use App\Models\SchedulePeriod;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -138,28 +139,80 @@ final class CourseService
     }
 
     /**
-     * Findet den Kurs mit dieser Nummer im Strang oder legt ihn an.
+     * Findet den Kurs mit dieser Nummer **für diese Kette** oder legt ihn an.
      *
      * Der übliche Weg aus der Oberfläche: Wer eine Nummer am Fahrzeug abliest, will sie
      * eintippen und nicht erst einen Kurs anlegen.
+     *
+     * **Die Nummer ist nur je Linie eindeutig, nicht netzweit** (KURSE §2 K3). Die „2" der
+     * Linie 8 ist ein anderer Umlauf als die „2" der Linie 6. Gesucht wird deshalb nur unter
+     * den Kursen dieser Nummer, die mindestens eine Linie mit der Kette gemeinsam haben.
+     *
+     * Warum Überschneidung und nicht Gleichheit der Linienmengen: Eine Kette wächst. Heute
+     * liegt Kurs 1/03 nur auf der 1, morgen hängt eine 13er-Fahrt daran. Verlangte man eine
+     * exakte Übereinstimmung, entstünde beim nächsten Eintippen auf der 1 ein zweiter Kurs
+     * mit derselben Nummer.
+     *
+     * Ein Kurs ohne Fahrten ist noch an keine Linie gebunden und nimmt jede auf.
      */
-    public function findOrCreate(SchedulePeriod $period, FahrplanTyp $typ, string $number): Course
+    public function findOrCreateForChain(ConsolidatedTrip $trip, string $number): Course
     {
-        $vorhanden = Course::query()
-            ->where('period_id', $period->id)
-            ->where('day_type', $typ->value)
-            ->where('number', $number)
-            ->first();
+        $version = $trip->lineVersion;
+        $eigeneLinien = $this->linesOfTrips($this->links->chainFor($trip));
 
-        if ($vorhanden !== null) {
-            return $vorhanden;
+        $kandidaten = Course::query()
+            ->where('period_id', $version->period_id)
+            ->where('day_type', $version->day_type->value)
+            ->where('number', $number)
+            ->get();
+
+        foreach ($kandidaten as $kurs) {
+            $kursLinien = $this->linesOfCourse($kurs->id);
+
+            if ($kursLinien === [] || array_intersect($kursLinien, $eigeneLinien) !== []) {
+                return $kurs;
+            }
         }
 
         return Course::query()->create([
-            'period_id' => $period->id,
-            'day_type' => $typ->value,
+            'period_id' => $version->period_id,
+            'day_type' => $version->day_type->value,
             'number' => $number,
         ]);
+    }
+
+    /**
+     * Die Linien, die eine Menge von Fahrten berührt.
+     *
+     * @param  array<int, int>  $tripIds
+     * @return array<int, string>
+     */
+    private function linesOfTrips(array $tripIds): array
+    {
+        if ($tripIds === []) {
+            return [];
+        }
+
+        return DB::table('consolidated_trips as ct')
+            ->join('line_versions as lv', 'lv.id', '=', 'ct.line_version_id')
+            ->whereIn('ct.id', $tripIds)
+            ->distinct()
+            ->pluck('lv.line')
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function linesOfCourse(int $courseId): array
+    {
+        return DB::table('course_trips as k')
+            ->join('consolidated_trips as ct', 'ct.id', '=', 'k.consolidated_trip_id')
+            ->join('line_versions as lv', 'lv.id', '=', 'ct.line_version_id')
+            ->where('k.course_id', $courseId)
+            ->distinct()
+            ->pluck('lv.line')
+            ->all();
     }
 
     /**
@@ -193,8 +246,12 @@ final class CourseService
             $fahrten->flatten(1)->pluck('trip_id')->map(static fn ($id): int => (int) $id)->all()
         );
 
-        // Dubletten: dieselbe Nummer im selben Strang. Kein Fehler, aber sichtbar (K3).
-        $proNummer = $kurse->groupBy('number')->map->count();
+        // Eine Dublette ist dieselbe Nummer auf **denselben Linien** — nicht schon dieselbe
+        // Nummer im Strang: Die „2" der Linie 8 ist ein anderer Umlauf als die „2" der Linie 6
+        // (K3). Erst wenn sich die Linien überschneiden, widersprechen sich zwei Kurse.
+        $linienJeKurs = $fahrten
+            ->map(static fn ($zeilen): array => $zeilen->pluck('line')->unique()->values()->all())
+            ->all();
 
         $ergebnis = [];
 
@@ -229,13 +286,37 @@ final class CourseService
                 'lines' => $linienListe,
                 'first_departure' => $sortiert->first()['departure'] ?? null,
                 'last_arrival' => $sortiert->last()['arrival'] ?? null,
-                'duplicate' => ($proNummer[$kurs->number] ?? 1) > 1,
+                'duplicate' => $this->hasOverlappingTwin($kurs, $kurse, $linienJeKurs),
             ];
         }
 
         usort($ergebnis, static fn (array $a, array $b): int => strnatcmp($a['number'], $b['number']));
 
         return $ergebnis;
+    }
+
+    /**
+     * Trägt ein anderer Umlauf dieselbe Nummer auf einer gemeinsamen Linie?
+     *
+     * @param  Collection<int, Course>  $alle
+     * @param  array<int, array<int, string>>  $linienJeKurs
+     */
+    private function hasOverlappingTwin(Course $kurs, $alle, array $linienJeKurs): bool
+    {
+        foreach ($alle as $anderer) {
+            if ($anderer->id === $kurs->id || $anderer->number !== $kurs->number) {
+                continue;
+            }
+
+            $a = $linienJeKurs[$kurs->id] ?? [];
+            $b = $linienJeKurs[$anderer->id] ?? [];
+
+            if ($a === [] || $b === [] || array_intersect($a, $b) !== []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -269,13 +350,36 @@ final class CourseService
             'lines' => [],
             'first_departure' => null,
             'last_arrival' => null,
-            'duplicate' => Course::query()
-                ->where('period_id', $course->period_id)
-                ->where('day_type', $course->day_type->value)
-                ->where('number', $course->number)
-                ->whereKeyNot($course->id)
-                ->exists(),
+            'duplicate' => $this->hasOverlappingTwin(
+                $course,
+                Course::query()
+                    ->where('period_id', $course->period_id)
+                    ->where('day_type', $course->day_type->value)
+                    ->where('number', $course->number)
+                    ->get(),
+                $this->linesPerCourseFor($course),
+            ),
         ];
+    }
+
+    /**
+     * @return array<int, array<int, string>>
+     */
+    private function linesPerCourseFor(Course $course): array
+    {
+        $ids = Course::query()
+            ->where('period_id', $course->period_id)
+            ->where('day_type', $course->day_type->value)
+            ->where('number', $course->number)
+            ->pluck('id');
+
+        $ergebnis = [];
+
+        foreach ($ids as $id) {
+            $ergebnis[(int) $id] = $this->linesOfCourse((int) $id);
+        }
+
+        return $ergebnis;
     }
 
     /**

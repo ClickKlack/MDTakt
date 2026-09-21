@@ -3,11 +3,13 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\AuthController;
+use App\Http\Controllers\Admin\CourseCarryoverController;
 use App\Http\Controllers\Admin\CourseController;
 use App\Http\Controllers\Admin\CoverageController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
 use App\Http\Controllers\Admin\LineColorController;
+use App\Http\Controllers\Admin\LineCourseController;
 use App\Http\Controllers\Admin\LineVersionController;
 use App\Http\Controllers\Admin\LineVersionDiffController;
 use App\Http\Controllers\Admin\PeriodChangeOfferController;
@@ -88,6 +90,15 @@ Route::prefix('v1')->group(function (): void {
                 ->name('admin.trips.course.update');
             Route::delete('consolidated-trips/{consolidatedTrip}/course', [TripCourseController::class, 'destroy'])
                 ->name('admin.trips.course.destroy');
+
+            // Die Umlaeufe einer Linie im Ganzen: Ketten, Risse, Fahrten ohne Kurs
+            Route::get('lines/{line}/courses', [LineCourseController::class, 'index'])->name('admin.lines.courses');
+
+            // Uebernahme beim Versionswechsel — die Vorschau ist garantiert folgenlos (K4)
+            Route::get('line-versions/{lineVersion}/course-carryover', [CourseCarryoverController::class, 'show'])
+                ->name('admin.line-versions.carryover.show');
+            Route::post('line-versions/{lineVersion}/course-carryover', [CourseCarryoverController::class, 'store'])
+                ->name('admin.line-versions.carryover.store');
 
             // Fahrplanperioden — netzweit, kuratiert (FAHRPLANPERIODEN §4.1)
             Route::get('schedule-periods', [SchedulePeriodController::class, 'index'])->name('admin.schedule-periods.index');

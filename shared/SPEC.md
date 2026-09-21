@@ -44,7 +44,8 @@ Entwicklung einer spezialisierten Plattform zur Umlauf-Erkennung für den Magdeb
 Eine Sichtung enthält:
 - `course_number` — Kursnummer (z.B. "03"). ~~Primärer Schlüssel der Umlauf-Identität~~ —
   **korrigiert 20.09.2026:** Der Umlauf ist die gepflegte **Kette** (§2.4); die Nummer ist ein
-  Etikett daran, dessen netzweite Eindeutigkeit offen ist (KURSE §2 K3)
+  Etikett daran. Die Nummer ist **je Linie bzw. Linienkombination** eindeutig, nicht netzweit
+  (KURSE §2 K3)
 - `line` — Linienbezeichnung (z.B. "1", "6")
 - `direction` — Fahrtrichtung (z.B. "Steubenallee", "Kampstraße")
 - `observed_at` — Zeitstempel der Sichtung (Datum + Uhrzeit)
@@ -181,6 +182,8 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 | `GET`/`POST` | `/api/v1/admin/courses` | Umläufe eines Strangs / Umlauf anlegen |
 | `PUT`/`DELETE` | `/api/v1/admin/courses/{id}` | Kursnummer ändern / Umlauf löschen |
 | `PUT`/`DELETE` | `/api/v1/admin/consolidated-trips/{id}/course` | Kurs der **ganzen Kette** setzen / lösen |
+| `GET` | `/api/v1/admin/lines/{line}/courses` | Umläufe einer Linie: Ketten, Risse, Fahrten ohne Kurs |
+| `GET`/`POST` | `/api/v1/admin/line-versions/{id}/course-carryover` | Übernahme beim Versionswechsel: Vorschau / anwenden |
 
 > Weitere Admin-Endpunkte (Datenkorrektur, Fahrplanperioden-Erkennung) werden mit den jeweiligen ROADMAP-Iterationen ergänzt.
 

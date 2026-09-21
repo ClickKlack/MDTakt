@@ -21,7 +21,7 @@
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
 | **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f, Fahrplan + Diff |
 | **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ✅ |
-| **I-14** | **Kurse & Umläufe** | Engine + Admin | Umlauf-Ebene manuell pflegbar: Fahrten verketten, Kursnummern vergeben | 🟡 Etappen 1 + 2 |
+| **I-14** | **Kurse & Umläufe** | Engine + Admin | Umlauf-Ebene manuell pflegbar: Fahrten verketten, Kursnummern vergeben | ✅ |
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -44,7 +44,7 @@ Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung
 | 1 | **I-11** Auth-Fundament (Sanctum) | Login-Voraussetzung — **Single-Admin via .env/Seed** | ✅ |
 | 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten | ✅ |
 | 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | ✅ Phasen B und C |
-| 3b | **I-14** Kurse & Umläufe | Baut das Gefüge, in das die Sichtungs-API ihre Kursnummern liefert | 🟡 Etappen 1 + 2 |
+| 3b | **I-14** Kurse & Umläufe | Baut das Gefüge, in das die Sichtungs-API ihre Kursnummern liefert | ✅ |
 | 4 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬜ |
 | 5 | **I-05** Matching-Logik | Engine-Kern fürs Matching — setzt stabile Fahrt-Identität aus I-13 voraus | ⬜ |
 | 6 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
@@ -548,8 +548,11 @@ Kursnummer dieser Umlauf trägt.
       gehört dem Umlauf, der Linien-Präfix ist Anzeige
 - [x] **Die Verkettung führt** (K2) — gespeichert wird der Anschluss A→B plus die bewusste Entscheidung
       „beginnt/endet hier". Nur so ist der Betriebsfahrt-Fall von „noch nicht gepflegt" unterscheidbar
-- [x] **Kein Unique auf die Kursnummer** (K3) — ob sie netzweit eindeutig ist, zeigt erst die Pflege; Dubletten
-      werden gemeldet, ein Index ist später nachziehbar. **Korrigiert Annahme E2** in `MDKURSTRACKER_REQUIREMENTS.md`
+- [x] **Die Kursnummer ist je Linie eindeutig** (K3, geklärt 21.09.2026 am Realbestand) — die „2" der 8 ist ein
+      anderer Umlauf als die „2" der 6. Ein bestehender Kurs wird beim Eintippen nur wiederverwendet, wenn er eine
+      Linie mit der Kette teilt; als Dublette gilt nur dieselbe Nummer auf überschneidenden Linien. Weiterhin kein
+      Unique-Index — die Linienmenge steht in `course_trips`, nicht in einer Spalte. **Korrigiert Annahme E2** in
+      `MDKURSTRACKER_REQUIREMENTS.md`
 - [x] **Versionswechsel überträgt nichts von selbst** (K4) — Übernahme aus Version N−1 nur auf Knopfdruck, mit Vorschau
 - [x] **Editor auf Periode + Fahrplantyp** (K5), ergänzt um den **Versionsstand**: Innerhalb einer Periode kann eine
       Linie mehrere Versionen haben, an einem Umsteigepunkt stehen zwei Linien dann auf verschiedenen Ständen
@@ -634,10 +637,25 @@ Kursnummer dieser Umlauf trägt.
 - [x] Tests: `CourseTest` (19) — Kette statt Einzelfahrt, Linienwechsel im Umlauf, Dublette,
       getrennte Stränge, Eckzeiten über Mitternacht
 
-### (3) Kursübersicht und Übernahme ⬜
-- [ ] `GET /api/v1/admin/lines/{line}/courses` — Kursübersicht je Linie mit Ketten, Lücken und Fahrten ohne Kurs
-- [ ] `CourseCarryoverService` auf Basis von `LineVersionDiffService`: Vorschau und Übernahme aus Version N−1 (K4)
-- [ ] Admin-Ansicht „Kurse" + Übernahme-Dialog in „Versionen"
+### (3) Kursübersicht und Übernahme ✅
+- [x] `GET /api/v1/admin/lines/{line}/courses` — je Kurs die Fahrten in Fahrreihenfolge, die **Risse** in der Kette
+      und die Fahrten ohne Kurs. Ein Umlauf erscheint bei **jeder** Linie, die er berührt, mit allen seinen Fahrten
+- [x] **Abstand und Anschluss getrennt ausgewiesen** (`gap_before_seconds`, `linked_to_previous`): Ein großer
+      Abstand *mit* Anschluss ist eine lange Wende, ein Abstand *ohne* Anschluss eine gerissene Kette. Nötig, weil
+      ein Umlauf keine durchgehende Kette sein muss — beim Lösen eines Anschlusses bleibt der Kurs an beiden Teilen
+- [x] `LineVersionDiffService::pairing()` — die Fahrt→Fahrt-Zuordnung, die der Diff bisher nur zählte. Die
+      Vergleichslogik bleibt an einer Stelle, statt für die Übernahme gedoppelt zu werden
+- [x] `CourseCarryoverService`: Vorschau (**garantiert folgenlos**, eigener Endpunkt statt Schalter) und Anwendung.
+      Übertragen werden Kursnummer (auch bei verschobener Zeit), Aus-/Einrücken und Anschlüsse **innerhalb** der
+      Version. Bereits gesetzte Pflege gewinnt, deshalb ist ein zweiter Lauf folgenlos
+- [x] **Anschlüsse auf eine andere Linie bleiben liegen** und werden gemeldet: Die Gegenfahrt hängt noch an der
+      alten Fahrt, und ein Fahrzeug hat höchstens einen Vorgänger. Sie zu *verschieben* nähme der alten Version
+      ihre Kette, die für ihre verbliebenen Gültigkeitstage weiter stimmt. Das ist der Linienwechsel-Fall, also
+      kein Randfall — falls er im Betrieb häufig auftritt, ist der Entwurf hier neu zu bedenken
+- [x] `openapi.yaml` + Bruno (`admin/line-courses.bru`, `admin/course-carryover.bru`)
+- [x] Admin-Ansicht „Kurse" (Ketten je Linie, Filter „nur gerissene") + Übernahme-Dialog in „Versionen"
+- [x] Tests: `CourseCarryoverTest` (13), `CourseOverviewTest` (10) — inkl. folgenloser Vorschau, Idempotenz,
+      Linienwechsel-Sperre und Kette über Mitternacht
 
 ### Abnahmekriterium
 Ein Admin kann an einer Endstelle die dort endenden mit den dort beginnenden Fahrten verketten — auch über Linien
@@ -670,7 +688,7 @@ Linie wiederfinden. Perioden und Versionen bleiben dabei getrennt.
 | Nachtlinien: Betriebstag ≠ Kalendertag (N1 fährt montags anders als Di–Fr) | I-13 | ✅ entschieden 20.09.2026: **zwei Grenzen** — Taglinien 03:00, Nachtlinien 12:00 (FAHRPLANPERIODEN §10). Am Bestand gemessen: Beide Netze überlappen 03:45–06:40, eine gemeinsame Grenze ginge nicht; zwischen 07:00 und 22:00 fährt keine Nachtlinie. **Rückwirkend angewandt** durch Neuaufbau des Konsolidats aus dem Feed-Archiv (6 Feeds, 19.08.–20.09.) — die gesamte Historie ab 15.08. trägt das korrigierte Modell |
 | Kursnummer beim Linienwechsel | I-14 | ✅ entschieden 20.09.2026: **Nummer bleibt, Linie wechselt** (`1/03` → `13/03`); die Nummer gehört dem Umlauf (KURSE §2 K1) |
 | Führende Pflege-Wahrheit: Kette oder Kursnummer | I-14 | ✅ entschieden 20.09.2026: **die Verkettung führt**; die Kursnummer ist ein Etikett an der Kette (K2) |
-| Eindeutigkeit der Kursnummer (netzweit oder je Linie) | I-14 | ❓ offen — bewusst **kein** Unique-Index, nur Warnung bei Dubletten (K3). Nachziehbar, sobald die Pflege zeigt, was gilt |
+| Eindeutigkeit der Kursnummer (netzweit oder je Linie) | I-14 | ✅ geklärt 21.09.2026 — **je Linie bzw. Linienkombination**, nicht netzweit (K3). Nachschlagen beim Eintippen ist linienbezogen; kein Unique-Index, da die Linienmenge in `course_trips` steht |
 | Haltestelle als Ebene über dem Halt | I-14 | ✅ entschieden 20.09.2026: **eigene Entität** (`stop_groups`), automatisch über den Namen, von Hand nachpflegbar. Keine Abstands-Automatik — die weiten Fälle sind Betriebsfahrten (KURSE §2 K6) |
 | Übernahme gepflegter Kurse beim Versionswechsel | I-14 | ✅ entschieden 20.09.2026: **nur auf Knopfdruck**, mit Vorschau (K4) — eine verschobene Abfahrt kann die Wendezeit gekippt haben |
 | Umgang mit Sichtungen, die einer gepflegten Kette widersprechen | I-04/I-05 | ❓ offen — siehe KURSE §5 |

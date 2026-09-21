@@ -72,9 +72,10 @@ docs {
   Umlaeufe, die diese Linie **beruehren** — derselbe Umlauf erscheint also bei jeder seiner
   Linien.
 
-  **`duplicate` ist kein Fehler.** Ob die Kursnummer netzweit eindeutig ist oder nur je Linie,
-  ist offen (KURSE §2 K3). Ein Unique-Index waere eine Behauptung; die Meldung dagegen findet
-  Tippfehler und laesst sich folgenlos ignorieren.
+  **`duplicate` meint dieselbe Nummer auf ueberschneidenden Linien.** Die Kursnummer ist je Linie
+  bzw. Linienkombination eindeutig, nicht netzweit (KURSE §2 K3) — die „2" der 8 und die „2" der 6
+  sind zwei Umlaeufe und keine Dublette. Ein Unique-Index bleibt aus, weil die Linienmenge eines
+  Kurses in `course_trips` steht und sich mit jeder Verknuepfung aendert.
 
   **Eckzeiten folgen dem Betriebstag, nicht der Uhr.** Auf einer Nachtlinie beginnt der Umlauf
   abends und endet am Morgen darauf — `first_departure` kann also groesser aussehen als

@@ -46,10 +46,18 @@ final class ScheduleVersionService
         if ($window === null) {
             Log::warning('Version update without imported calendar');
 
-            return [
-                'signatures' => 0, 'versions_created' => 0, 'intervals_written' => 0,
-                'lines_changed' => 0, 'consolidated_stops' => 0, 'consolidated_trips' => 0,
-            ];
+            return $this->emptyResult();
+        }
+
+        // Der letzte Tag des Fensters wird nicht ausgewertet (siehe fingerprintsPerDay) —
+        // bleibt danach kein Tag übrig, gibt es nichts zu beobachten.
+        if ($window['from']->greaterThanOrEqualTo($window['to'])) {
+            Log::warning('Version update skipped: feed window shorter than two days', [
+                'window_from' => $window['from']->toDateString(),
+                'window_to' => $window['to']->toDateString(),
+            ]);
+
+            return $this->emptyResult();
         }
 
         $kette = $this->periodChain($window['from']);
@@ -94,10 +102,12 @@ final class ScheduleVersionService
                         $versionenNeu++;
                         $geaenderteLinien[$line] = true;
 
-                        // Nur ein **beobachteter** Wechsel zählt für den Periodenvorschlag.
-                        // Beginnt die Version an der Fensterkante, ist ihr Anfang bloß eine
-                        // Untergrenze — daraus lässt sich kein Wechseltag ableiten (§5.4 b).
-                        if ($abschnitt['from_confirmed']) {
+                        // Nur ein **beobachteter, bleibender** Wechsel zählt für den
+                        // Periodenvorschlag. Beginnt die Version an der Fensterkante, ist ihr
+                        // Anfang bloß eine Untergrenze — daraus lässt sich kein Wechseltag
+                        // ableiten (§5.4 b). Und kehrt der vorherige Fahrplan hinter ihr
+                        // zurück, war sie eine Abweichung, kein Wechsel (§4.3).
+                        if ($abschnitt['from_confirmed'] && ! $abschnitt['reverted']) {
                             $wechselProTag[$abschnitt['from']][$line] = true;
                         }
                     }
@@ -139,6 +149,17 @@ final class ScheduleVersionService
             'lines_changed' => count($geaenderteLinien),
             'consolidated_stops' => count($stopMap),
             'consolidated_trips' => $fahrten['consolidated_trips'],
+        ];
+    }
+
+    /**
+     * @return array{signatures: int, versions_created: int, intervals_written: int, lines_changed: int, consolidated_stops: int, consolidated_trips: int}
+     */
+    private function emptyResult(): array
+    {
+        return [
+            'signatures' => 0, 'versions_created' => 0, 'intervals_written' => 0,
+            'lines_changed' => 0, 'consolidated_stops' => 0, 'consolidated_trips' => 0,
         ];
     }
 
@@ -243,11 +264,9 @@ final class ScheduleVersionService
      */
     private function fingerprintsPerDay(CarbonImmutable $from, CarbonImmutable $to): array
     {
-        // Einen Tag über das Fenster hinaus laden: Der Betriebstag `to` endet erst in der
-        // Nacht auf `to + 1`, und deren Fahrten stehen im Feed unter dem Folgetag.
         $proTag = $this->serviceDays->activeServiceIdsForRange(
             $from->toDateString(),
-            $to->addDay()->toDateString(),
+            $to->toDateString(),
         );
 
         $verschoben = $this->operatingDay->shiftMap();
@@ -271,11 +290,15 @@ final class ScheduleVersionService
         $result = [];
         $aktiveLinien = [];
 
-        $letzterTag = $to->toDateString();
+        // Der letzte Tag des Fensters ist nur zur Hälfte beobachtbar: Sein Betriebstag endet
+        // erst in der Nacht auf `to + 1`, und deren Fahrten stehen im Feed unter dem Folgetag,
+        // der außerhalb liegt. Gemessen am 16.10.2026 fehlten dadurch auf jeder Nachtlinie 13
+        // von 18 Fahrten — ein Fingerprint, der einen Fahrplanwechsel vortäuscht, den es nicht
+        // gibt. Beobachtet wird deshalb nur bis zum Vortag; der letzte Tag kommt im nächsten
+        // Import als Innentag wieder, dann vollständig.
+        $letzterTag = $to->subDay()->toDateString();
 
         foreach ($proTag as $date => $serviceIds) {
-            // Der Zusatztag hinter dem Fenster liefert nur die Nacht des letzten Betriebstags;
-            // als eigener Betriebstag wäre er unvollständig beobachtet.
             if ($date > $letzterTag) {
                 continue;
             }
@@ -394,8 +417,12 @@ final class ScheduleVersionService
      * Abschnitte begrenzen die Nachbarn (der Wechsel ist beobachtet), erzeugen selbst aber
      * keine Version — „kein Betrieb" ist kein Fahrplanstand.
      *
+     * Jeder Abschnitt trägt zusätzlich, ob der Fahrplan **danach zum vorherigen zurückkehrt**
+     * (`reverted`). Das unterscheidet eine Abweichung von einem Wechsel — siehe
+     * `offerPeriodChanges`.
+     *
      * @param  array<int, array{date: string, fingerprint: string|null}>  $tage
-     * @return array<int, array{fingerprint: string, from: string, to: string, from_confirmed: bool, to_confirmed: bool}>
+     * @return array<int, array{fingerprint: string, from: string, to: string, from_confirmed: bool, to_confirmed: bool, reverted: bool}>
      */
     private function foldIntoIntervals(array $tage): array
     {
@@ -417,6 +444,7 @@ final class ScheduleVersionService
                 'to' => $tag['date'],
                 'from_confirmed' => false,
                 'to_confirmed' => false,
+                'reverted' => false,
             ];
         }
 
@@ -426,10 +454,22 @@ final class ScheduleVersionService
             $abschnitte[$i]['to_confirmed'] = $i < count($abschnitte) - 1;
         }
 
-        return array_values(array_filter(
+        $abschnitte = array_values(array_filter(
             $abschnitte,
             static fn (array $a): bool => $a['fingerprint'] !== null,
         ));
+
+        // Kehrt der vorherige Fahrplan hinter einem Abschnitt zurück, war der Abschnitt eine
+        // Abweichung und kein Wechsel. Erst nach dem Filtern geprüft: Ein Tag ohne Betrieb
+        // trennt die beiden Vorkommen zwar, ist aber selbst kein Fahrplanstand. Am Rand des
+        // Laufs ist die Rückkehr nicht beobachtbar — dort bleibt der Abschnitt ein Wechsel.
+        foreach (array_keys($abschnitte) as $i) {
+            $abschnitte[$i]['reverted'] = $i > 0
+                && $i < count($abschnitte) - 1
+                && $abschnitte[$i - 1]['fingerprint'] === $abschnitte[$i + 1]['fingerprint'];
+        }
+
+        return $abschnitte;
     }
 
     private function findOrCreateVersion(SchedulePeriod $periode, string $line, string $dayType, string $fingerprint, ?bool &$neu): LineVersion

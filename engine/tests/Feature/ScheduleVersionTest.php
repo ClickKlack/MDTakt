@@ -121,12 +121,29 @@ final class ScheduleVersionTest extends TestCase
         $version = LineVersion::query()->where('line', '1')->sole();
         $this->assertSame(1, $version->version_no);
 
-        // Ein einziger Abschnitt: beide Grenzen liegen an der Fensterkante, also offen.
+        // Ein einziger Abschnitt: beide Grenzen liegen an der Fensterkante, also offen. Er
+        // endet am 27.08. und nicht am 28.08. — der letzte Tag des Fensters ist nur zur
+        // Haelfte beobachtbar und wird nicht ausgewertet (FAHRPLANPERIODEN §10).
         $interval = $version->intervals()->sole();
         $this->assertSame('2026-08-17', $interval->valid_from->toDateString());
-        $this->assertSame('2026-08-28', $interval->valid_to->toDateString());
+        $this->assertSame('2026-08-27', $interval->valid_to->toDateString());
         $this->assertFalse($interval->from_confirmed);
         $this->assertFalse($interval->to_confirmed);
+    }
+
+    public function test_a_feed_window_of_a_single_day_yields_no_observation(): void
+    {
+        // Der letzte Tag eines Fensters ist nur zur Haelfte beobachtbar und faellt heraus
+        // (§10). Bleibt danach kein Tag uebrig, gibt es nichts auszuwerten — und keinen
+        // Fahrplanstand, den ein halber Tag belegen koennte.
+        $line = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
+        $this->werktagsService('S1', '2026-08-17', '2026-08-17');
+        $this->fahrt('T1', 'S1', $line->route_id, ['07:00:00', '07:20:00']);
+
+        $result = $this->konsolidieren();
+
+        $this->assertSame(0, $result['versions_created']);
+        $this->assertSame(0, LineVersion::query()->count());
     }
 
     public function test_schedule_change_inside_the_window_creates_two_versions_with_a_confirmed_boundary(): void
@@ -325,7 +342,7 @@ final class ScheduleVersionTest extends TestCase
         $this->konsolidieren();
 
         $alteVersion = LineVersion::query()->where('line', '1')->sole();
-        $this->assertSame('2026-08-28', $alteVersion->intervals()->sole()->valid_to->toDateString());
+        $this->assertSame('2026-08-27', $alteVersion->intervals()->sole()->valid_to->toDateString());
 
         // Zweiter Lauf: Der Feed revidiert die zweite Woche rueckwirkend.
         StopTime::query()->delete();

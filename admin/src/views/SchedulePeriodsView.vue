@@ -176,15 +176,18 @@ async function remove(period: SchedulePeriod): Promise<void> {
           </p>
           <p class="mt-2 text-xs text-amber-800">Betroffen: {{ offer.lines.join(', ') }}</p>
 
-          <!-- Ein Wechseltag am Rand des Feed-Fensters ruht auf einer einzigen Beobachtung.
-               Ihn als Fahrplanwechsel festzuschreiben, wäre verfrüht (§5.4 b). -->
+          <!-- Ein Wechseltag am Rand des beobachteten Zeitraums ruht auf einer einzigen
+               Beobachtung. Ihn als Fahrplanwechsel festzuschreiben, wäre verfrüht (§5.4 b).
+               Gezählt werden dabei nur die oben genannten Linien — eine fremde Linie darf
+               dem Vorschlag keine Beleglage leihen. -->
           <p
             v-if="offer.single_day_observation"
             class="mt-3 rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-xs text-amber-900"
           >
-            <strong>Nur ein beobachteter Tag.</strong> Der Wechsel liegt am Rand des
-            Feed-Fensters — dahinter reichen die Daten nicht. Ob das ein echter Fahrplanwechsel
-            ist oder ein Randeffekt, zeigt erst der nächste Import. Bis dahin besser abwarten.
+            <strong>Nur ein beobachteter Tag.</strong> Keine der betroffenen Linien behält den
+            neuen Fahrplan über den Wechseltag hinaus — dahinter reichen die Daten nicht. Ob das
+            ein echter Fahrplanwechsel ist oder ein Randeffekt, zeigt erst der nächste Import.
+            Bis dahin besser abwarten.
           </p>
           <p v-else class="mt-3 text-xs text-amber-800">
             Beobachtet bis {{ formatDate(offer.observed_until) }} — der neue Fahrplan hat sich

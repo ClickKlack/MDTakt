@@ -7,8 +7,10 @@ namespace Tests\Feature;
 use App\Enums\FahrplanTyp;
 use App\Enums\PeriodOfferStatus;
 use App\Models\Calendar;
+use App\Models\CalendarDate;
 use App\Models\ConsolidatedTrip;
 use App\Models\LineVersion;
+use App\Models\LineVersionInterval;
 use App\Models\PeriodChangeOffer;
 use App\Models\Route;
 use App\Models\SchedulePeriod;
@@ -60,6 +62,16 @@ final class PeriodChangeOfferTest extends TestCase
                 'arrival_time' => $zeit,
             ]);
         }
+    }
+
+    private function taeglichService(string $serviceId, string $von, string $bis): void
+    {
+        Calendar::factory()->create([
+            'service_id' => $serviceId,
+            'monday' => true, 'tuesday' => true, 'wednesday' => true, 'thursday' => true,
+            'friday' => true, 'saturday' => true, 'sunday' => true,
+            'start_date' => $von, 'end_date' => $bis,
+        ]);
     }
 
     private function werktagsService(string $serviceId, string $von, string $bis): void
@@ -222,10 +234,44 @@ final class PeriodChangeOfferTest extends TestCase
             ->assertJsonPath('error.code', 409);
     }
 
-    public function test_a_change_on_the_last_window_day_is_marked_as_a_single_observation(): void
+    public function test_a_change_on_the_last_observed_day_is_marked_as_a_single_observation(): void
     {
-        // 4 von 10 Linien wechseln am 28.08. — dem letzten Werktag des Fensters. Dahinter
-        // reichen die Daten nicht; ein Fensterrand ist kein Fahrplanwechsel (§5.4 b).
+        // 4 von 10 Linien wechseln am 27.08. — dem letzten ausgewerteten Tag des Fensters
+        // (der 28.08. faellt als Fensterrand heraus, §10). Dahinter reichen die Daten nicht;
+        // ein Rand ist kein Fahrplanwechsel (§5.4 b).
+        for ($i = 1; $i <= 10; $i++) {
+            $route = Route::factory()->create(['route_id' => "R{$i}", 'route_short_name' => (string) $i]);
+            $minute = str_pad((string) $i, 2, '0', STR_PAD_LEFT);
+
+            if ($i <= 4) {
+                $this->werktagsService("ALT{$i}", '2026-08-17', '2026-08-26');
+                $this->fahrt("T-ALT{$i}", "ALT{$i}", $route->route_id, ["07:{$minute}:00", "07:{$minute}:00"]);
+                $this->werktagsService("NEU{$i}", '2026-08-27', '2026-08-27');
+                $this->fahrt("T-NEU{$i}", "NEU{$i}", $route->route_id, ["08:{$minute}:00", "08:{$minute}:00"]);
+
+                continue;
+            }
+
+            $this->werktagsService("S{$i}", '2026-08-17', '2026-08-28');
+            $this->fahrt("T{$i}", "S{$i}", $route->route_id, ["09:{$minute}:00", "09:{$minute}:00"]);
+        }
+
+        $this->konsolidieren();
+
+        $this->withToken($this->adminToken())
+            ->getJson('/api/v1/admin/period-change-offers')
+            ->assertOk()
+            ->assertJsonPath('data.0.suggested_from', '2026-08-27')
+            ->assertJsonPath('data.0.observed_until', '2026-08-27')
+            ->assertJsonPath('data.0.single_day_observation', true);
+    }
+
+    public function test_the_last_day_of_the_feed_window_is_not_observed_at_all(): void
+    {
+        // Derselbe Aufbau einen Tag spaeter: Der Wechsel faellt auf den 28.08., den letzten
+        // Tag des Fensters. Dessen Betriebstag endet erst in der Nacht auf den 29.08., und
+        // die steht im Feed unter einem Tag, den es nicht gibt — der Tag ist nur zur Haelfte
+        // beobachtbar und wird gar nicht erst ausgewertet (§10).
         for ($i = 1; $i <= 10; $i++) {
             $route = Route::factory()->create(['route_id' => "R{$i}", 'route_short_name' => (string) $i]);
             $minute = str_pad((string) $i, 2, '0', STR_PAD_LEFT);
@@ -245,11 +291,162 @@ final class PeriodChangeOfferTest extends TestCase
 
         $this->konsolidieren();
 
+        $this->assertDatabaseCount('period_change_offers', 0);
+        $this->assertSame(10, LineVersion::query()->count(), 'Der Fahrplan des 28.08. wird nicht beobachtet');
+
+        // Die Beobachtung endet am Vortag — und offen, denn der naechste Import holt den Tag
+        // als Innentag nach.
+        $letztes = LineVersion::query()->where('line', '1')->sole()
+            ->intervals()->orderByDesc('valid_to')->first();
+        $this->assertSame('2026-08-27', $letztes->valid_to->toDateString());
+        $this->assertFalse($letztes->to_confirmed);
+    }
+
+    public function test_a_night_line_keeps_its_version_across_the_window_edge(): void
+    {
+        // Der reale Fall vom 16.10.2026: Eine Nachtlinie faehrt ihre Nacht im Feed unter dem
+        // Folgetag. Am letzten Fenstertag fehlt diese Nacht — wertete man den Tag aus, saehe
+        // jede Nachtlinie dort einen anderen Fahrplan, und neun davon reichten aus, um einen
+        // Fahrplanwechsel vorzutaeuschen, den es nicht gibt.
+        for ($i = 1; $i <= 10; $i++) {
+            $route = Route::factory()->create(['route_id' => "R{$i}", 'route_short_name' => "N{$i}"]);
+            $minute = str_pad((string) $i, 2, '0', STR_PAD_LEFT);
+
+            $this->taeglichService("S{$i}", '2026-08-17', '2026-08-28');
+            $this->fahrt("T-ABEND{$i}", "S{$i}", $route->route_id, ["22:{$minute}:00", "22:{$minute}:00"]);
+            // Vor der Nachtlinien-Grenze (12:00): gehoert zum Betriebstag des Vortags.
+            $this->fahrt("T-NACHT{$i}", "S{$i}", $route->route_id, ["02:{$minute}:00", "02:{$minute}:00"]);
+        }
+
+        $this->konsolidieren();
+
+        $this->assertDatabaseCount('period_change_offers', 0);
+        $this->assertSame(
+            10,
+            LineVersion::query()->where('day_type', FahrplanTyp::MoFrNormal)->count(),
+            'Je Nachtlinie genau eine Mo-Fr-Version — der Abendteil des Fensterrands bildet keine zweite',
+        );
+    }
+
+    /**
+     * Legt `$anzahl` Linien an; die ersten `$wechselnd` fahren an den Tagen `$sondertage`
+     * nach einem anderen Fahrplan und danach wieder nach dem alten.
+     *
+     * @param  array<int, string>  $sondertage
+     */
+    private function netzMitSonderverkehr(int $anzahl, int $wechselnd, array $sondertage): void
+    {
+        for ($i = 1; $i <= $anzahl; $i++) {
+            $route = Route::factory()->create(['route_id' => "R{$i}", 'route_short_name' => (string) $i]);
+            $minute = str_pad((string) $i, 2, '0', STR_PAD_LEFT);
+
+            $this->werktagsService("S{$i}", '2026-08-17', '2026-08-28');
+            $this->fahrt("T{$i}", "S{$i}", $route->route_id, ["07:{$minute}:00", "07:{$minute}:00"]);
+
+            if ($i > $wechselnd) {
+                continue;
+            }
+
+            // Ohne Wochenmuster — dieser Service faehrt ausschliesslich an den Sondertagen.
+            Calendar::factory()->create([
+                'service_id' => "SONDER{$i}",
+                'monday' => false, 'tuesday' => false, 'wednesday' => false, 'thursday' => false,
+                'friday' => false, 'saturday' => false, 'sunday' => false,
+                'start_date' => '2026-08-17', 'end_date' => '2026-08-28',
+            ]);
+            $this->fahrt("T-SONDER{$i}", "SONDER{$i}", $route->route_id, ["08:{$minute}:00", "08:{$minute}:00"]);
+
+            // Der Regelverkehr entfaellt an den Sondertagen, der Sonderverkehr faehrt nur dort.
+            foreach ($sondertage as $tag) {
+                CalendarDate::factory()->create(['service_id' => "S{$i}", 'date' => $tag, 'exception_type' => 2]);
+                CalendarDate::factory()->create(['service_id' => "SONDER{$i}", 'date' => $tag, 'exception_type' => 1]);
+            }
+        }
+    }
+
+    public function test_a_one_day_deviation_that_reverts_is_no_period_change(): void
+    {
+        // Der reale Fall vom 03.10.2026: ein Feiertag, an dem 10 von 30 Linien anders fahren
+        // — und am Tag darauf wieder wie zuvor. Anteilig ueber der Schwelle, fachlich aber
+        // kein Fahrplanwechsel: Ein Wechsel bleibt, eine Abweichung kehrt zurueck (§4.3).
+        $this->netzMitSonderverkehr(10, 5, ['2026-08-24']);
+        $this->konsolidieren();
+
+        $this->assertDatabaseCount('period_change_offers', 0);
+
+        // Die Abweichung selbst bleibt als Version erhalten — auch ein einzelner Tag ist ein
+        // Fahrplanstand (§5.4). Unterdrueckt wird nur der Vorschlag.
+        $this->assertSame(15, LineVersion::query()->count(), '10 Linien, fuenf davon mit Sonderfahrplan');
+
+        $intervalle = LineVersion::query()->where('line', '1')->orderBy('version_no')->get()
+            ->flatMap(fn (LineVersion $v): array => $v->intervals()->orderBy('valid_from')->get()
+                ->map(fn ($iv): string => $iv->valid_from->toDateString().'..'.$iv->valid_to->toDateString())->all())
+            ->all();
+
+        // Der alte Fahrplan kehrt zurueck: derselbe Fingerprint, dieselbe Version, ein
+        // zweites Intervall.
+        $this->assertSame(['2026-08-17..2026-08-21', '2026-08-25..2026-08-27', '2026-08-24..2026-08-24'], $intervalle);
+    }
+
+    public function test_a_multi_day_deviation_that_reverts_is_no_period_change_either(): void
+    {
+        // Dieselbe Regel traegt laenger: Ein Ersatzverkehr ueber drei Tage ist kein
+        // Fahrplanwechsel, solange der alte Fahrplan danach zurueckkehrt.
+        $this->netzMitSonderverkehr(10, 5, ['2026-08-24', '2026-08-25', '2026-08-26']);
+        $this->konsolidieren();
+
+        $this->assertDatabaseCount('period_change_offers', 0);
+    }
+
+    public function test_a_deviation_that_does_not_revert_is_still_offered(): void
+    {
+        // Gegenprobe: Kehrt der alte Fahrplan nicht zurueck, bleibt es ein Wechsel — die
+        // Regel darf den Normalfall nicht mit unterdruecken.
+        $this->netzMitSonderverkehr(10, 5, ['2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27']);
+        $this->konsolidieren();
+
+        $offer = PeriodChangeOffer::query()->sole();
+        $this->assertSame('2026-08-24', $offer->suggested_from->toDateString());
+        $this->assertSame(['1', '2', '3', '4', '5'], $offer->lines);
+    }
+
+    public function test_the_evidence_counts_only_the_lines_of_the_offer(): void
+    {
+        // Realer Fall vom 03.10.2026: Der Vorschlag umfasst die Linien 1 und 2, beide mit
+        // genau einem beobachteten Tag. Linie 9 wechselt am selben Tag und bleibt dabei —
+        // sie gehoert aber nicht zum Vorschlag und darf ihm keine Beleglage leihen, die
+        // keine seiner eigenen Linien hat. Der Zustand wird direkt aufgebaut: Er entsteht
+        // im Betrieb erst ueber zwei Importe, denn ein Tag wird nur einmal vorgeschlagen.
+        $f = new ConsolidatedFixtures;
+        $periode = $f->periode();
+
+        PeriodChangeOffer::query()->create([
+            'suggested_from' => '2026-08-24',
+            'changed_line_count' => 2,
+            'active_line_count' => 3,
+            'lines' => ['1', '2'],
+            'status' => PeriodOfferStatus::Open,
+        ]);
+
+        foreach (['1', '2'] as $line) {
+            LineVersionInterval::factory()->create([
+                'line_version_id' => $f->version($line, FahrplanTyp::MoFrNormal, 2, $periode)->id,
+                'valid_from' => '2026-08-24',
+                'valid_to' => '2026-08-24',
+            ]);
+        }
+
+        LineVersionInterval::factory()->create([
+            'line_version_id' => $f->version('9', FahrplanTyp::MoFrNormal, 2, $periode)->id,
+            'valid_from' => '2026-08-24',
+            'valid_to' => '2026-09-04',
+        ]);
+
         $this->withToken($this->adminToken())
             ->getJson('/api/v1/admin/period-change-offers')
             ->assertOk()
-            ->assertJsonPath('data.0.suggested_from', '2026-08-28')
-            ->assertJsonPath('data.0.observed_until', '2026-08-28')
+            ->assertJsonPath('data.0.suggested_from', '2026-08-24')
+            ->assertJsonPath('data.0.observed_until', '2026-08-24')
             ->assertJsonPath('data.0.single_day_observation', true);
     }
 
@@ -263,7 +460,7 @@ final class PeriodChangeOfferTest extends TestCase
             ->getJson('/api/v1/admin/period-change-offers')
             ->assertOk()
             ->assertJsonPath('data.0.suggested_from', '2026-08-24')
-            ->assertJsonPath('data.0.observed_until', '2026-08-28')
+            ->assertJsonPath('data.0.observed_until', '2026-08-27')
             ->assertJsonPath('data.0.single_day_observation', false);
     }
 

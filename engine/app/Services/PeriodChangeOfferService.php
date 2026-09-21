@@ -52,11 +52,17 @@ final class PeriodChangeOfferService
     /**
      * Wie weit reicht die Beobachtung hinter dem Wechseltag?
      *
-     * Fällt ein Wechsel auf den **letzten Tag des Feed-Fensters**, ist er durch genau einen Tag
+     * Fällt ein Wechsel auf den **Rand des beobachteten Fensters**, ist er durch genau einen Tag
      * belegt — und ein Fensterrand ist kein Fahrplanwechsel (FAHRPLANPERIODEN §5.4 b). Der erste
      * Folge-Import am 23.08.2026 zeigte das an einem realen Fall: 15 Linien änderten sich zum
      * 21.09., dem letzten Tag des Fensters. Ob das ein echter Fahrplanwechsel ist oder ein
      * Randeffekt, entscheidet erst der nächste Lauf.
+     *
+     * Gezählt wird allein die Gültigkeit der **im Vorschlag gelisteten** Linien. Über alle
+     * Intervalle des Tages gerechnet, trug eine beliebige andere Linie die Kennzahl: Der
+     * Vorschlag zum 03.10.2026 meldete „beobachtet bis 11.10." und galt damit als gut belegt,
+     * obwohl jede seiner zehn Linien dort eine Eintagsversion hatte — die acht Tage stammten
+     * von Linie 9, die gar nicht zum Vorschlag gehörte.
      *
      * Bewusst zur Lesezeit berechnet statt beim Anlegen gespeichert: Deckt ein späterer Import
      * den Zeitraum hinter dem Wechseltag ab, verschwindet der Hinweis von selbst.
@@ -67,6 +73,10 @@ final class PeriodChangeOfferService
 
         $beobachtetBis = LineVersionInterval::query()
             ->whereDate('valid_from', $tag)
+            ->whereIn(
+                'line_version_id',
+                LineVersion::query()->select('id')->whereIn('line', $vorschlag->lines),
+            )
             ->max('valid_to');
 
         $bis = $beobachtetBis === null ? $tag : CarbonImmutable::parse($beobachtetBis)->toDateString();

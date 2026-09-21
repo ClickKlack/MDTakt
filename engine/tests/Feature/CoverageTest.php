@@ -78,7 +78,10 @@ final class CoverageTest extends TestCase
             'service_id' => 'SA',
             'monday' => false, 'tuesday' => false, 'wednesday' => false, 'thursday' => false,
             'friday' => false, 'saturday' => true, 'sunday' => false,
-            'start_date' => '2026-08-15', 'end_date' => '2026-09-05',
+            // Einen Tag ueber den letzten Samstag hinaus: Der letzte Tag des Feed-Fensters
+            // wird nicht ausgewertet (FAHRPLANPERIODEN §10), und hier geht es um die
+            // Samstags-Kette, nicht um den Fensterrand.
+            'start_date' => '2026-08-15', 'end_date' => '2026-09-06',
         ]);
         $this->fahrt('T1', 'SA', $line->route_id, ['07:00:00', '07:20:00']);
 
@@ -101,12 +104,13 @@ final class CoverageTest extends TestCase
     {
         $line = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
 
-        // Erster Import: Fenster 17.–21.08.
+        // Erster Import: Fenster 17.–22.08., beobachtet bis zum 21.08. — der letzte Tag des
+        // Fensters wird nicht ausgewertet (FAHRPLANPERIODEN §10).
         Calendar::factory()->create([
             'service_id' => 'W1',
             'monday' => true, 'tuesday' => true, 'wednesday' => true, 'thursday' => true,
             'friday' => true, 'saturday' => false, 'sunday' => false,
-            'start_date' => '2026-08-17', 'end_date' => '2026-08-21',
+            'start_date' => '2026-08-17', 'end_date' => '2026-08-22',
         ]);
         $this->fahrt('T1', 'W1', $line->route_id, ['07:00:00', '07:20:00']);
         $this->konsolidieren();

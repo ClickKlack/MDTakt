@@ -122,6 +122,21 @@ Zwei Ebenen: **Perioden** (kuratiert, netzweit) und **Linien-Versionen** (automa
   gleichzeitig an, eine einzelne Baustelle drei bis sechs.
 - **Gezählt werden nur beobachtete Wechsel:** Eine Version, die an der Feed-Fensterkante beginnt, ist bloß eine
   Untergrenze (§5.4 b) und ergibt keinen Wechseltag. Der erste Import löst deshalb keinen Vorschlag aus.
+- **Gezählt wird nur, was bleibt (21.09.2026).** Kehrt hinter einem Abschnitt der **vorherige Fingerprint**
+  zurück, war er eine Abweichung und kein Wechsel — ein Fahrplanwechsel ist per Definition dauerhaft. Die Prüfung
+  ist rein lokal: Abschnitt *i* zählt nicht, wenn *i−1* und *i+1* denselben Fingerprint tragen. Am Rand des Laufs
+  ist die Rückkehr nicht beobachtbar; dort bleibt der Abschnitt ein Wechsel.
+  Der Fall, der das zeigte: Der **03.10.2026** (Samstag **und** Feiertag) meldete 10 von 30 Linien — 33,3 %, knapp
+  über der Schwelle. Neun davon waren Nachtlinien, deren **Tagteil unverändert** war; abgewichen ist allein ihre
+  Nacht, die als Samstagnacht im `so_feiertag`-Strang liegt (siehe §10). Jede dieser Versionen galt genau einen
+  Tag, am 04.10. lief der alte Fahrplan weiter. Ohne die Nachtlinien blieb Linie 1 mit einer echten
+  Feiertagsabweichung — 3,3 %.
+  **Die Abweichung selbst bleibt eine Version** (§5.4): Der 03.10. *hat* einen eigenen Fahrplan. Unterdrückt wird
+  nur der Vorschlag.
+- **Die Beleglage zählt nur die Linien des Vorschlags (21.09.2026).** `observed_until` lief zuvor über *alle*
+  Intervalle des Wechseltags. Der Vorschlag zum 03.10. meldete dadurch „beobachtet bis 11.10." und galt als gut
+  belegt, obwohl jede seiner zehn Linien dort eine Eintagsversion hatte — die acht Tage stammten von Linie 9, die
+  gar nicht zum Vorschlag gehörte. Der Admin entscheidet an dieser Zahl; sie darf nichts Fremdes mitzählen.
 
 ### 4.4 `status` ist abgeleitet, nicht gespeichert (21.09.2026)
 
@@ -479,10 +494,42 @@ Genau dafür ist das Feed-Archiv gebaut (`FeedArchiveService`): *„Aus ihm läs
 rückwirkend aufbauen."* Dies war sein erster Einsatz — und er hat getragen. **Wer das Archiv nicht sichert, kann
 eine solche Korrektur nicht nachholen.**
 
-### Was offen bleibt
+### Der letzte Fenstertag wird nicht ausgewertet (gelöst 21.09.2026)
 
 **Der Betriebstag-Wechsel ist an der Fensterkante unvollständig beobachtbar.** Der letzte Tag eines Feed-Fensters
 sieht nur seine Abendseite; die zugehörige Nacht steht im Feed bereits unter dem Folgetag, der außerhalb liegt.
-Solche Tage erhalten deshalb eine Version mit auffällig wenigen Fahrten (am 16.10.2026: fünf statt achtzehn auf
-der N1). Das ist dieselbe Klasse von Randeffekt wie die offenen Grenzen aus §5.4 b und verschwindet, sobald ein
-späterer Feed den Tag im Inneren abdeckt.
+
+Das blieb zunächst als Hinweis stehen — bis sich zeigte, dass es nicht bei „auffällig wenigen Fahrten" bleibt: Am
+**16.10.2026**, dem letzten Tag seines Fensters, fehlten auf jeder Nachtlinie 13 von 18 Fahrten. Sechzehn Linien
+bekamen dadurch einen neuen Fingerprint, und das System bot einen **Periodenwechsel** an, den es nie gegeben hat
+(16 von 34 Linien = 47 %). Ein halb beobachteter Tag ist keine Beobachtung.
+
+**Seitdem endet die Auswertung am vorletzten Tag des Fensters** (`ScheduleVersionService::fingerprintsPerDay`).
+Die Intervalle enden dort mit `to_confirmed = false` — was sie an der Fensterkante ohnehin taten; die rechte
+Grenze war schon immer nur eine Untergrenze (§5.4 b). Der Tag kommt beim nächsten Import als Innentag wieder,
+dann vollständig. Ein Fenster, das nach dieser Regel keinen Tag mehr übrig lässt, wird mit einer `WARNING`
+übersprungen.
+
+Der Preis: Ein echter Fahrplanwechsel genau am letzten Fenstertag wird einen Import später erkannt. Das ist kein
+Verlust, sondern die ehrlichere Aussage — ein einzelner, halbierter Tag trägt keine Periodengrenze.
+
+### Was offen bleibt
+
+**Der Nachtverkehr folgt einem eigenen Rhythmus, nicht dem Fahrplantyp seines Betriebstags.** Ein Betriebstag
+trägt genau einen Typ (§2.1) — sein Tagteil und sein Nachtteil können aber verschiedenen Mustern folgen:
+
+- **03.10.2026** (Samstag **und** Feiertag) → `so_feiertag`. Sein Tagteil ist der eines Sonntags, seine Nacht ist
+  **zeichengleich mit der Nacht des 10.10.** (normaler Samstag): dieselben Abfahrtsfolgen, 15 bis 16 Fahrten je
+  Nachtlinie statt der 11 bis 13 einer Sonntagnacht. Weil die Signatur den `day_type` enthält, hasht dieselbe
+  Samstagnacht unter `so_feiertag` anders als unter `sa` — jede Nachtlinie bekommt dort eine Eintagsversion.
+- **02.10.2026** (Freitag, Vorabend des Feiertags) → `mo_fr`, mit 16 statt 13 Nachtfahrten auf der N1. Auch hier
+  eine Eintagsversion.
+
+Der zweite Fall zeigt, warum eine naheliegende Korrektur zu kurz greift: Den Nachtteil nach dem **Kalender-
+Wochentag** zu klassifizieren, löste den 03.10., nicht aber den 02.10. Maßgeblich ist offenbar nicht der Wochentag,
+sondern ob der **Folgetag ein Ruhetag** ist — der Nachtrhythmus ist eine eigene Dimension.
+
+Ein Umbau wäre teuer: Die Signatur ist `SHA(line | day_type | Abfahrtsfolge)`; ein geänderter `day_type` macht
+sämtliche Nachtlinien-Fingerprints neu und verlangt einen chronologischen Neuaufbau des Konsolidats aus dem
+Feed-Archiv. Solange der Effekt nur **Eintagsversionen** erzeugt — die korrekt sind und seit dem 21.09.2026 keinen
+Periodenwechsel mehr vorschlagen (§4.3) — ist der Leidensdruck gering. Die Frage gehört in eine eigene Iteration.

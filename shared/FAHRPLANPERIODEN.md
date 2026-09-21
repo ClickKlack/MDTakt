@@ -513,6 +513,19 @@ dann vollständig. Ein Fenster, das nach dieser Regel keinen Tag mehr übrig lä
 Der Preis: Ein echter Fahrplanwechsel genau am letzten Fenstertag wird einen Import später erkannt. Das ist kein
 Verlust, sondern die ehrlichere Aussage — ein einzelner, halbierter Tag trägt keine Periodengrenze.
 
+**Die Bestände davor räumt `schedule:repair-artifacts` nach** (einmalig je Bestand, siehe DEPLOYMENT §7b-bis): Es
+nimmt die Intervalle des halb gesehenen Tages zurück, löscht die dadurch verwaisten Versionen und **öffnet die
+Grenze davor wieder** — sie galt als gesichert, weil dahinter ein Fahrplan gesehen wurde, den es nicht gab. Dazu
+löscht es offene Vorschläge, die der Bestand nicht mehr trägt: solche ohne beobachteten Wechsel und solche, deren
+Abweichung zurückkehrt. **Gelöscht, nicht abgelehnt** — „abgelehnt" hieße, der Tag sei geprüft und verworfen
+worden, und kein späterer Import dürfte ihn je wieder vorschlagen. Er war aber nie geprüft, sondern nie beobachtet.
+
+Bewusst **kein Neuaufbau aus dem Feed-Archiv**, obwohl der die Historie vollständiger glattzöge: `course_trips`
+und `trip_links` hängen per `cascadeOnDelete` an `consolidated_trips` und damit an den Linien-Versionen — ein
+Neuaufbau kostet die gesamte Kurs- und Anschlusspflege (am 21.09.2026: 280 Zuordnungen, 427 Anschlüsse). Was er
+zusätzlich brächte, sind ältere Fensterkanten, an denen derselbe Effekt gewirkt hat; das ist kosmetisch und
+betrifft nur die Anzeige „gesichert" gegen „offen".
+
 ### Was offen bleibt
 
 **Der Nachtverkehr folgt einem eigenen Rhythmus, nicht dem Fahrplantyp seines Betriebstags.** Ein Betriebstag

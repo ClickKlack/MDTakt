@@ -419,6 +419,33 @@ cp scripts/deploy.local.env.example scripts/deploy.local.env   # einmalig, Werte
 Das Skript bricht ab, wenn der Working Tree nicht sauber ist (`--allow-dirty` überstimmt das),
 wenn die PHP-Version älter als 8.3 ist oder wenn auf dem Server keine `.env` liegt.
 
+## 7b-bis. Einmalige Bereinigung nach dem Deployment (21.09.2026)
+
+Mit den korrigierten Regeln zur Perioden-Erkennung (FAHRPLANPERIODEN §4.3, §10) entstehen zwei Arten von
+Artefakten nicht mehr — **die Daten davor tragen sie aber weiter**: Beobachtungen vom halb gesehenen letzten
+Fenstertag und Periodenwechsel-Vorschläge, die darauf oder auf einer Eintagsabweichung ruhen.
+
+`schedule:repair-artifacts` räumt das nach. **Bewusst nicht im Deployment-Skript** — eine Bereinigung, die Daten
+löscht, gehört nicht in einen Vorgang, der wöchentlich läuft.
+
+```bash
+php artisan schedule:repair-artifacts --dry-run    # erst ansehen, schreibt nichts
+php artisan schedule:repair-artifacts              # dann anwenden
+```
+
+| Option | Bedeutung |
+|---|---|
+| `--dry-run` | führt den Lauf aus und verwirft ihn; der Bericht zeigt, was ein echter Lauf täte |
+| `--day=JJJJ-MM-TT` | der halb beobachtete Tag. Vorgabe: letzter Tag des **aktuellen** Feed-Fensters. Ausdrücklich nötig, wenn seit dem fehlerhaften Lauf schon ein neuer Feed importiert wurde — der alte Fensterrand liegt dann im Inneren und ist von außen nicht mehr erkennbar |
+
+Der Lauf ist idempotent; ein zweiter Aufruf meldet „Nichts zu tun". **Kurse und Anschlüsse sind nicht betroffen:**
+Gelöscht wird nur eine Version, die danach keine Gültigkeit mehr trägt — an einer solchen hängt kein gepflegter
+Tag. Im Dev-Bestand waren es 16 Versionen mit 1522 Fahrten und null Kurszuordnungen.
+
+> Der naheliegende Alternativweg — Konsolidat aus dem Feed-Archiv neu aufbauen (§10) — **kostet die gesamte
+> Kurspflege**: `course_trips` und `trip_links` hängen per `cascadeOnDelete` an `consolidated_trips` und damit an
+> den Linien-Versionen. Dafür ist er hier der falsche Weg.
+
 ## 7c. Erstmalige Einrichtung der `.env` auf dem Server
 
 Die `.env` enthält Geheimnisse und wird **nie** vom Skript übertragen. Einmalig von Hand:

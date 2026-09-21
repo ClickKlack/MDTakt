@@ -45,15 +45,20 @@ Beide PHP-Projekte legen die Zielplattform deshalb in `composer.json` fest:
 
 | Projekt | `config.platform.php` | Warum dieser Wert |
 |---|---|---|
-| `engine` | `8.4.24` | gemessene PHP-Version des Hosting-Pakets |
+| `engine` | `8.4.24` | PHP-Version des Hosting-Pakets, gemessen am 19.08.2026 |
 | `collector` | `8.4.0` | läuft im Container auf `php:8.4-cli-alpine` — ein **gleitender** Tag; der Rebuild kann jeden Patchstand der 8.4er-Linie ziehen, also gilt der Branch-Boden |
 
 Damit löst `composer update` überall so auf, wie das Zielsystem es installieren kann. Der Wert ist
 eine reine Auflösungsvorgabe — lokal darf ruhig ein neueres PHP laufen.
 
-**Beim Wechsel der Server-PHP-Version den Pin nachziehen**, sonst bleiben Pakete unnötig alt.
-Die tatsächliche Version zeigt `ssh <ziel> 'php -v'`; ob eine Lockfile zu einer Version passt,
-beantwortet `composer why-not php <version>`.
+**Der Pin ist eine Untergrenze, kein Sollwert.** Er muss dem Server nicht patchgenau folgen: Ein
+Host, der inzwischen neuer ist als der Pin, installiert die aufgelösten Pakete problemlos. Der
+Preflight meldete am 21.09.2026 bereits `8.4.25`, während der Pin auf `8.4.24` steht — das ist die
+unbedenkliche Richtung. Nachziehen lohnt erst beim Sprung auf eine neue Minor-Version, sonst
+bleiben Pakete unnötig alt.
+
+Die tatsächliche Version zeigt `ssh <ziel> 'php -v'` oder der Preflight von `deploy.sh`; ob eine
+Lockfile zu einer Version passt, beantwortet `composer why-not php <version>`.
 
 > Sauberer wäre beim Collector ein exakter Patch-Tag im `Dockerfile` statt `php:8.4-cli-alpine`.
 > Dann wäre der Rebuild reproduzierbar und der Pin könnte dem Image exakt folgen.
@@ -216,18 +221,26 @@ Der Import wird vom **Collector** ausgelöst; der Cron gehört deshalb auf desse
 Engine-Server ist dafür kein Cronjob nötig — die Konsolidierung läuft im Anschluss an den Import
 innerhalb desselben Requests.
 
-Die Quelle wird **wöchentlich** aktualisiert — häufiger zu laufen bringt nichts, der Collector
-überspringt unveränderte Feeds ohnehin per ETag/sha256.
+Die Quelle wird **wöchentlich** aktualisiert; der Feed erscheint samstags. Geplant sind deshalb
+**zwei** Läufe: Sonntags holt der erste den neuen Stand, montags folgt ein zweiter als freier
+Wiederholungsversuch. Der zweite kostet fast nichts — der Collector überspringt unveränderte Feeds
+per ETag/sha256 und ist dann nach rund fünf Sekunden durch. Noch häufiger zu laufen bringt nichts.
+
+Der zweite Termin ist kein Luxus: Ein einzelner Wochentermin hat keinen Puffer, und ein
+ausgefallener Lauf kostet im ungünstigen Fall Fahrplan-Historie, die sich nicht nachholen lässt.
 
 Für die Docker-Variante liegt `collector/run-import.sh` bereit — der Planer bekommt dann nur einen
 Pfad statt einer Befehlszeile:
 
 ```cron
-# GTFS-Import, montags 03:00
+# GTFS-Import, sonntags 03:00 — holt den neuen Feed
+0 3 * * 0 <COLLECTOR_VERZEICHNIS>/run-import.sh
+
+# Wiederholungsversuch, montags 03:00 — überspringt, wenn der Sonntag erfolgreich war
 0 3 * * 1 <COLLECTOR_VERZEICHNIS>/run-import.sh
 
 # ohne Docker
-0 3 * * 1 cd <COLLECTOR_VERZEICHNIS> && php bin/collector collector:import-gtfs >> <LOGPFAD>/cron.log 2>&1
+0 3 * * 0,1 cd <COLLECTOR_VERZEICHNIS> && php bin/collector collector:import-gtfs >> <LOGPFAD>/cron.log 2>&1
 ```
 
 Das Skript setzt Arbeitsverzeichnis und `docker`-Pfad selbst — beides ist in Planer-Umgebungen
@@ -241,7 +254,7 @@ rätselhafter Compose-Fehler.
 | Feld | Wert |
 |---|---|
 | Benutzer | `root` |
-| Zeitplan | wöchentlich, montags 03:00 |
+| Zeitplan | wöchentlich, sonntags **und** montags 03:00 — zwei Aufgaben mit identischem Befehl |
 | Befehl | `<COLLECTOR_VERZEICHNIS>/run-import.sh` |
 | Benachrichtigung | E-Mail, **nur bei ungewöhnlicher Beendigung** |
 
@@ -253,8 +266,10 @@ rätselhafter Compose-Fehler.
 Der Exit-Code des Containers ist der des Imports — ein Aufgabenplaner, der Fehlschläge meldet,
 erkennt einen misslungenen Lauf daran.
 
-Ein ausgefallener Lauf ist **nicht** sofort kritisch: Bei 23 Tagen Fenster und wöchentlichem Takt
-überlappen aufeinanderfolgende Läufe um gut zwei Wochen. Zwei verpasste Läufe in Folge reißen eine Lücke.
+Ein ausgefallener Lauf ist **nicht** sofort kritisch: Bei 23 Tagen Fenster überlappen
+aufeinanderfolgende Wochenstände um gut zwei Wochen, und der zweite Termin derselben Woche fängt
+einen Einzelausfall ohnehin auf. Kritisch wird es erst, wenn **beide** Läufe einer Woche scheitern
+und das in den Folgewochen so bleibt.
 
 ---
 
@@ -302,7 +317,10 @@ Ein still gescheiterter Cron kostet eine Woche Fahrplan-Historie. Mindestens ein
 - **Manuell:** Admin-Ansicht „Imports" — Status, Zeiten, Counts, Fehlermeldung je Lauf.
 - **Automatisch:** `GET /api/v1/admin/imports` (Sanctum) prüfen, ob der letzte Lauf `success` ist und
   jünger als 8 Tage. Bei `failed` oder Überalterung benachrichtigen.
-- **Log:** `COLLECTOR_LOG_PATH`, 14 Tage Rotation.
+- **Wrapper-Log:** `storage/logs/cron.log` auf dem Collector-Host — Start- und Endmarke, Dauer und
+  Exit-Code je Lauf, dazu die gesamte Ausgabe des Containers. Die einzige Quelle, die auch
+  Fehlschläge **vor** dem Containerstart zeigt.
+- **Collector-Log:** `COLLECTOR_LOG_PATH`, 14 Tage Rotation.
 
 Nach dem Import prüfen lässt sich der Konsolidierungsstand in der Admin-Ansicht „Versionen":
 konsolidierter Zeitraum sowie gesicherte gegenüber offenen Grenzen.
@@ -311,6 +329,17 @@ konsolidierter Zeitraum sowie gesicherte gegenüber offenen Grenzen.
 > `stop_times`-Übertragung ab, bleibt der Lauf dauerhaft im Status `running` — die Engine erfährt
 > nie, dass der Client weg ist. Die Prüfregel „letzter Lauf ist `success` und jünger als 8 Tage"
 > deckt beide Fälle ab; eine reine `failed`-Prüfung nicht.
+
+> **Die Engine-Sicht allein hat eine Lücke.** Scheitert ein Lauf, **bevor** der Container startet —
+> weil `.env` fehlt, die `docker`-Binary nicht gefunden wird oder der Aufruf keine Rechte auf den
+> Docker-Socket hat —, erfährt die Engine davon nichts. In der Admin-Ansicht steht dann unverändert
+> der letzte erfolgreiche Lauf, und die 8-Tage-Regel schlägt erst mit Verzögerung an. Solche
+> Fehlschläge stehen **ausschließlich** im Wrapper-Log. Ein von Hand angestoßener Lauf meldet
+> zudem gar nichts ins Postfach — die Benachrichtigung hängt am Aufgabenplaner, nicht am Skript.
+>
+> Harmloser, aber dieselbe Mechanik: Ein 304-Skip erreicht die Engine nie und legt dort keinen
+> Datensatz an. Zwischen zwei echten Importen altert der jüngste Engine-Datensatz deshalb
+> planmäßig um bis zu eine Woche — dafür ist die Grenze auf 8 Tage gesetzt und nicht enger.
 
 ### Zustand nach einem abgebrochenen Lauf
 

@@ -28,6 +28,12 @@ use Illuminate\Support\Facades\Log;
  * Start- und Endfahrt, und deshalb entscheidet sein Filter mit: Ein Wechsel 1 → 13 ist manchmal
  * Absicht und manchmal nicht, und nur er weiß, welcher Fall vorliegt.
  *
+ * **Am Tauschpunkt entscheidet der Halt, nicht die Zeit.** An einer Haltestelle, an der das
+ * Fahrzeug nur kurz hält und weiterfährt, kommen mehrere Fahrten zeitgleich an und fahren
+ * zeitgleich wieder ab — die Zeit unterscheidet dort nichts, und die Datenbank-Id entscheidet.
+ * Mit `throughStop` zählt deshalb nur, was an **demselben Halt** weiterfährt, an dem die Ankunft
+ * endet. Das ist keine Schätzung, sondern eine Gleichheit auf `consolidated_trips`.
+ *
  * **Die Paarung ist FIFO.** Jede Ankunft bekommt die früheste noch freie Abfahrt im Zeitfenster.
  * Die Höchstwende ist dabei kein Schönheitswert, sondern der Abbruch: Ohne sie griffe der Lauf in
  * einer Taktlücke nach einer Abfahrt zwei Stunden später und behauptete einen Umlauf, den es
@@ -191,11 +197,17 @@ final class TripLinkAutoService
                 continue;
             }
 
-            [$partner, $grund, $geprueft, $rueckwaerts] = $this->pickPartner($fahrt, $beginnend, $verplant, $modelle, $graph, $scope);
+            [$partner, $grund, $geprueft, $rueckwaerts, $fremderSteig] = $this->pickPartner($fahrt, $beginnend, $verplant, $modelle, $graph, $scope);
 
             if ($partner === null) {
                 $uebersprungen[] = match (true) {
                     $grund !== null => $this->skip('ending', $fahrt, $geprueft, $grund->code->value, $grund->message),
+                    $fremderSteig => $this->skip('ending', $fahrt, null, 'different_platform', sprintf(
+                        'Am Tauschpunkt fährt das Fahrzeug durch: Es beginnt innerhalb von %d Minuten keine '
+                        .'freie Fahrt an dem Halt, an dem diese endet. Ist das hier eine Wendestelle, nimm den '
+                        .'Schalter wieder heraus.',
+                        intdiv($scope->maxTurnaroundSeconds, 60),
+                    )),
                     $rueckwaerts !== null => $this->skip(
                         'ending',
                         $fahrt,
@@ -241,9 +253,10 @@ final class TripLinkAutoService
      * @param  array<int, array<string, mixed>>  $beginnend
      * @param  array<int, bool>  $verplant
      * @param  array<int, ConsolidatedTrip>  $modelle
-     * @return array{0: array<string, mixed>|null, 1: TripLinkRejectionReason|null, 2: array<string, mixed>|null, 3: array<string, mixed>|null}
-     *                                                                                                                                          Partner, Ablehnungsgrund, der dabei geprüfte Kandidat, und — falls es
-     *                                                                                                                                          gar keinen vorwärts gelegenen gab — die erste rückwärts liegende Abfahrt.
+     * @return array{0: array<string, mixed>|null, 1: TripLinkRejectionReason|null, 2: array<string, mixed>|null, 3: array<string, mixed>|null, 4: bool}
+     *                                                                                                                                                   Partner, Ablehnungsgrund, der dabei geprüfte Kandidat, — falls es gar
+     *                                                                                                                                                   keinen vorwärts gelegenen gab — die erste rückwärts liegende Abfahrt,
+     *                                                                                                                                                   und ob am Tauschpunkt ein Kandidat nur am falschen Halt lag.
      */
     private function pickPartner(
         array $fahrt,
@@ -255,12 +268,13 @@ final class TripLinkAutoService
     ): array {
         // Eine unlesbare Ankunft trägt keine Wendezeit; daraus eine zu rechnen wäre erfunden.
         if ($fahrt['arrival_sort'] === PHP_INT_MAX) {
-            return [null, null, null, null];
+            return [null, null, null, null, false];
         }
 
         $grund = null;
         $geprueft = null;
         $rueckwaerts = null;
+        $fremderSteig = false;
 
         foreach ($beginnend as $kandidat) {
             if ($kandidat['decision'] !== null || isset($verplant[$kandidat['id']])) {
@@ -299,6 +313,19 @@ final class TripLinkAutoService
                 continue;
             }
 
+            // **Am Tauschpunkt steht das Fahrzeug still und fährt weiter** — es bleibt dabei an
+            // demselben Halt. Genau daran hängt die Entscheidung, denn an einer Endstelle
+            // wechselt es die Seite: Am City Carré endet die 1 auf Steig #515 und die 5 fährt
+            // von dort weiter, während die 5 auf #268 endet und die 1 von dort weiterfährt.
+            // Ohne diese Prüfung entscheidet bei zeitgleichen Abfahrten die Datenbank-Id — und
+            // die paart zweimal die Kehrtwende.
+            if ($scope->throughStop
+                && $modelle[$fahrt['id']]->last_stop_id !== $modelle[$kandidat['id']]->first_stop_id) {
+                $fremderSteig = true;
+
+                continue;
+            }
+
             $abgelehnt = $this->rules->rejectionFor($modelle[$fahrt['id']], $modelle[$kandidat['id']], $graph);
 
             if ($abgelehnt !== null) {
@@ -308,10 +335,10 @@ final class TripLinkAutoService
                 continue;
             }
 
-            return [$kandidat, null, null, null];
+            return [$kandidat, null, null, null, false];
         }
 
-        return [null, $grund, $geprueft, $rueckwaerts];
+        return [null, $grund, $geprueft, $rueckwaerts, $fremderSteig];
     }
 
     /**
@@ -653,6 +680,7 @@ final class TripLinkAutoService
                 'min_turnaround_seconds' => $scope->minTurnaroundSeconds,
                 'max_turnaround_seconds' => $scope->maxTurnaroundSeconds,
                 'include_terminals' => $scope->includeTerminals,
+                'through_stop' => $scope->throughStop,
             ],
             'defaults' => [
                 'min_turnaround_seconds' => (int) config('mdtakt.courses.min_turnaround_minutes') * 60,

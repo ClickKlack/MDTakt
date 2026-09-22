@@ -34,6 +34,11 @@ const aktion = ref<AutoLinkAction>('link')
 const mindestwende = ref(3)
 const hoechstwende = ref(20)
 const auchBetriebsfahrten = ref(false)
+/**
+ * Tauschpunkt statt Wendestelle. Bewusst ein Schalter und keine Erkennung: Ob eine Haltestelle
+ * so bedient wird, weiss der Pflegende — aus den Daten laesst es sich nicht sicher ableiten.
+ */
+const tauschpunkt = ref(false)
 
 const vorschau = ref<AutoLinkResult | null>(null)
 const laeuft = ref(false)
@@ -43,6 +48,12 @@ const laeuft = ref(false)
  * dem Knopf der anderen — und ein Klick taete etwas anderes, als daneben steht.
  */
 watch(aktion, () => {
+  vorschau.value = null
+})
+
+// Der Tauschpunkt aendert die Paarung, nicht nur ihre Zahl — eine stehengebliebene Vorschau
+// zeigte danach andere Paare, als der Knopf daneben anlegt.
+watch(tauschpunkt, () => {
   vorschau.value = null
 })
 
@@ -65,6 +76,7 @@ const eingaben = computed<AutoLinkParams | null>(() => {
         action: 'link',
         min_turnaround_minutes: mindestwende.value,
         max_turnaround_minutes: hoechstwende.value,
+        through_stop: tauschpunkt.value,
       }
     : { ...props.params, action: 'unlink', include_terminals: auchBetriebsfahrten.value }
 })
@@ -329,6 +341,20 @@ const uebersprungen = computed(() => {
         offen — sonst griffe der Lauf über eine Taktlücke hinweg nach dem falschen Fahrzeug.
       </p>
     </div>
+
+    <label v-if="aktion === 'link'" class="mt-3 flex items-start gap-2 text-sm text-slate-700">
+      <input v-model="tauschpunkt" type="checkbox" class="mt-0.5" />
+      <span>
+        Tauschpunkt — das Fahrzeug fährt durch
+        <span class="block max-w-2xl text-xs text-slate-500">
+          Für Haltestellen, an denen die Bahn nur kurz hält und weiterfährt (City Carré, Listemannstraße). Dort
+          kommen mehrere Fahrten zeitgleich an und fahren zeitgleich ab — die Zeit unterscheidet sie nicht, und
+          ohne diesen Schalter entscheidet der Zufall. Mit ihm zählt nur, was an
+          <strong>demselben Halt</strong> weiterfährt, an dem die Ankunft endet. An einer Wendestelle, wo das
+          Fahrzeug die Seite wechselt, findet der Lauf damit nichts — dort gehört der Haken heraus.
+        </span>
+      </span>
+    </label>
 
     <div v-else class="mt-3">
       <label class="flex items-start gap-2 text-sm text-slate-700">

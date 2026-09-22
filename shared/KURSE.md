@@ -186,6 +186,45 @@ Filter zeigt. Der Linienfilter wurde dafür von Einfach- auf **Mehrfachauswahl**
 gemeinsam, die 6 daneben unberührt. Mit genau einer wählbaren Linie ließe sich der gewollte
 Linienwechsel nur über „Alle" automatisieren, und damit liefen alle übrigen Linien mit.
 
+#### Der Tauschpunkt — dort entscheidet der Halt, nicht die Zeit
+
+**Entschieden 22.09.2026.** Manche Haltestellen sind keine Wendestelle, sondern ein *virtueller
+Tauschpunkt*: Die Bahn hält kurz und fährt weiter, nur die Liniennummer wechselt. Am City Carré
+sind das `1 ↔ 5` und `2 ↔ 13`, an der Listemannstraße `1 → 1`.
+
+Dort versagt FIFO, und zwar nicht knapp: **Mehrere Fahrten kommen auf derselben Sekunde an und
+fahren auf derselben Sekunde ab.** Am City Carré um 04:36 enden die 1 und die 5, um 04:38 beginnen
+die 1 und die 5. Die Zeit unterscheidet nichts, also entscheidet der Stichentscheid — die
+Datenbank-Id. Die paart `1 → 1` und `5 → 5`, und das ist zweimal die Kehrtwende: Die 1 käme vom
+Hauptbahnhof und führe dorthin zurück. Auch eine Mindestwende von 0 ändert daran nichts, denn das
+Zeitfenster ist gar nicht das Problem.
+
+Was unterscheidet, ist der **Halt**:
+
+| | endet an | | beginnt an |
+|---|---|---|---|
+| Ankunft 5 | Steig #268 | Abfahrt 1 | Steig #268 |
+| Ankunft 1 | Steig #515 | Abfahrt 5 | Steig #515 |
+
+Das Fahrzeug steht und fährt von dort weiter — es wechselt den Bahnsteig nicht. An einer
+Endstelle tut es genau das Gegenteil. Der Lauf bekommt deshalb einen Schalter **Tauschpunkt**:
+Gepaart wird nur, was an demselben Halt weiterfährt, an dem die Ankunft endet.
+
+**Ein Schalter und keine Erkennung.** Ob eine Haltestelle so bedient wird, weiß der Pflegende; aus
+den Daten ließe es sich nur schätzen. Geometrische Kriterien (kehrt die Fahrt in die Richtung
+zurück, aus der sie kam?) wurden erwogen und verworfen — sie brauchen eine Winkelschwelle und
+liegen damit immer irgendwo daneben. Die Halt-Gleichheit ist dagegen kein Urteil, sondern eine
+Gleichheit auf `consolidated_trips`.
+
+Am Realbestand nachgemessen, Mo–Fr über den ganzen Tag: City Carré 297 von 297 Ankünften mit genau
+einem Kandidaten am selben Halt, davon **37 anders als heute** — das sind die Fehlpaarungen.
+Listemannstraße 215 von 215 eindeutig und **null** Abweichungen, weil dort schon der
+Gattungswechsel Tram/Bus trennt. Diesdorf als echte Endstelle: null Kandidaten am selben Halt, der
+Schalter gehört dort nicht gesetzt und sagt das auch (`different_platform`).
+
+An einer Wendeschleife mit nur einem Halt ist der Schalter folgenlos: Dort steht das Fahrzeug
+tatsächlich am selben Punkt.
+
 Geprüft wird je Paar dieselbe Zulässigkeit wie beim Einzelklick (§4) — nur bricht ein Nein den Lauf
 nicht ab, sondern überspringt eine Zeile mit Begründung. Wird ein Kandidat abgewiesen, rückt der
 nächste nach; erst wenn keiner trägt, erscheint der Grund. Beim ersten Nein aufzugeben ließe an

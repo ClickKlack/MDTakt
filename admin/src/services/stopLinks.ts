@@ -195,6 +195,7 @@ export interface AutoLinkResult {
     min_turnaround_seconds: number
     max_turnaround_seconds: number
     include_terminals: boolean
+    through_stop: boolean
   }
   /** Die konfigurierten Vorgabewerte — damit der Dialog sie nicht doppelt kennen muss. */
   defaults: { min_turnaround_seconds: number; max_turnaround_seconds: number }
@@ -227,6 +228,13 @@ export interface AutoLinkParams {
   min_turnaround_minutes?: number
   max_turnaround_minutes?: number
   include_terminals?: boolean
+  /**
+   * Tauschpunkt statt Wendestelle: Gepaart wird nur, was an **demselben Halt** weiterfährt, an
+   * dem die Ankunft endet. An einer Haltestelle, an der das Fahrzeug nur kurz hält und
+   * weiterfährt, kommen mehrere Fahrten zeitgleich an und fahren zeitgleich ab — die Zeit
+   * unterscheidet dort nichts.
+   */
+  through_stop?: boolean
 }
 
 /** Garantiert folgenlos — die Vorschau schreibt nichts. */

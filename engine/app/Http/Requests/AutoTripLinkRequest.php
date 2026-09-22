@@ -25,7 +25,7 @@ final class AutoTripLinkRequest extends ApiFormRequest
     {
         // Der Schalter kommt bei der Vorschau (GET) als Zeichenkette an — siehe
         // {@see ApiFormRequest::normalizeBooleans()}.
-        $this->normalizeBooleans('include_terminals');
+        $this->normalizeBooleans('include_terminals', 'through_stop');
     }
 
     /**
@@ -49,6 +49,7 @@ final class AutoTripLinkRequest extends ApiFormRequest
             'min_turnaround_minutes' => ['nullable', 'integer', 'min:0', 'max:600'],
             'max_turnaround_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
             'include_terminals' => ['nullable', 'boolean'],
+            'through_stop' => ['nullable', 'boolean'],
         ];
     }
 
@@ -83,6 +84,7 @@ final class AutoTripLinkRequest extends ApiFormRequest
             maxTurnaroundSeconds: $this->maxTurnaroundSeconds(),
             action: $this->action(),
             includeTerminals: $this->boolean('include_terminals'),
+            throughStop: $this->boolean('through_stop'),
         );
     }
 

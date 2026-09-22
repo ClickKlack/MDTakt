@@ -24,6 +24,7 @@ final readonly class AutoLinkScope
      * @param  int  $fromTripId  Markierte Startfahrt der **linken** Spalte (endende Fahrten).
      * @param  int  $toTripId  Markierte letzte Fahrt, ebenfalls links.
      * @param  bool  $includeTerminals  Nur bei {@see AutoLinkAction::Unlink}: auch Aus- und Einrücken lösen.
+     * @param  bool  $throughStop  Nur bei {@see AutoLinkAction::Link}: Tauschpunkt statt Wendestelle.
      */
     public function __construct(
         public StopGroup $stopGroup,
@@ -38,6 +39,7 @@ final readonly class AutoLinkScope
         public int $maxTurnaroundSeconds,
         public AutoLinkAction $action,
         public bool $includeTerminals,
+        public bool $throughStop = false,
     ) {}
 
     /**

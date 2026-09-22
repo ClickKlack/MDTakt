@@ -22,6 +22,7 @@ params:query {
   ~mode: tram
   ~min_turnaround_minutes: 3
   ~max_turnaround_minutes: 20
+  ~through_stop: true
 }
 
 auth:bearer {
@@ -171,6 +172,11 @@ docs {
   bei Gleichstand nach `id`. Verkehrt herum markiert wird getauscht. Liegt eine Markierung nicht
   in der gefilterten Liste, ist das ein 422 — sonst bearbeitete der Lauf etwas, das man gar nicht
   sieht.
+
+  **An einem Tauschpunkt entscheidet der Halt, nicht die Zeit.** Wo die Bahn nur kurz haelt und
+  weiterfaehrt, kommen mehrere Fahrten zeitgleich an und ab — FIFO kann sie dann nicht
+  auseinanderhalten, und die Fahrt-Id paart die Kehrtwende. Dafuer gibt es `through_stop`, siehe
+  `auto-trip-links-through-stop.bru`.
 
   **Nie ueberschreiben.** Was bereits eine Entscheidung traegt, wird uebersprungen und gemeldet.
   Ein zweiter Lauf ist deshalb folgenlos. Wer etwas aendern will, loest es erst — dafuer gibt es

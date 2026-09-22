@@ -1,0 +1,113 @@
+meta {
+  name: Auto Trip Links (Tauschpunkt)
+  type: http
+  seq: 35
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/stop-links/auto?stop_group=206&period=2&day_type=mo_fr&from_trip_id=27155&to_trip_id=27879&min_turnaround_minutes=0&through_stop=true
+  body: none
+  auth: bearer
+}
+
+params:query {
+  stop_group: 206
+  period: 2
+  day_type: mo_fr
+  from_trip_id: 27155
+  to_trip_id: 27879
+  min_turnaround_minutes: 0
+  through_stop: true
+  ~max_turnaround_minutes: 20
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.filter.through_stop: eq true
+  res.body.data.pairs: isArray
+}
+
+script:post-response {
+  const d = res.body.data;
+
+  // Der Kern der Zusicherung: Am Tauschpunkt faehrt das Fahrzeug von dem Halt weiter, an dem
+  // es angekommen ist. Die Antwort traegt die Halte nicht mit, aber der Linienwechsel ist der
+  // sichtbare Beleg — am City Carre tauschen 1<->5 und 2<->13.
+  const erwartet = { "1": "5", "5": "1", "2": "13", "13": "2" };
+
+  for (const paar of d.pairs) {
+    const von = paar.from_trip.line;
+    const nach = paar.to_trip.line;
+
+    if (erwartet[von] && erwartet[von] !== nach) {
+      throw new Error("Am Tauschpunkt gehoert " + von + " -> " + erwartet[von] + ", gepaart wurde " + von + " -> " + nach);
+    }
+  }
+}
+
+docs {
+  # Anschluesse am Tauschpunkt verknuepfen
+
+  Derselbe Lauf wie die gewoehnliche Vorschau, nur mit `through_stop=true`. Gepaart wird dann
+  ausschliesslich, was an **demselben Halt** weiterfaehrt, an dem die Ankunft endet.
+
+  ## Wofuer das da ist
+
+  Manche Haltestellen sind keine Wendestelle, sondern ein virtueller Tauschpunkt: Die Bahn haelt
+  kurz und faehrt weiter, nur die Liniennummer wechselt. Am City Carre sind das `1 <-> 5` und
+  `2 <-> 13`, an der Listemannstrasse `1 -> 1`.
+
+  Dort versagt FIFO, und zwar nicht knapp. Um 04:36 enden die 1 und die 5, um 04:38 beginnen die
+  1 und die 5 — **auf derselben Sekunde**. Die Zeit unterscheidet nichts, also entscheidet der
+  Stichentscheid ueber die Fahrt-Id, und der paart `1 -> 1` und `5 -> 5`: zweimal die
+  Kehrtwende, denn die 1 kaeme vom Hauptbahnhof und fuehre dorthin zurueck. Eine Mindestwende
+  von 0 hilft nicht, weil das Zeitfenster gar nicht das Problem ist.
+
+  ## Worauf zu achten ist
+
+  **Der Schalter ist eine Aussage, keine Erkennung.** Ob eine Haltestelle so bedient wird, weiss
+  der Pflegende. Aus den Daten liesse es sich nur schaetzen — geometrische Kriterien (kehrt die
+  Fahrt in die Richtung zurueck, aus der sie kam?) brauchen eine Winkelschwelle und liegen damit
+  immer irgendwo daneben. Die Halt-Gleichheit ist dagegen kein Urteil, sondern eine Gleichheit
+  auf `consolidated_trips`.
+
+  **An einer Wendestelle findet der Lauf damit nichts.** Dort wechselt das Fahrzeug die Seite,
+  und jede Ankunft erscheint unter `skipped` mit `reason_code: "different_platform"`. Das ist
+  kein Fehler, sondern die Ansage, dass der Haken hier nicht hingehoert.
+
+  **An einer Wendeschleife mit nur einem Halt ist er folgenlos** — dort steht das Fahrzeug
+  tatsaechlich am selben Punkt.
+
+  **Nur bei `action=link`.** Beim Aufloesen spielt der Halt keine Rolle.
+
+  Beispiel-Response (gekuerzt, City Carre 04:36–05:02):
+
+  ```json
+  {
+    "data": {
+      "filter": { "through_stop": true, "min_turnaround_seconds": 0 },
+      "summary": { "candidates": 8, "planned": 8, "skipped": 0 },
+      "pairs": [
+        { "from_trip": { "line": "5", "arrival_time": "04:36:00" },
+          "to_trip":   { "line": "1", "departure_time": "04:38:00" },
+          "turnaround_seconds": 120,
+          "warnings": [{ "code": "line_change", "message": "Die Kette wechselt von Linie 5 auf Linie 1." }] },
+        { "from_trip": { "line": "1", "arrival_time": "04:36:00" },
+          "to_trip":   { "line": "5", "departure_time": "04:38:00" },
+          "turnaround_seconds": 120,
+          "warnings": [{ "code": "line_change", "message": "Die Kette wechselt von Linie 1 auf Linie 5." }] }
+      ]
+    }
+  }
+  ```
+
+  Ohne den Schalter stuende dort `5 -> 5` und `1 -> 1`.
+}

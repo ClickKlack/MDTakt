@@ -1693,6 +1693,11 @@ components:
                 to_trip_id: { type: integer }
                 min_turnaround_seconds: { type: integer }
                 max_turnaround_seconds: { type: integer }
+                through_stop:
+                  type: boolean
+                  description: >
+                    Nur bei `action=link`: Gepaart wurde ausschliesslich, was an demselben Halt
+                    weiterfaehrt, an dem die Ankunft endet (Tauschpunkt).
                 include_terminals:
                   type: boolean
                   description: >
@@ -3439,6 +3444,25 @@ paths:
             Vorgabe aus `COURSE_MAX_TURNAROUND_MINUTES`. Darf nicht unter der Mindestwende liegen.
             Nur bei `action=link`.
           schema: { type: integer, minimum: 1, maximum: 600 }
+        - name: through_stop
+          in: query
+          required: false
+          description: >
+            **Tauschpunkt statt Wendestelle.** Nur bei `action=link`. Gepaart wird dann
+            ausschliesslich, was an **demselben Halt** weiterfaehrt, an dem die Ankunft endet.
+
+
+            An einer Haltestelle, an der die Bahn nur kurz haelt und weiterfaehrt (City Carre,
+            Listemannstrasse), kommen mehrere Fahrten auf derselben Sekunde an und fahren auf
+            derselben Sekunde ab. Die Zeit unterscheidet dort nichts, und der Stichentscheid
+            ueber die Fahrt-Id paart die Kehrtwende. Das Fahrzeug steht aber und faehrt von dort
+            weiter — es wechselt den Bahnsteig nicht.
+
+
+            An einer Wendestelle mit zwei Bahnsteigen findet der Lauf damit nichts und meldet
+            `different_platform`; dort gehoert der Schalter heraus. An einer Wendeschleife mit
+            nur einem Halt ist er folgenlos. In der Query ist der Wert **Text**.
+          schema: { type: boolean }
         - name: include_terminals
           in: query
           required: false
@@ -3503,6 +3527,7 @@ paths:
                 min_turnaround_minutes: { type: integer, minimum: 0, maximum: 600 }
                 max_turnaround_minutes: { type: integer, minimum: 1, maximum: 600 }
                 include_terminals: { type: boolean, default: false }
+                through_stop: { type: boolean, default: false }
       responses:
         '200':
           description: Geschrieben — `skipped` kann trotzdem belegt sein

@@ -551,6 +551,149 @@ final class AutoTripLinkTest extends TestCase
         $this->assertDatabaseHas('course_trips', ['consolidated_trip_id' => $ab->id]);
     }
 
+    // ---------------------------------------------------------------- Tauschpunkt
+
+    /**
+     * Baut die Kreuzung vom City Carré nach: zwei Bahnsteige einer Haltestelle, an denen je
+     * eine Fahrt endet und eine **andere** Linie weiterfährt.
+     *
+     * Beide Ankünfte liegen auf derselben Sekunde, beide Abfahrten ebenfalls — die Zeit
+     * unterscheidet hier also nichts. Was bleibt, ist der Halt: Das Fahrzeug steht kurz und
+     * fährt von dort weiter, es wechselt den Bahnsteig nicht.
+     *
+     * @return array{0: ConsolidatedTrip, 1: ConsolidatedTrip, 2: ConsolidatedTrip, 3: ConsolidatedTrip}
+     *                                                                                                   Ankunft A, Ankunft B, Abfahrt ab A, Abfahrt ab B
+     */
+    private function tauschpunkt(): array
+    {
+        $eins = $this->version('1');
+        $fuenf = $this->version('5');
+
+        $gruppe = $this->f->haltestelle('City Carree');
+
+        // Zwei Bahnsteige **einer** Haltestelle. Ohne die Klammer wiese die Zulässigkeits-
+        // pruefung jeden Uebergang ab, weil die Halte verschieden sind.
+        foreach (['Carree Nord', 'Carree Sued'] as $steig) {
+            $this->f->zurHaltestelle($this->f->halt($steig), $gruppe);
+        }
+
+        // Linie 5 kommt von der Goldschmiedebruecke und endet auf dem Nordsteig; von dort
+        // faehrt die 1 zum Hauptbahnhof weiter.
+        $anNord = $this->f->fahrt($fuenf, ['Goldschmiedebruecke', 'Carree Nord'], ['04:30:00', '04:36:00']);
+        $abNord = $this->f->fahrt($eins, ['Carree Nord', 'Hauptbahnhof'], ['04:38:00', '04:50:00']);
+
+        // Die 1 kommt vom Hauptbahnhof und endet auf dem Suedsteig; von dort faehrt die 5
+        // zur Leiterstrasse weiter.
+        $anSued = $this->f->fahrt($eins, ['Hauptbahnhof', 'Carree Sued'], ['04:28:00', '04:36:00']);
+        $abSued = $this->f->fahrt($fuenf, ['Carree Sued', 'Leiterstrasse'], ['04:38:00', '04:52:00']);
+
+        return [$anNord, $anSued, $abNord, $abSued];
+    }
+
+    /**
+     * @param  array<string, mixed>  $zusatz
+     * @return array<string, mixed>
+     */
+    private function tauschRumpf(ConsolidatedTrip $von, ConsolidatedTrip $bis, array $zusatz = []): array
+    {
+        return [
+            'stop_group' => $this->f->haltestelle('City Carree')->id,
+            'period' => $this->f->periode()->id,
+            'day_type' => FahrplanTyp::MoFrNormal->value,
+            'from_trip_id' => $von->id,
+            'to_trip_id' => $bis->id,
+            'min_turnaround_minutes' => 0,
+        ] + $zusatz;
+    }
+
+    /**
+     * Der gemeldete Fall: Beide Abfahrten liegen auf derselben Sekunde, und ohne den Schalter
+     * entscheidet die Datenbank-Id — die paart zweimal die Kehrtwende, also das Fahrzeug
+     * zurueck dorthin, wo es hergekommen ist.
+     */
+    public function test_a_through_stop_pairs_by_platform_not_by_id(): void
+    {
+        [$anNord, $anSued, $abNord, $abSued] = $this->tauschpunkt();
+
+        $daten = $this->anwenden($this->tauschRumpf($anNord, $anSued, ['through_stop' => true]));
+
+        $this->assertSame(2, $daten['summary']['created']);
+
+        $paare = [];
+        foreach ($daten['pairs'] as $paar) {
+            $paare[$paar['from_trip']['id']] = $paar['to_trip']['id'];
+        }
+
+        // Wer auf dem Nordsteig ankommt, faehrt vom Nordsteig weiter.
+        $this->assertSame($abNord->id, $paare[$anNord->id] ?? null);
+        $this->assertSame($abSued->id, $paare[$anSued->id] ?? null);
+    }
+
+    /** Ohne den Schalter bleibt es beim Heute: Die Zeit fuehrt, der Halt zaehlt nicht. */
+    public function test_without_the_switch_the_platform_is_ignored(): void
+    {
+        [$anNord, $anSued] = $this->tauschpunkt();
+
+        $daten = $this->vorschau($this->tauschRumpf($anNord, $anSued));
+
+        $this->assertSame(2, $daten['summary']['planned']);
+        $this->assertFalse($daten['filter']['through_stop']);
+    }
+
+    /**
+     * An einer Endstelle mit **zwei** Bahnsteigen wechselt das Fahrzeug die Seite — netzweit ist
+     * das der Normalfall (64 von 104 Endstellen). Der Schalter findet dort nichts und sagt das,
+     * statt still nichts zu tun.
+     *
+     * An einer Wendeschleife mit nur einem Halt greift er dagegen gar nicht: Dort steht das
+     * Fahrzeug tatsaechlich am selben Punkt, und der Schalter ist folgenlos.
+     */
+    public function test_a_through_stop_run_at_a_two_sided_terminus_reports_why_nothing_matched(): void
+    {
+        $version = $this->version();
+
+        $gruppe = $this->f->haltestelle('Herrenkrug');
+
+        foreach (['Herrenkrug Ankunft', 'Herrenkrug Abfahrt'] as $steig) {
+            $this->f->zurHaltestelle($this->f->halt($steig), $gruppe);
+        }
+
+        $an = $this->f->fahrt($version, ['Kannenstieg', 'Herrenkrug Ankunft'], ['05:00:00', '06:00:00']);
+        $this->f->fahrt($version, ['Herrenkrug Abfahrt', 'Kannenstieg'], ['06:05:00', '07:00:00']);
+
+        $rumpf = [
+            'stop_group' => $gruppe->id,
+            'period' => $this->f->periode()->id,
+            'day_type' => FahrplanTyp::MoFrNormal->value,
+            'from_trip_id' => $an->id,
+            'to_trip_id' => $an->id,
+            'min_turnaround_minutes' => 0,
+        ];
+
+        // Ohne Schalter wird gepaart, mit Schalter nicht — derselbe Ausschnitt.
+        $this->assertSame(1, $this->vorschau($rumpf)['summary']['planned']);
+
+        $daten = $this->vorschau($rumpf + ['through_stop' => true]);
+
+        $this->assertSame(0, $daten['summary']['planned']);
+        $this->assertSame('different_platform', $daten['skipped'][0]['reason_code']);
+    }
+
+    /** Der Schalter kommt bei der Vorschau als Text an — wie `include_terminals`. */
+    public function test_the_through_stop_switch_is_accepted_as_query_text(): void
+    {
+        [$anNord, $anSued] = $this->tauschpunkt();
+
+        $abfrage = http_build_query($this->tauschRumpf($anNord, $anSued)).'&through_stop=true';
+
+        $daten = $this->withToken($this->token())
+            ->getJson('/api/v1/admin/stop-links/auto?'.$abfrage)
+            ->assertOk()
+            ->json('data');
+
+        $this->assertTrue($daten['filter']['through_stop']);
+    }
+
     // ---------------------------------------------------------------- Auflösen
 
     public function test_unlink_preview_changes_nothing(): void

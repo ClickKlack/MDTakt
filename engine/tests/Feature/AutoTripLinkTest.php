@@ -664,6 +664,37 @@ final class AutoTripLinkTest extends TestCase
         $this->assertDatabaseCount('trip_links', 0);
     }
 
+    /**
+     * Eine Query-Zeichenkette kennt keine Booleans: axios schreibt den ungesetzten Haken als
+     * `include_terminals=false`, und Laravels `boolean`-Regel nimmt genau diese Schreibweise
+     * nicht an. Ohne die Umschreibung im Request scheiterte **jede** Vorschau des Auflösens
+     * mit 422 — der Knopf zum Ausführen erschien deshalb nie.
+     *
+     * `http_build_query` schreibt `true` als `1` und trifft den Fall nicht; die Query steht hier
+     * deshalb von Hand.
+     */
+    public function test_unlink_preview_accepts_the_terminal_switch_as_query_text(): void
+    {
+        $version = $this->version();
+        $an = $this->ankunft($version, '06:00:00');
+        $this->abfahrt($version, '06:05:00');
+
+        $this->anwenden($this->rumpf($an, $an));
+
+        foreach (['false' => 1, 'true' => 1] as $text => $erwartet) {
+            $rumpf = $this->rumpf($an, $an, ['action' => 'unlink']);
+            $abfrage = http_build_query($rumpf).'&include_terminals='.$text;
+
+            $daten = $this->withToken($this->token())
+                ->getJson('/api/v1/admin/stop-links/auto?'.$abfrage)
+                ->assertOk()
+                ->json('data');
+
+            $this->assertSame($erwartet, $daten['summary']['planned'], "include_terminals={$text}");
+            $this->assertSame($text === 'true', $daten['filter']['include_terminals']);
+        }
+    }
+
     public function test_unlink_reports_a_partner_outside_the_range(): void
     {
         $version = $this->version();

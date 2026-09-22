@@ -21,6 +21,13 @@ use Illuminate\Validation\Validator;
  */
 final class AutoTripLinkRequest extends ApiFormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        // Der Schalter kommt bei der Vorschau (GET) als Zeichenkette an — siehe
+        // {@see ApiFormRequest::normalizeBooleans()}.
+        $this->normalizeBooleans('include_terminals');
+    }
+
     /**
      * @return array<string, array<int, mixed>>
      */

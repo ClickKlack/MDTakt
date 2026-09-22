@@ -1,0 +1,116 @@
+meta {
+  name: Auto Trip Links (Aufloesen — Vorschau)
+  type: http
+  seq: 31
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/stop-links/auto?stop_group=117&period=1&day_type=mo_fr&from_trip_id=9835&to_trip_id=9902&action=unlink&include_terminals=false
+  body: none
+  auth: bearer
+}
+
+params:query {
+  stop_group: 117
+  period: 1
+  day_type: mo_fr
+  from_trip_id: 9835
+  to_trip_id: 9902
+  action: unlink
+  include_terminals: false
+  ~stand: 0
+  ~lines[]: 1
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.action: eq unlink
+  res.body.data.summary.applied: eq false
+  res.body.data.filter.include_terminals: eq false
+  res.body.data.removals: isArray
+}
+
+script:post-response {
+  const d = res.body.data;
+  const s = d.summary;
+
+  if (s.planned !== d.removals.length) {
+    throw new Error("summary.planned " + s.planned + " passt nicht zu removals[] " + d.removals.length);
+  }
+
+  // Die Vorschau ist garantiert folgenlos — sie darf nie etwas geloescht haben.
+  if (s.applied !== false || s.removed !== 0) {
+    throw new Error("Die Vorschau meldet geloeste Anschluesse");
+  }
+
+  // Ohne den Schalter bleiben die Betriebshof-Fahrten stehen.
+  for (const zeile of d.removals) {
+    if (zeile.kind !== "link") {
+      throw new Error("Entscheidung " + zeile.kind + " geplant, obwohl include_terminals aus ist");
+    }
+  }
+}
+
+docs {
+  # Anschluesse aufloesen — Vorschau
+
+  Derselbe Pfad wie die Verknuepfungs-Vorschau, nur mit `action=unlink`: Was ein `POST` mit
+  denselben Parametern loesen wuerde, ohne dass etwas geschieht.
+
+  ## Warum diese Datei getrennt steht
+
+  Wegen `include_terminals`. Eine Query-Zeichenkette kennt keine Typen — der Schalter kommt hier
+  als **Text** `false` an, nicht als Boolean. Laravels `boolean`-Regel nimmt genau diese
+  Schreibweise nicht an, und bis 22.09.2026 scheiterte deshalb *jede* Vorschau des Aufloesens aus
+  der Oberflaeche mit 422: axios schreibt `include_terminals=false`, die Engine wies es ab, und im
+  Admin erschien der ausfuehrende Knopf nie. Der Request normalisiert den Wert jetzt vor der
+  Pruefung; diese Datei haelt genau die Schreibweise fest, an der es gescheitert ist.
+
+  Der `POST` auf denselben Pfad trifft den Fall **nicht**: Dort steht der Schalter im JSON-Rumpf
+  und ist ein echter Boolean. Wer nur den `POST` prueft, sieht den Fehler nicht.
+
+  ## Worauf zu achten ist
+
+  **Ohne `include_terminals` enthaelt `removals[]` ausschliesslich `kind: "link"`.** Die
+  Betriebshof-Fahrten (`start`/`end`, fachlich Aus- und Einruecken) erscheinen stattdessen unter
+  `skipped` mit `reason_code: "terminal_decision"` — sie sind eine eigenstaendige Aussage und
+  sollen nicht nebenbei verschwinden.
+
+  **Einzeln loesen geht ohne diesen Endpunkt:** `DELETE /api/v1/admin/trip-links/{id}` nimmt jede
+  Entscheidung zurueck, auch eine `start`/`end`-Marke. Im Board haengt dafuer an jeder Marke ein
+  „Loesen".
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": {
+      "action": "unlink",
+      "filter": { "lines": [], "mode": null, "include_terminals": false },
+      "summary": {
+        "candidates": 18, "planned": 12, "created": 0, "removed": 0, "skipped": 6,
+        "courses_unified": 0, "course_conflicts": 0, "applied": false
+      },
+      "removals": [
+        { "trip_link_id": 7, "kind": "link",
+          "from_trip": { "id": 9835, "line": "1", "arrival_time": "06:48:00" },
+          "to_trip":   { "id": 10412, "line": "13", "departure_time": "06:52:00" },
+          "turnaround_seconds": 240, "partner_outside_range": false }
+      ],
+      "skipped": [
+        { "side": "ending", "trip": { "id": 9851, "line": "1" }, "partner": null,
+          "reason_code": "terminal_decision",
+          "reason": "Die Fahrt faehrt von hier in den Betriebshof (Endet hier, in den Betriebshof). Betriebsfahrten werden nur mit „auch Betriebshof-Fahrten loesen\" entfernt." }
+      ]
+    }
+  }
+  ```
+}

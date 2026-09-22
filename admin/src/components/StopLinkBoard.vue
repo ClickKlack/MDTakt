@@ -200,6 +200,62 @@ const zeilen = computed<Zeile[]>(() => {
   return ergebnis.filter((zeile) => passt(zeile.ending) || passt(zeile.starting))
 })
 
+/**
+ * Fahrten, deren Anschluss auf eine Fahrt zeigt, die es in **diesem Versionsstand nicht gibt**.
+ *
+ * Der Fall entsteht beim Versionswechsel einer einzelnen Linie: Am City Carré wechselt die 13
+ * mitten in der Periode auf eine neue Version, die 1, 2 und 5 nicht. Ein Anschluss 2 → 13, im
+ * vorigen Stand gesetzt, zeigt danach auf eine 13er-Fahrt, die hier nicht mehr faehrt — waehrend
+ * die Fahrt der neuen Version daneben unentschieden steht.
+ *
+ * Ohne diese Erkennung sah man davon nichts: Die Karte war gedaempft, weil eine Entscheidung
+ * dranhaengt, zeigte aber weder Partner noch Wendezeit noch „Loesen" — sie war stumm. Genau der
+ * gemeldete Effekt, dass eine Seite grau ist und die andere nicht.
+ */
+const partnerAusserhalb = computed<Set<number>>(() => {
+  const endeIds = new Set(props.board.ending.map((f) => f.id))
+  const startIds = new Set(props.board.starting.map((f) => f.id))
+  const treffer = new Set<number>()
+
+  for (const [liste, gegenueber] of [
+    [props.board.ending, startIds],
+    [props.board.starting, endeIds],
+  ] as const) {
+    for (const trip of liste) {
+      if (trip.decision?.kind !== 'link') {
+        continue
+      }
+      const partner = trip.decision.partner
+
+      if (partner === null || !gegenueber.has(partner.id)) {
+        treffer.add(trip.id)
+      }
+    }
+  }
+
+  return treffer
+})
+
+function fremderPartner(trip: StopLinkTrip | null): boolean {
+  return trip !== null && partnerAusserhalb.value.has(trip.id)
+}
+
+/** Was an der Gegenfahrt steht — sie gehoert zu einer Version, die hier nicht gilt. */
+function fremderPartnerTitel(trip: StopLinkTrip): string {
+  const partner = trip.decision?.partner
+
+  if (partner === undefined || partner === null) {
+    return 'Die Gegenfahrt gehört zu einer Fahrplan-Version, die in diesem Versionsstand nicht gilt.'
+  }
+
+  return (
+    `Verknüpft mit Linie ${partner.line} um ` +
+    `${formatClock(partner.departure_time ?? partner.arrival_time)} (Version ${partner.version_no}). ` +
+    'Diese Version gilt in diesem Versionsstand nicht — der Anschluss gehört auf die Fahrt der neuen Version ' +
+    'übertragen (Versionen → Übernahme) oder hier zu lösen.'
+  )
+}
+
 const offeneEnden = computed(
   () => props.board.ending.filter((f) => passt(f) && f.decision === null).length,
 )
@@ -476,6 +532,27 @@ function aufEscape(e: KeyboardEvent): void {
             </button>
             <!-- Die Marke ist eine Entscheidung wie jede andere und muss deshalb auch wieder
                  zurückzunehmen sein — ohne „Lösen" bliebe ein Fehlgriff für immer stehen. -->
+            <!-- Ein Anschluss, dessen Gegenfahrt in diesem Stand nicht faehrt. Er ist eine
+                 echte Entscheidung, nur hier nicht darstellbar — also sagen wir es, statt die
+                 Karte stumm zu daempfen. -->
+            <template v-else-if="zeile.ending.decision.kind === 'link' && fremderPartner(zeile.ending)">
+              <span
+                class="shrink-0 rounded bg-violet-100 px-1.5 text-violet-900"
+                :title="fremderPartnerTitel(zeile.ending)"
+              >
+                Anschluss auf {{ zeile.ending.decision.partner?.line ?? '?' }}
+                {{ formatClock(zeile.ending.decision.partner?.departure_time ?? null) }} — andere Version
+              </span>
+              <button
+                type="button"
+                class="shrink-0 text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:opacity-50"
+                :disabled="busy"
+                title="Den Anschluss lösen — die Fahrt gilt dann wieder als nicht gepflegt."
+                @click.stop="emit('unlink', zeile.ending.decision.id)"
+              >
+                Lösen
+              </button>
+            </template>
             <template v-else-if="zeile.ending.decision.kind === 'end'">
               <span class="shrink-0 rounded bg-sky-50 px-1.5 text-sky-900" title="Einrücken">
                 In den Betriebshof
@@ -601,6 +678,24 @@ function aufEscape(e: KeyboardEvent): void {
             >
               Aus dem Betriebshof
             </button>
+            <template v-else-if="zeile.starting.decision.kind === 'link' && fremderPartner(zeile.starting)">
+              <span
+                class="shrink-0 rounded bg-violet-100 px-1.5 text-violet-900"
+                :title="fremderPartnerTitel(zeile.starting)"
+              >
+                Anschluss von {{ zeile.starting.decision.partner?.line ?? '?' }}
+                {{ formatClock(zeile.starting.decision.partner?.arrival_time ?? null) }} — andere Version
+              </span>
+              <button
+                type="button"
+                class="shrink-0 text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:opacity-50"
+                :disabled="busy"
+                title="Den Anschluss lösen — die Fahrt gilt dann wieder als nicht gepflegt."
+                @click.stop="emit('unlink', zeile.starting.decision.id)"
+              >
+                Lösen
+              </button>
+            </template>
             <template v-else-if="zeile.starting.decision.kind === 'start'">
               <span class="shrink-0 rounded bg-sky-50 px-1.5 text-sky-900" title="Ausrücken">
                 Aus dem Betriebshof

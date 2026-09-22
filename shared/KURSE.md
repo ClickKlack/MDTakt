@@ -228,6 +228,22 @@ Eintagsstände dieser Art sind kein Ausnahmefall, sondern die Folge des offenen 
 „Nachtverkehr folgt eigenem Rhythmus" (ROADMAP): Die Nacht eines Betriebstags folgt nicht seinem
 Fahrplantyp, sondern der Frage, ob der Folgetag ein Ruhetag ist.
 
+**Ein Anschluss kann auf eine Fahrt zeigen, die im gezeigten Stand nicht fährt.** Das entsteht,
+wenn eine **einzelne** Linie mitten in der Periode die Version wechselt: Am City Carré tut das
+die 13, die 1, 2 und 5 nicht. Ein Anschluss 2 → 13, im vorigen Stand gesetzt, hängt danach an
+einer 13er-Fahrt der alten Version — während die Fahrt der neuen Version daneben unentschieden
+steht. Der Anschluss ist dabei nicht falsch: Als er gesetzt wurde, galten beide Versionen
+gleichzeitig (§4 prüft genau das).
+
+Das Board zeigt diesen Zustand ausdrücklich an — violette Marke, Nennung der Gegenfahrt, dazu
+„Lösen" —, und über dem Board steht, wie viele es sind. Vorher war die Karte nur gedämpft und
+stumm: eine Entscheidung ohne sichtbaren Partner, ohne Wendezeit, ohne Bedienung. Nebenan stand
+die unentschiedene Fahrt der neuen Version, und der Unterschied war nicht zu erklären.
+
+Der Weg heraus ist die **Übernahme auf die neue Version** (K4), nicht das Lösen von Hand: Sie
+trägt Kursnummer und Anschlüsse auf die Fahrten der neuen Version und meldet, was dabei liegen
+bleibt.
+
 #### Der Tauschpunkt — dort entscheidet der Halt, nicht die Zeit
 
 **Entschieden 22.09.2026.** Manche Haltestellen sind keine Wendestelle, sondern ein *virtueller

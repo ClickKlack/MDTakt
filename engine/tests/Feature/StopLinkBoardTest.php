@@ -360,6 +360,67 @@ final class StopLinkBoardTest extends TestCase
         $this->assertSame(1, $mitNacht[0]['open']['tram']);
     }
 
+    /**
+     * Ein Anschluss auf eine Fahrt, die im gewählten Stand gar nicht fährt, behält seinen
+     * Partner in der Antwort.
+     *
+     * Der Fall entsteht beim Versionswechsel **einer einzelnen Linie**: Am City Carré wechselt
+     * die 13 mitten in der Periode auf eine neue Version, die 1, 2 und 5 nicht. Ein Anschluss
+     * 2 → 13, im vorigen Stand gesetzt, zeigt danach auf eine 13er-Fahrt, die hier nicht mehr
+     * fährt — während die Fahrt der neuen Version daneben unentschieden steht.
+     *
+     * Dass der Partner trotzdem mitkommt, ist die Zusicherung, auf der die Anzeige aufsetzt:
+     * Ohne ihn wäre die Karte stumm gedämpft, und niemand könnte sehen, woran sie hängt.
+     */
+    public function test_a_link_across_stands_keeps_its_partner_in_the_payload(): void
+    {
+        $periode = $this->f->periode();
+        $gruppe = $this->f->haltestelle('Sudenburg');
+
+        // Linie 2 gilt durchgehend, Linie 13 wechselt in der Mitte die Version.
+        $zwei = $this->f->version('2', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($zwei, '2026-08-17', '2026-08-28');
+
+        $dreizehnAlt = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($dreizehnAlt, '2026-08-17', '2026-08-21');
+
+        $dreizehnNeu = $this->f->version('13', FahrplanTyp::MoFrNormal, 2, $periode);
+        $this->f->gueltigkeit($dreizehnNeu, '2026-08-24', '2026-08-28');
+
+        $ankunft = $this->f->fahrt($zwei, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:42:00']);
+        $alteAbfahrt = $this->f->fahrt($dreizehnAlt, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00']);
+        $this->f->fahrt($dreizehnNeu, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00'], 'sig-13-neu');
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'link',
+            'from_trip_id' => $ankunft->id,
+            'to_trip_id' => $alteAbfahrt->id,
+        ])->assertCreated();
+
+        $staende = $this->hole($gruppe->id, $periode)['stands'];
+
+        // Der Stand, in dem die **neue** 13er-Version gilt — dort fehlt die verknüpfte Fahrt.
+        $spaeter = null;
+
+        foreach ($staende as $stand) {
+            $daten = $this->hole($gruppe->id, $periode, FahrplanTyp::MoFrNormal, $stand['index']);
+
+            if (! in_array($alteAbfahrt->id, array_column($daten['starting'], 'id'), true)) {
+                $spaeter = $daten;
+                break;
+            }
+        }
+
+        $this->assertNotNull($spaeter, 'Es muss einen Stand ohne die alte 13er-Fahrt geben.');
+
+        $verknuepft = collect($spaeter['ending'])->firstWhere('id', $ankunft->id);
+
+        $this->assertSame('link', $verknuepft['decision']['kind']);
+        // Der Partner kommt mit, obwohl er in diesem Stand nicht in `starting` steht.
+        $this->assertSame($alteAbfahrt->id, $verknuepft['decision']['partner']['id']);
+        $this->assertSame('13', $verknuepft['decision']['partner']['line']);
+    }
+
     public function test_a_stop_without_trips_yields_empty_lists(): void
     {
         $periode = $this->f->periode();

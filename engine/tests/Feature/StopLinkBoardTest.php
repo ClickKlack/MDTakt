@@ -307,6 +307,59 @@ final class StopLinkBoardTest extends TestCase
         $this->assertNull($daten['starting'][0]['decision']['depot']);
     }
 
+    /**
+     * Jeder Versionsstand trägt seine eigene Zahl offener Fahrten.
+     *
+     * Der Fall, der das nötig macht: Eine Nachtlinie hat im Mo-Fr-Strang regelmäßig eine
+     * Eintagsversion — sie fährt in der Nacht auf einen Feiertag anders —, und daraus wird ein
+     * Stand, der einen einzigen Tag umfasst. Wer im Hauptstand alles entschieden hat, liest
+     * dort 0 und hält die Haltestelle für fertig, während die Auswahlliste noch etwas meldet:
+     * Sie zählt über die ganze Periode. Ohne die Zahl je Stand bliebe der Widerspruch
+     * unauflösbar, und man müsste jeden Stand einzeln durchklicken.
+     */
+    public function test_each_stand_reports_its_own_open_count(): void
+    {
+        $periode = $this->f->periode();
+
+        // Hauptstand: gilt über den ganzen Zeitraum.
+        $tag = $this->f->version('1', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($tag, '2026-08-17', '2026-08-28');
+        $entschieden = $this->f->fahrt($tag, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:30:00']);
+
+        // Ein einziger Tag mitten darin — die Eintagsversion.
+        $nacht = $this->f->version('N1', FahrplanTyp::MoFrNormal, 2, $periode);
+        $this->f->gueltigkeit($nacht, '2026-08-21', '2026-08-21');
+        $this->f->fahrt($nacht, ['Herrenkrug', 'Sudenburg'], ['01:45:00', '02:15:00']);
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'end',
+            'from_trip_id' => $entschieden->id,
+        ])->assertCreated();
+
+        $daten = $this->hole($this->haltestelleId('Sudenburg'), $periode);
+
+        $mitNacht = array_values(array_filter(
+            $daten['stands'],
+            static fn (array $st): bool => $st['line_count'] > 1,
+        ));
+        $ohneNacht = array_values(array_filter(
+            $daten['stands'],
+            static fn (array $st): bool => $st['line_count'] === 1,
+        ));
+
+        $this->assertNotEmpty($mitNacht, 'Der Eintagsstand muss eigens stehen.');
+        $this->assertNotEmpty($ohneNacht);
+
+        // Im Stand ohne die Nachtlinie ist alles entschieden …
+        foreach ($ohneNacht as $stand) {
+            $this->assertSame(0, $stand['open']['total']);
+        }
+
+        // … im Eintagsstand liegt die offene Fahrt, und sie ist als Tram ausgewiesen.
+        $this->assertSame(1, $mitNacht[0]['open']['total']);
+        $this->assertSame(1, $mitNacht[0]['open']['tram']);
+    }
+
     public function test_a_stop_without_trips_yields_empty_lists(): void
     {
         $periode = $this->f->periode();

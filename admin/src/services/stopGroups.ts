@@ -37,6 +37,20 @@ export interface StopGroup {
   /** Es endet nur oder beginnt nur: der Hinweis auf ein fehlendes Gegenstück. */
   one_sided: boolean
   manual_count: number
+  /**
+   * Die Verkehrsmittel, die in **Periode und Fahrplantyp der Abfrage** hier beginnen oder
+   * enden. Leer, wenn die Abfrage ohne beides lief — dann ist auch `open` null.
+   */
+  modes: ('tram' | 'bus')[]
+  /**
+   * Noch offene Fahrten je Verkehrsmittel, plus `total`.
+   *
+   * **Über die ganze Periode gezählt, nicht je Versionsstand.** Die Zahl kann deshalb höher
+   * liegen als die im Editor, wenn dort ein Stand gewählt ist, der nur einen Teil der Periode
+   * abdeckt. Für die Frage, die die Auswahlliste beantwortet — ist hier noch etwas zu tun? —
+   * trägt das: Sie ist nie fälschlich null.
+   */
+  open: ({ total: number } & Partial<Record<'tram' | 'bus', number>>) | null
 }
 
 export interface StopGroupSuggestion {
@@ -50,9 +64,26 @@ export interface StopGroupDetail extends StopGroup {
   suggestions: StopGroupSuggestion[]
 }
 
-export async function fetchStopGroups(q?: string | null, onlyTermini = false): Promise<StopGroup[]> {
+/**
+ * Das Haltestellen-Verzeichnis.
+ *
+ * Mit `period` **und** `dayType` tragen die Zeilen zusätzlich `modes` und `open` — erst beide
+ * zusammen benennen einen Fahrplan, und erst dann lässt sich sagen, was hier noch offen ist.
+ */
+export async function fetchStopGroups(
+  q?: string | null,
+  onlyTermini = false,
+  period?: number | null,
+  dayType?: string | null,
+): Promise<StopGroup[]> {
   const { data } = await api.get('/api/v1/admin/stop-groups', {
-    params: { q: q || undefined, only_termini: onlyTermini ? 1 : undefined },
+    params: {
+      q: q || undefined,
+      // Bewusst `1` und nicht `true`: In einer Query ist ein Boolean eine Zeichenkette.
+      only_termini: onlyTermini ? 1 : undefined,
+      period: period ?? undefined,
+      day_type: dayType ?? undefined,
+    },
   })
   return data.data
 }

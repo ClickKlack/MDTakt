@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Enums\FahrplanTyp;
 use App\Models\ConsolidatedStop;
 use App\Models\ConsolidatedStopVersion;
+use App\Models\SchedulePeriod;
 use App\Models\StopGroup;
 use App\Models\StopGroupMember;
+use App\Models\TripLink;
 use App\Models\User;
 use App\Services\StopGroupService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -206,6 +209,109 @@ final class StopGroupTest extends TestCase
 
         // Reine Durchfahrts-Halte tauchen in dieser Ansicht gar nicht erst auf.
         $this->assertNull(collect($daten)->firstWhere('name', 'Irgendwo'));
+    }
+
+    // ------------------------------------------- Arbeitslast je Haltestelle (Anschlusseditor)
+
+    /**
+     * Mit Periode und Fahrplantyp trägt das Verzeichnis die Arbeitslast: welche Verkehrsmittel
+     * hier vorkommen und wie viel davon noch offen ist. Daran hängt die Auswahlliste im
+     * Anschlusseditor — wer die Straßenbahn abarbeitet, hat an einer reinen Buslinie nichts zu
+     * tun, und eine fertig gepflegte Haltestelle soll zurücktreten.
+     */
+    public function test_the_directory_reports_modes_and_open_trips_per_stop_group(): void
+    {
+        $f = new ConsolidatedFixtures;
+        $periode = $f->periode();
+
+        $tram = $f->version('1', FahrplanTyp::MoFrNormal, 1, $periode);
+        $f->gueltigkeit($tram);
+        $f->fahrt($tram, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:30:00']);
+
+        $bus = $f->version('48', FahrplanTyp::MoFrNormal, 1, $periode);
+        $f->gueltigkeit($bus);
+        $busFahrt = $f->fahrt($bus, ['Olvenstedt', 'Sudenburg'], ['06:10:00', '06:40:00']);
+        $busFahrt->update(['route_type' => 3]);
+
+        $daten = $this->withToken($this->token())
+            ->getJson(sprintf('/api/v1/admin/stop-groups?only_termini=1&period=%d&day_type=mo_fr', $periode->id))
+            ->assertOk()
+            ->json('data');
+
+        $sudenburg = collect($daten)->firstWhere('name', 'Sudenburg');
+
+        $this->assertSame(['bus', 'tram'], $sudenburg['modes']);
+        $this->assertSame(1, $sudenburg['open']['tram']);
+        $this->assertSame(1, $sudenburg['open']['bus']);
+        $this->assertSame(2, $sudenburg['open']['total']);
+    }
+
+    /** Was entschieden ist, zählt nicht mehr als offen — sonst bliebe die Liste ewig voll. */
+    public function test_a_decided_trip_no_longer_counts_as_open(): void
+    {
+        $f = new ConsolidatedFixtures;
+        $periode = $f->periode();
+
+        $version = $f->version('1', FahrplanTyp::MoFrNormal, 1, $periode);
+        $f->gueltigkeit($version);
+        $fahrt = $f->fahrt($version, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:30:00']);
+
+        $abfrage = sprintf('/api/v1/admin/stop-groups?only_termini=1&period=%d&day_type=mo_fr', $periode->id);
+
+        $vorher = collect($this->withToken($this->token())->getJson($abfrage)->json('data'))
+            ->firstWhere('name', 'Sudenburg');
+
+        $this->assertSame(1, $vorher['open']['tram']);
+
+        TripLink::factory()->end()->create([
+            'from_trip_id' => $fahrt->id,
+            'stop_id' => $fahrt->last_stop_id,
+        ]);
+
+        $nachher = collect($this->withToken($this->token())->getJson($abfrage)->json('data'))
+            ->firstWhere('name', 'Sudenburg');
+
+        // Das Verkehrsmittel bleibt — die Haltestelle verschwindet nicht aus der Auswahl,
+        // nur weil dort nichts mehr zu tun ist.
+        $this->assertSame(['tram'], $nachher['modes']);
+        $this->assertSame(0, $nachher['open']['tram']);
+    }
+
+    /** Ohne Periode und Fahrplantyp bleibt das Verzeichnis wie bisher — beides gehört zusammen. */
+    public function test_without_period_and_day_type_the_workload_is_absent(): void
+    {
+        $f = new ConsolidatedFixtures;
+        $version = $f->version('1');
+        $f->gueltigkeit($version);
+        $f->fahrt($version, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:30:00']);
+
+        $sudenburg = collect($this->withToken($this->token())->getJson('/api/v1/admin/stop-groups?only_termini=1')->json('data'))
+            ->firstWhere('name', 'Sudenburg');
+
+        $this->assertSame([], $sudenburg['modes']);
+        $this->assertNull($sudenburg['open']);
+    }
+
+    /** Eine andere Periode zählt eigene Fahrten — sonst stünde über der Liste ein falscher Stand. */
+    public function test_another_period_is_not_counted(): void
+    {
+        $f = new ConsolidatedFixtures;
+        $periode = $f->periode();
+
+        $version = $f->version('1', FahrplanTyp::MoFrNormal, 1, $periode);
+        $f->gueltigkeit($version);
+        $f->fahrt($version, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:30:00']);
+
+        $andere = SchedulePeriod::factory()->create(['label' => 'Andere', 'valid_from' => '2027-01-01']);
+
+        $daten = $this->withToken($this->token())
+            ->getJson(sprintf('/api/v1/admin/stop-groups?only_termini=1&period=%d&day_type=mo_fr', $andere->id))
+            ->json('data');
+
+        $sudenburg = collect($daten)->firstWhere('name', 'Sudenburg');
+
+        $this->assertSame([], $sudenburg['modes']);
+        $this->assertNull($sudenburg['open']);
     }
 
     public function test_a_group_can_be_created_and_renamed(): void

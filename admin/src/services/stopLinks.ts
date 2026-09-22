@@ -23,6 +23,15 @@ export interface StopLinkStand {
   ranges: { valid_from: string; valid_to: string }[]
   line_version_ids: number[]
   line_count: number
+  /**
+   * Noch offene Fahrten **in diesem Stand**, je Verkehrsmittel plus `total`.
+   *
+   * Ohne sie bliebe ein Widerspruch unauflösbar: Eine Nachtlinie hat im Mo-Fr-Strang
+   * regelmäßig Eintagsversionen, und daraus wird ein Stand, der einen einzigen Tag umfasst.
+   * Wer im Hauptstand alles entschieden hat, sieht dort 0 und hält die Haltestelle für fertig,
+   * während die Auswahlliste — die über die ganze Periode zählt — noch eine Fahrt meldet.
+   */
+  open: { total: number } & Partial<Record<'tram' | 'bus', number>>
 }
 
 export type TripLinkKind = 'link' | 'start' | 'end'

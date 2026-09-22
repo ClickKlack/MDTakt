@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\FahrplanTyp;
+use App\Enums\RouteType;
 use App\Enums\TripLinkKind;
 use App\Models\SchedulePeriod;
 use App\Models\StopGroup;
@@ -44,6 +45,7 @@ final class StopLinkBoardService
 
         $versionen = $this->versionsTouching($stopIds, $period, $typ);
         $staende = $this->foldStands($versionen, $typ);
+        $this->attachOpenCounts($staende, $stopIds);
         $stand = $this->pickStand($staende, $standIndex);
 
         $aktiveVersionen = $stand === null ? [] : $stand['line_version_ids'];
@@ -157,6 +159,81 @@ final class StopLinkBoardService
                     ->values()
                     ->all(),
             ];
+        }
+
+        return $ergebnis;
+    }
+
+    /**
+     * Hängt jedem Versionsstand an, wie viele Fahrten dort noch offen sind.
+     *
+     * **Warum das an den Stand gehört und nicht nur an den gewählten:** Eine Nachtlinie hat im
+     * Mo-Fr-Strang regelmäßig Eintagsversionen — die N1 fährt in der Nacht auf einen Feiertag
+     * anders, und daraus wird ein Stand, der einen einzigen Tag umfasst. Wer im Hauptstand
+     * alles entschieden hat, sieht dort `open_count = 0` und hält die Haltestelle für fertig,
+     * während in einem Nebenstand noch eine Fahrt liegt. Die Auswahlliste zählt über die ganze
+     * Periode und zeigt die Eins — ohne diese Angabe bliebe der Widerspruch unauflösbar, und
+     * man müsste jeden Stand einzeln durchklicken, um die Fahrt zu finden.
+     *
+     * Je Verkehrsmittel, wie im Haltestellen-Verzeichnis: Die Pflege läuft in Stufen, erst die
+     * Straßenbahn. Eine Fahrt, die hier endet **und** beginnt, zählt zweimal — genau wie in
+     * `open_count` des Boards, das sie in beiden Spalten führt.
+     *
+     * @param  array<int, array<string, mixed>>  $staende
+     * @param  array<int, int>  $stopIds
+     */
+    private function attachOpenCounts(array &$staende, array $stopIds): void
+    {
+        $versionIds = array_values(array_unique(array_merge(
+            ...array_map(static fn (array $st): array => $st['line_version_ids'], $staende),
+        )));
+
+        $offen = $versionIds === [] || $stopIds === []
+            ? []
+            : $this->openPerVersion($stopIds, $versionIds);
+
+        foreach ($staende as &$stand) {
+            $summe = ['total' => 0];
+
+            foreach ($stand['line_version_ids'] as $id) {
+                foreach ($offen[$id] ?? [] as $mittel => $anzahl) {
+                    $summe[$mittel] = ($summe[$mittel] ?? 0) + $anzahl;
+                    $summe['total'] += $anzahl;
+                }
+            }
+
+            $stand['open'] = $summe;
+        }
+        unset($stand);
+    }
+
+    /**
+     * Offene Fahrten je Linien-Version und Verkehrsmittel.
+     *
+     * @param  array<int, int>  $stopIds
+     * @param  array<int, int>  $versionIds
+     * @return array<int, array<string, int>>
+     */
+    private function openPerVersion(array $stopIds, array $versionIds): array
+    {
+        $ergebnis = [];
+
+        foreach (['last_stop_id' => 'from_trip_id', 'first_stop_id' => 'to_trip_id'] as $spalte => $fremd) {
+            $zeilen = DB::table('consolidated_trips as ct')
+                ->leftJoin('trip_links as tl', 'tl.'.$fremd, '=', 'ct.id')
+                ->whereIn('ct.line_version_id', $versionIds)
+                ->whereIn('ct.'.$spalte, $stopIds)
+                ->whereNull('tl.id')
+                ->groupBy('ct.line_version_id', 'ct.route_type')
+                ->select('ct.line_version_id', 'ct.route_type', DB::raw('count(*) as offen'))
+                ->get();
+
+            foreach ($zeilen as $zeile) {
+                $mittel = RouteType::modeFor((int) $zeile->route_type);
+                $id = (int) $zeile->line_version_id;
+
+                $ergebnis[$id][$mittel] = ($ergebnis[$id][$mittel] ?? 0) + (int) $zeile->offen;
+            }
         }
 
         return $ergebnis;

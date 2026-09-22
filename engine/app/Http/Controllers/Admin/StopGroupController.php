@@ -31,11 +31,16 @@ final class StopGroupController extends Controller
         private readonly StopGroupService $groups,
     ) {}
 
-    /** GET /api/v1/admin/stop-groups?q=&only_termini= */
+    /** GET /api/v1/admin/stop-groups?q=&only_termini=&period=&day_type= */
     public function index(StopGroupListRequest $request): JsonResponse
     {
         return response()->json([
-            'data' => $this->directory->overview($request->suche(), $request->onlyTermini()),
+            'data' => $this->directory->overview(
+                $request->suche(),
+                $request->onlyTermini(),
+                $request->periodId(),
+                $request->dayType(),
+            ),
         ]);
     }
 

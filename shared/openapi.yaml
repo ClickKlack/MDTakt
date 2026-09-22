@@ -1264,6 +1264,37 @@ components:
             Es endet nur oder beginnt nur etwas. Meist der Hinweis, dass der Gegen-Bahnsteig
             noch als eigene Haltestelle gefuehrt wird — sonst eine echte Betriebsfahrt.
         manual_count: { type: integer }
+        modes:
+          type: array
+          description: >
+            Die Verkehrsmittel, die in **Periode und Fahrplantyp der Abfrage** hier beginnen
+            oder enden. Leer, wenn die Abfrage ohne beides lief. Danach filtert die Auswahl im
+            Anschlusseditor: Wer die Strassenbahn abarbeitet, hat an einer reinen Buslinie
+            nichts zu tun.
+          items: { type: string, enum: [tram, bus] }
+        open:
+          type: object
+          nullable: true
+          description: >
+            Noch offene Fahrten je Verkehrsmittel, plus `total`. `null`, wenn die Abfrage ohne
+            `period`/`day_type` lief.
+
+
+            **Ueber die ganze Periode gezaehlt, nicht je Versionsstand.** Der Stand entsteht
+            erst beim Aufbau eines einzelnen Boards, samt Faltung der beteiligten
+            Linien-Versionen; ihn fuer alle Endstellen zu rechnen hiesse, das je Haltestelle zu
+            tun und bei jedem Standwechsel erneut. Die Zahl kann deshalb hoeher liegen als die
+            im Editor, wenn dort ein Stand gewaehlt ist, der nur einen Teil der Periode
+            abdeckt. Fuer die Frage, die diese Liste beantwortet — *ist hier noch etwas zu
+            tun?* — traegt sie trotzdem: Sie ist nie faelschlich null.
+
+
+            Eine Fahrt, die hier endet **und** beginnt (Wendeschleife), zaehlt zweimal — genau
+            wie im Board, das sie in beiden Spalten fuehrt.
+          properties:
+            tram: { type: integer }
+            bus: { type: integer }
+            total: { type: integer }
 
     StopGroupSuggestion:
       type: object
@@ -1343,6 +1374,27 @@ components:
           type: array
           items: { type: integer }
         line_count: { type: integer }
+        open:
+          type: object
+          description: >
+            Noch offene Fahrten **in diesem Stand**, je Verkehrsmittel plus `total`.
+
+
+            **Warum das an jedem Stand steht und nicht nur am gewaehlten:** Eine Nachtlinie hat
+            im `mo_fr`-Strang regelmaessig Eintagsversionen — sie faehrt in der Nacht auf einen
+            Feiertag anders —, und daraus wird ein Stand, der einen einzigen Tag umfasst. Wer im
+            Hauptstand alles entschieden hat, liest dort `open_count = 0` und haelt die
+            Haltestelle fuer fertig, waehrend das Haltestellen-Verzeichnis noch eine Fahrt
+            meldet: Es zaehlt ueber die ganze Periode. Ohne diese Angabe bliebe der Widerspruch
+            unaufloesbar, und man muesste jeden Stand einzeln durchklicken, um die Fahrt zu
+            finden.
+
+
+            Eine Fahrt, die hier endet **und** beginnt, zaehlt zweimal — wie in `open_count`.
+          properties:
+            tram: { type: integer }
+            bus: { type: integer }
+            total: { type: integer }
 
     CourseTerminal:
       type: object

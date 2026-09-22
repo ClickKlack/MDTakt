@@ -186,6 +186,48 @@ Filter zeigt. Der Linienfilter wurde dafür von Einfach- auf **Mehrfachauswahl**
 gemeinsam, die 6 daneben unberührt. Mit genau einer wählbaren Linie ließe sich der gewollte
 Linienwechsel nur über „Alle" automatisieren, und damit liefen alle übrigen Linien mit.
 
+#### Die Auswahl arbeitet in Stufen: erst die Tram, dann der Bus
+
+**Entschieden 22.09.2026.** Die Umlauf-Pflege läuft nicht netzweit gleichzeitig, sondern je
+Verkehrsmittel: erst die Straßenbahn vollständig, dann die Busse. Deshalb steht die
+Verkehrsmittel-Wahl **vor** der Haltestelle und nicht mehr unter dem Board — zusammen mit
+Periode und Fahrplantyp, denn alle drei bestimmen, welche Haltestellen überhaupt in Frage
+kommen.
+
+Sie wirkt an drei Stellen:
+
+| | |
+|---|---|
+| **Auswahlliste** | Nur Endstellen, an denen dieses Verkehrsmittel beginnt oder endet — bei Tram 25 von 60 |
+| **Hervorhebung** | Haltestellen mit offenen Fahrten treten hervor und tragen ihre Zahl; erledigte treten zurück. Ein Haken blendet sie ganz aus |
+| **Zählung im Editor** | „Noch offen: 22 Tram-Fahrten"; die ganze Haltestelle steht klein dahinter |
+
+**Die Zählung im Editor folgt dem Verkehrsmittel — die Gesamtzahl bleibt daneben stehen.** Das
+kehrt die frühere Regel um, nach der dort immer die ganze Haltestelle stand („der Pflegestand
+soll sich nicht schönrechnen lassen"). Der Grund hält weiterhin, deshalb verschwindet die Zahl
+nicht, sondern rückt in die Klammer: Sichtbar bleibt beides, groß ist die Stufe, an der gerade
+gearbeitet wird. Dem **Linien**filter folgt sie dagegen nicht — wer einzelne Linien ausblendet,
+will den Ausschnitt sehen, nicht den Pflegestand verkleinern.
+
+**Die Zahl in der Auswahlliste zählt über die ganze Periode, nicht je Versionsstand.** Der Stand
+entsteht erst beim Aufbau eines einzelnen Boards; ihn für alle 60 Endstellen zu rechnen hieße,
+das je Haltestelle zu tun und bei jedem Standwechsel erneut. Sie kann deshalb höher liegen als
+die im Editor — an der Listemannstraße 414 statt 240, wenn dort der zweite Stand gewählt ist.
+Für die Frage, die die Liste beantwortet (*ist hier noch etwas zu tun?*), trägt das: Sie ist nie
+fälschlich null.
+
+**Dafür trägt jeder Versionsstand seine eigene Zahl.** Sonst wäre der Unterschied zwischen
+beiden Zählungen nicht aufzulösen: Am Betriebshof Nord / AMROC war im Hauptstand alles
+entschieden, die Liste meldete trotzdem eine offene Fahrt — eine N1 um 02:15, die zu einer
+**Eintagsversion** gehörte (Nacht auf den Feiertag 03.10.2026). Sie lag in einem Stand, der
+genau diesen einen Tag umfasst, und ohne die Zahl am Stand-Knopf wäre sie nur durch Durchklicken
+aller Stände zu finden gewesen. Ist der gezeigte Stand fertig und ein anderer nicht, sagt der
+Editor das ausdrücklich und verlinkt dorthin.
+
+Eintagsstände dieser Art sind kein Ausnahmefall, sondern die Folge des offenen Punktes
+„Nachtverkehr folgt eigenem Rhythmus" (ROADMAP): Die Nacht eines Betriebstags folgt nicht seinem
+Fahrplantyp, sondern der Frage, ob der Folgetag ein Ruhetag ist.
+
 #### Der Tauschpunkt — dort entscheidet der Halt, nicht die Zeit
 
 **Entschieden 22.09.2026.** Manche Haltestellen sind keine Wendestelle, sondern ein *virtueller

@@ -1,0 +1,120 @@
+meta {
+  name: Stop Groups (Arbeitslast je Haltestelle)
+  type: http
+  seq: 36
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/stop-groups?only_termini=1&period=2&day_type=mo_fr
+  body: none
+  auth: bearer
+}
+
+params:query {
+  only_termini: 1
+  period: 2
+  day_type: mo_fr
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+}
+
+script:post-response {
+  const gruppen = res.body.data;
+
+  for (const g of gruppen) {
+    // Mit Periode und Fahrplantyp traegt jede Zeile beides — sonst waere die Auswahlliste
+    // im Anschlusseditor nicht zu filtern.
+    if (!Array.isArray(g.modes)) {
+      throw new Error(g.name + " traegt keine modes-Liste");
+    }
+    if (g.open === null || typeof g.open.total !== "number") {
+      throw new Error(g.name + " traegt keine Arbeitslast");
+    }
+
+    // total ist die Summe ueber die Verkehrsmittel — sonst liefen Liste und Editor auseinander.
+    let summe = 0;
+    for (const m of g.modes) {
+      if (typeof g.open[m] !== "number") {
+        throw new Error(g.name + " nennt " + m + " in modes, aber nicht in open");
+      }
+      summe += g.open[m];
+    }
+    if (summe !== g.open.total) {
+      throw new Error(g.name + ": open.total " + g.open.total + " ist nicht die Summe " + summe);
+    }
+  }
+
+  // Wer die Strassenbahn abarbeitet, bekommt eine kuerzere Liste.
+  const tram = gruppen.filter(g => g.modes.includes("tram"));
+  const offen = tram.filter(g => g.open.tram > 0);
+
+  console.log("Endstellen " + gruppen.length + " - mit Tram " + tram.length + ", davon offen " + offen.length);
+}
+
+docs {
+  # Haltestellen mit Arbeitslast
+
+  Dasselbe Verzeichnis wie `stop-groups.bru`, aber mit `period` **und** `day_type`. Dann traegt
+  jede Zeile zusaetzlich `modes` und `open` — die Arbeitsliste des Anschlusseditors.
+
+  ## Wofuer das da ist
+
+  Die Umlauf-Pflege laeuft in Stufen: erst die Strassenbahn, dann die Busse. Dafuer muss die
+  Auswahl schon vor der Haltestelle wissen, welches Verkehrsmittel gemeint ist — sie zeigt dann
+  nur die Endstellen, an denen dieses Mittel ueberhaupt vorkommt, und hebt die hervor, an denen
+  noch etwas offen ist. Am Realbestand: 60 Endstellen, davon 25 mit Tram und 22 davon mit
+  offenen Tram-Fahrten.
+
+  ## Worauf zu achten ist
+
+  **Beide Parameter gehoeren zusammen.** Einzeln ist keiner wirksam: Erst Periode und
+  Fahrplantyp zusammen benennen einen Fahrplan, und erst dann laesst sich sagen, was offen ist.
+  Ohne beide bleibt `modes` leer und `open` null — die Haltestellen-Pflege ruft den Endpunkt so
+  auf und bekommt unveraendert das, was sie immer bekommen hat.
+
+  **`open` zaehlt ueber die ganze Periode, nicht je Versionsstand.** Der Stand entsteht erst
+  beim Aufbau eines einzelnen Boards, samt Faltung der beteiligten Linien-Versionen; ihn fuer
+  alle Endstellen zu rechnen hiesse, das je Haltestelle zu tun und bei jedem Standwechsel
+  erneut. Die Zahl kann deshalb hoeher liegen als die im Editor — an der Listemannstrasse 414
+  statt 240, wenn dort der zweite Stand gewaehlt ist. Fuer die Frage, die diese Liste
+  beantwortet (*ist hier noch etwas zu tun?*), traegt sie trotzdem: Sie ist nie faelschlich
+  null.
+
+  **Eine Fahrt zaehlt zweimal, wenn sie hier endet und beginnt** (Wendeschleife) — genau wie im
+  Board, das sie in beiden Spalten fuehrt. Die beiden Zahlen sollen vergleichbar bleiben.
+
+  **Ein Verkehrsmittel ohne offene Fahrt bleibt in `modes`.** Eine fertig gepflegte Haltestelle
+  soll zuruecktreten, nicht aus der Auswahl verschwinden — sonst kaeme man an sie nur noch
+  ueber die Suche heran.
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": [
+      {
+        "id": 206, "name": "City Carré", "stop_count": 2,
+        "is_terminus": true, "one_sided": false,
+        "modes": ["tram"],
+        "open": { "tram": 763, "total": 763 }
+      },
+      {
+        "id": 89, "name": "Listemannstraße", "stop_count": 2,
+        "modes": ["bus", "tram"],
+        "open": { "bus": 201, "tram": 213, "total": 414 }
+      }
+    ]
+  }
+  ```
+}

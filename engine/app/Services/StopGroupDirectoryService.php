@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\FahrplanTyp;
+use App\Enums\RouteType;
 use App\Models\StopGroup;
 use Illuminate\Support\Facades\DB;
 
@@ -25,11 +27,21 @@ final class StopGroupDirectoryService
     ) {}
 
     /**
+     * @param  int|null  $periodId  Mit Periode **und** Fahrplantyp tragen die Zeilen zusätzlich
+     *                              `modes` und `open` — die Arbeitsliste des Anschlusseditors.
      * @return array<int, array<string, mixed>>
      */
-    public function overview(?string $suche = null, bool $nurEndpunkte = false): array
-    {
+    public function overview(
+        ?string $suche = null,
+        bool $nurEndpunkte = false,
+        ?int $periodId = null,
+        ?FahrplanTyp $dayType = null,
+    ): array {
         $this->groups->sync();
+
+        $ausschnitt = $periodId !== null && $dayType !== null
+            ? $this->workloadFor($periodId, $dayType)
+            : [];
 
         $mitglieder = DB::table('stop_group_members as m')
             ->join('consolidated_stops as s', 's.id', '=', 'm.consolidated_stop_id')
@@ -72,6 +84,10 @@ final class StopGroupDirectoryService
                 // fehlendes Gegenstück — genau der Fall, den der Zuordnungs-Editor lösen soll.
                 'one_sided' => ($endend === []) !== ($beginnend === []),
                 'manual_count' => count(array_filter($halte, static fn (array $h): bool => $h['assigned_via'] === 'manual')),
+                // Nur mit Periode und Fahrplantyp belegt: Welche Verkehrsmittel hier in diesem
+                // Ausschnitt beginnen oder enden, und wie viel davon noch offen ist.
+                'modes' => $ausschnitt[$gruppe->id]['modes'] ?? [],
+                'open' => $ausschnitt[$gruppe->id]['open'] ?? null,
             ];
         }
 
@@ -94,6 +110,72 @@ final class StopGroupDirectoryService
 
                 return false;
             }));
+        }
+
+        return $ergebnis;
+    }
+
+    /**
+     * Die Arbeitslast je Haltestelle: welche Verkehrsmittel hier vorkommen und wie viele
+     * Fahrten davon noch keine Entscheidung tragen.
+     *
+     * **Über die ganze Periode gezählt, nicht je Versionsstand.** Der Stand entsteht erst beim
+     * Aufbau eines einzelnen Boards, samt Faltung der beteiligten Linien-Versionen; ihn für
+     * alle 60 Endstellen zu rechnen hieße, das 60-mal zu tun und bei jedem Standwechsel erneut.
+     * Für die Frage, die diese Liste beantwortet — *ist hier noch etwas zu tun?* — trägt die
+     * gröbere Zählung: Sie ist nie fälschlich null. Sie kann höher liegen als die Zahl im
+     * Editor, wenn dort ein Stand gewählt ist, der nur einen Teil der Periode abdeckt.
+     *
+     * Eine Fahrt, die hier endet **und** beginnt (Wendeschleife), zählt zweimal — genau wie im
+     * Board, das sie in beiden Spalten führt.
+     *
+     * @return array<int, array{modes: array<int, string>, open: array<string, int>}>
+     */
+    private function workloadFor(int $periodId, FahrplanTyp $dayType): array
+    {
+        $roh = [];
+
+        foreach (['last_stop_id' => 'from_trip_id', 'first_stop_id' => 'to_trip_id'] as $spalte => $fremd) {
+            $zeilen = DB::table('consolidated_trips as ct')
+                ->join('line_versions as lv', 'lv.id', '=', 'ct.line_version_id')
+                ->join('stop_group_members as m', 'm.consolidated_stop_id', '=', 'ct.'.$spalte)
+                ->leftJoin('trip_links as tl', 'tl.'.$fremd, '=', 'ct.id')
+                ->where('lv.period_id', $periodId)
+                ->where('lv.day_type', $dayType->value)
+                ->groupBy('m.stop_group_id', 'ct.route_type')
+                ->select([
+                    'm.stop_group_id',
+                    'ct.route_type',
+                    DB::raw('count(*) as gesamt'),
+                    DB::raw('count(case when tl.id is null then 1 end) as offen'),
+                ])
+                ->get();
+
+            foreach ($zeilen as $zeile) {
+                $mittel = RouteType::modeFor((int) $zeile->route_type);
+                $id = (int) $zeile->stop_group_id;
+
+                $roh[$id][$mittel] = ($roh[$id][$mittel] ?? 0) + (int) $zeile->offen;
+                // Auch ein Verkehrsmittel ohne offene Fahrt gehört in die Liste — sonst
+                // verschwände eine fertig gepflegte Haltestelle aus der Auswahl.
+                $roh[$id]['__mittel'][$mittel] = true;
+            }
+        }
+
+        $ergebnis = [];
+
+        foreach ($roh as $id => $werte) {
+            $mittel = array_keys($werte['__mittel']);
+            sort($mittel);
+
+            $offen = ['total' => 0];
+
+            foreach ($mittel as $m) {
+                $offen[$m] = $werte[$m] ?? 0;
+                $offen['total'] += $offen[$m];
+            }
+
+            $ergebnis[$id] = ['modes' => $mittel, 'open' => $offen];
         }
 
         return $ergebnis;

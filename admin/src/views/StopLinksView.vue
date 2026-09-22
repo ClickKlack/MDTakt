@@ -57,11 +57,80 @@ const hinweise = ref<TripLinkWarning[]>([])
 /** Positive Rueckmeldung — getrennt von den Warnungen, damit beides sein Gewicht behaelt. */
 const erfolg = ref<string | null>(null)
 
+/** Nur Haltestellen mit offenen Anschluessen zeigen — die reine Abarbeitungsliste. */
+const nurOffene = ref(false)
+
+/** Offene Fahrten dieser Haltestelle im **gewaehlten Verkehrsmittel**. */
+function offeneAn(halt: StopGroup): number {
+  if (halt.open === null) {
+    return 0
+  }
+  return modeFilter.value === null ? halt.open.total : (halt.open[modeFilter.value] ?? 0)
+}
+
 const gefiltert = computed(() => {
   const begriff = suche.value.trim().toLowerCase()
-  const liste =
-    begriff === '' ? haltestellen.value : haltestellen.value.filter((h) => h.name.toLowerCase().includes(begriff))
+
+  const liste = haltestellen.value.filter((h) => {
+    // Das Verkehrsmittel entscheidet mit, welche Haltestellen ueberhaupt in Frage kommen:
+    // Wer die Strassenbahn abarbeitet, hat an einer reinen Buslinie nichts zu tun.
+    if (modeFilter.value !== null && !h.modes.includes(modeFilter.value)) {
+      return false
+    }
+    if (nurOffene.value && offeneAn(h) === 0) {
+      return false
+    }
+    return begriff === '' || h.name.toLowerCase().includes(begriff)
+  })
+
   return liste.slice(0, 40)
+})
+
+/** Wie viele Haltestellen der Filter verschweigt — sonst waere die Liste still unvollstaendig. */
+const verborgen = computed(() => {
+  const begriff = suche.value.trim().toLowerCase()
+  const imFilter = haltestellen.value.filter((h) => begriff === '' || h.name.toLowerCase().includes(begriff))
+  return imFilter.length - gefiltert.value.length
+})
+
+/** Offene Fahrten eines Versionsstands im gewaehlten Verkehrsmittel. */
+function offeneImStand(stand: { open: { total: number } & Partial<Record<'tram' | 'bus', number>> }): number {
+  return modeFilter.value === null ? stand.open.total : (stand.open[modeFilter.value] ?? 0)
+}
+
+/**
+ * Offene Fahrten in **anderen** Staenden als dem gezeigten.
+ *
+ * Das ist die Auskunft, die vorher fehlte: Wer im Hauptstand alles entschieden hat, liest dort
+ * „alle Fahrten sind entschieden" — und die Auswahlliste meldet trotzdem noch etwas, weil sie
+ * ueber die ganze Periode zaehlt. Ohne diesen Hinweis muesste man jeden Stand einzeln
+ * durchklicken, um die Fahrt zu finden.
+ */
+const offeneInAnderenStaenden = computed(() => {
+  if (board.value === null) {
+    return []
+  }
+
+  return board.value.stands
+    .filter((st) => st.index !== gewaehlterStand.value && offeneImStand(st) > 0)
+    .map((st) => ({ stand: st, offen: offeneImStand(st) }))
+})
+
+/**
+ * Die offenen Fahrten dieser Haltestelle im gewaehlten Verkehrsmittel — aus dem Board
+ * gerechnet und damit **auf den Versionsstand genau**, anders als die Zahl in der Auswahlliste.
+ *
+ * Bewusst ohne den Linienfilter: Die Stufe, die hier zaehlt, ist das Verkehrsmittel. Wer
+ * einzelne Linien ausblendet, will den Ausschnitt sehen, nicht den Pflegestand verkleinern.
+ */
+const offeneImMittel = computed(() => {
+  if (board.value === null) {
+    return 0
+  }
+
+  return [...board.value.ending, ...board.value.starting].filter(
+    (f) => f.decision === null && (modeFilter.value === null || f.mode === modeFilter.value),
+  ).length
 })
 
 /** Haltestellen, an denen nur endet oder nur beginnt — dort fehlt meist ein Bahnsteig. */
@@ -80,26 +149,12 @@ const linienAmHalt = computed(() => {
   return [...new Set(alle)].sort((a, b) => a.localeCompare(b, 'de', { numeric: true }))
 })
 
-/** Verkehrsmittel, die hier überhaupt vorkommen — ein Filter auf Leeres wäre irreführend. */
-const mittelAmHalt = computed(() => {
-  if (board.value === null) {
-    return []
-  }
-  const alle = [...board.value.ending, ...board.value.starting].map((f) => f.mode)
-  return [...new Set(alle)].filter((m): m is 'tram' | 'bus' => m === 'tram' || m === 'bus')
-})
 
 onMounted(async () => {
   try {
     // Nur Endstellen: An einem reinen Durchfahrts-Halt kann die Umlauf-Pflege nichts tun,
     // und netzweit sind das rund 250 von 315 Haltestellen.
-    const [h, p, l, b] = await Promise.all([
-      fetchStopGroups(null, true),
-      fetchSchedulePeriods(),
-      fetchLines(),
-      fetchDepots(true),
-    ])
-    haltestellen.value = h
+    const [p, l, b] = await Promise.all([fetchSchedulePeriods(), fetchLines(), fetchDepots(true)])
     perioden.value = p
     linienVerzeichnis.value = Object.fromEntries(l.map((linie) => [linie.route_short_name, linie]))
     betriebshoefe.value = b
@@ -111,6 +166,9 @@ onMounted(async () => {
     dayType.value = ((route.query.day_type as FahrplanTyp) ?? 'mo_fr') as FahrplanTyp
     gewaehlterStand.value = route.query.stand === undefined ? null : Number(route.query.stand)
 
+    // Erst jetzt: Die Arbeitslast je Haltestelle haengt an Periode und Fahrplantyp.
+    await ladeHaltestellen()
+
     if (gewaehlteHaltestelle.value !== null) {
       await ladeBoard()
     }
@@ -120,6 +178,16 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+/**
+ * Das Haltestellen-Verzeichnis samt Arbeitslast.
+ *
+ * Nur Endstellen: An einem reinen Durchfahrts-Halt kann die Umlauf-Pflege nichts tun, und
+ * netzweit sind das rund 250 von 315 Haltestellen.
+ */
+async function ladeHaltestellen(): Promise<void> {
+  haltestellen.value = await fetchStopGroups(null, true, gewaehltePeriode.value, dayType.value)
+}
 
 async function ladeBoard(): Promise<void> {
   if (gewaehlteHaltestelle.value === null || gewaehltePeriode.value === null) {
@@ -421,7 +489,17 @@ watch([gewaehltePeriode, dayType], () => {
   gewaehlterStand.value = null
   lineFilter.value = []
   leereBereich()
+  // Auch die Arbeitslast je Haltestelle haengt daran — sonst stuende ueber der Liste ein
+  // Fahrplantyp und darin die offenen Fahrten eines anderen.
+  void ladeHaltestellen()
   void ladeBoard()
+})
+
+// Ein anderes Verkehrsmittel zeigt einen anderen Ausschnitt — eine Markierung darin waere
+// Zufall, und ein mitgeschleppter Linienfilter zeigte dort nichts.
+watch(modeFilter, () => {
+  lineFilter.value = []
+  leereBereich()
 })
 
 watch(gewaehlterStand, (neu, alt) => {
@@ -469,38 +547,30 @@ watch(gewaehlterStand, (neu, alt) => {
 
         <!-- Auswahl: Haltestelle, Periode, Fahrplantyp, Versionsstand -->
         <div class="mt-6 rounded-lg bg-white p-4 shadow-sm">
-          <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Haltestelle</label>
-          <input
-            v-model="suche"
-            type="search"
-            placeholder="Haltestelle suchen …"
-            class="mt-1 w-full max-w-sm rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-800 focus:outline-none"
-          />
+          <!-- Alles, was die Liste darunter bestimmt, steht ueber ihr: Verkehrsmittel,
+               Periode und Fahrplantyp entscheiden, welche Haltestellen ueberhaupt in Frage
+               kommen und wie viel dort noch offen ist. -->
+          <div class="flex flex-wrap items-end gap-6">
+            <div>
+              <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Verkehrsmittel</label>
+              <div class="mt-1 flex flex-wrap gap-1 rounded-lg bg-slate-200/60 p-1">
+                <button
+                  v-for="mittel in ([null, 'tram', 'bus'] as const)"
+                  :key="mittel ?? 'alle'"
+                  type="button"
+                  class="rounded-md px-3 py-1 text-sm transition"
+                  :class="
+                    modeFilter === mittel
+                      ? 'bg-white font-medium text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:bg-white/60'
+                  "
+                  @click="modeFilter = mittel"
+                >
+                  {{ mittel === null ? 'Alle' : mittel === 'tram' ? 'Tram' : 'Bus' }}
+                </button>
+              </div>
+            </div>
 
-          <div class="mt-2 flex flex-wrap gap-1.5">
-            <button
-              v-for="halt in gefiltert"
-              :key="halt.id"
-              type="button"
-              class="rounded-md border px-2.5 py-1 text-sm transition"
-              :class="
-                gewaehlteHaltestelle === halt.id
-                  ? 'border-slate-800 bg-slate-800 font-medium text-white'
-                  : 'border-slate-200 text-slate-700 hover:border-slate-400'
-              "
-              @click="waehleHaltestelle(halt.id)"
-            >
-              {{ halt.name }}
-              <span v-if="halt.stop_count > 1" class="ml-1 text-xs opacity-60">{{ halt.stop_count }} Bahnsteige</span>
-              <span v-if="halt.one_sided" class="ml-1 text-xs text-amber-600" title="Hier endet nur oder beginnt nur etwas">!</span>
-            </button>
-            <span v-if="gefiltert.length === 0" class="text-sm text-slate-500">
-              Keine Endstelle gefunden. Gezeigt werden nur Haltestellen, an denen Fahrten beginnen oder enden — an
-              reinen Durchfahrts-Halten gibt es keine Umläufe zu pflegen.
-            </span>
-          </div>
-
-          <div class="mt-4 flex flex-wrap items-end gap-6">
             <div>
               <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Periode</label>
               <select
@@ -534,6 +604,67 @@ watch(gewaehlterStand, (neu, alt) => {
             </div>
           </div>
 
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Haltestelle</label>
+            <label class="flex items-center gap-2 text-sm text-slate-700">
+              <input v-model="nurOffene" type="checkbox" />
+              Nur mit offenen Anschlüssen
+            </label>
+          </div>
+          <input
+            v-model="suche"
+            type="search"
+            placeholder="Haltestelle suchen …"
+            class="mt-1 w-full max-w-sm rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-800 focus:outline-none"
+          />
+
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            <!-- Was noch offen ist, tritt hervor; was erledigt ist, tritt zurueck. Die Zahl
+                 zaehlt ueber die ganze Periode, nicht je Versionsstand — siehe unten. -->
+            <button
+              v-for="halt in gefiltert"
+              :key="halt.id"
+              type="button"
+              class="rounded-md border px-2.5 py-1 text-sm transition"
+              :class="
+                gewaehlteHaltestelle === halt.id
+                  ? 'border-slate-800 bg-slate-800 font-medium text-white'
+                  : offeneAn(halt) > 0
+                    ? 'border-amber-400 bg-amber-50 font-medium text-slate-900 hover:border-amber-600'
+                    : 'border-slate-200 text-slate-400 hover:border-slate-400 hover:text-slate-700'
+              "
+              @click="waehleHaltestelle(halt.id)"
+            >
+              {{ halt.name }}
+              <span
+                v-if="offeneAn(halt) > 0"
+                class="ml-1 text-xs font-semibold"
+                :class="gewaehlteHaltestelle === halt.id ? 'opacity-80' : 'text-amber-800'"
+                title="Noch offene Fahrten in dieser Periode"
+              >
+                {{ offeneAn(halt) }}
+              </span>
+              <span v-else class="ml-1 text-xs opacity-60">fertig</span>
+              <span v-if="halt.one_sided" class="ml-1 text-xs text-amber-600" title="Hier endet nur oder beginnt nur etwas">!</span>
+            </button>
+            <span v-if="gefiltert.length === 0" class="text-sm text-slate-500">
+              <template v-if="nurOffene">
+                Hier ist nichts mehr offen{{ modeFilter === null ? '' : modeFilter === 'tram' ? ' bei der Tram' : ' beim Bus' }} —
+                nimm den Haken heraus, um die erledigten Haltestellen wieder zu sehen.
+              </template>
+              <template v-else>
+                Keine Endstelle gefunden. Gezeigt werden nur Haltestellen, an denen Fahrten beginnen oder enden — an
+                reinen Durchfahrts-Halten gibt es keine Umläufe zu pflegen.
+              </template>
+            </span>
+          </div>
+
+          <p v-if="verborgen > 0" class="mt-2 text-xs text-slate-500">
+            {{ verborgen }} weitere {{ verborgen === 1 ? 'Haltestelle ist' : 'Haltestellen sind' }} durch den Filter
+            ausgeblendet. Die Zahl neben dem Namen zählt über die ganze Periode — im Editor kann sie kleiner sein,
+            wenn dort ein Versionsstand gewählt ist, der nur einen Teil davon abdeckt.
+          </p>
+
           <!-- Versionsstände: nur nötig, wenn die beteiligten Linien in dieser Periode
                überhaupt mehr als einen Fahrplanstand hatten. -->
           <div v-if="board && board.stands.length > 1" class="mt-4">
@@ -564,6 +695,15 @@ watch(gewaehlterStand, (neu, alt) => {
                   >, {{ stand.ranges.length }} Zeiträume</template
                 >
               </span>
+                <!-- Je Stand, nicht nur fuer den gezeigten: Ein Eintagsstand einer Nachtlinie
+                     ist sonst nicht zu finden, ohne jeden einzeln durchzuklicken. -->
+                <span
+                  v-if="offeneImStand(stand) > 0"
+                  class="ml-1 rounded bg-amber-100 px-1.5 text-xs font-semibold text-amber-900"
+                >
+                  {{ offeneImStand(stand) }} offen
+                </span>
+                <span v-else class="ml-1 text-xs text-emerald-600">fertig</span>
               </button>
             </div>
           </div>
@@ -598,19 +738,45 @@ watch(gewaehlterStand, (neu, alt) => {
                 {{ board.stop_group.stops.map((h) => h.name).join(' · ') }}
               </p>
             </div>
-            <!-- Bewusst die Zahl der **ganzen** Haltestelle, auch bei aktivem Filter: Der
-                 Pflegestand soll sich nicht schoenrechnen lassen, indem man etwas ausblendet. -->
-            <p class="text-sm" :class="board.open_count > 0 ? 'text-amber-800' : 'text-emerald-700'">
+            <!-- Die grosse Zahl folgt dem Verkehrsmittel: Wer die Strassenbahn abarbeitet,
+                 soll seinen Fortschritt sehen. Die ganze Haltestelle steht klein dahinter —
+                 der Pflegestand soll sich nicht schoenrechnen lassen, indem man etwas
+                 ausblendet. -->
+            <p class="text-sm" :class="offeneImMittel > 0 ? 'text-amber-800' : 'text-emerald-700'">
               {{
-                board.open_count > 0
-                  ? `Noch offen: ${board.open_count} Fahrten`
-                  : 'Alle Fahrten an dieser Haltestelle sind entschieden.'
+                offeneImMittel > 0
+                  ? `Noch offen: ${offeneImMittel} ${modeFilter === null ? 'Fahrten' : modeFilter === 'tram' ? 'Tram-Fahrten' : 'Bus-Fahrten'}`
+                  : modeFilter === null
+                    ? 'Alle Fahrten an dieser Haltestelle sind entschieden.'
+                    : `Alle ${modeFilter === 'tram' ? 'Tram' : 'Bus'}-Fahrten hier sind entschieden.`
               }}
-              <span v-if="modeFilter !== null || lineFilter.length > 0" class="text-slate-500">
-                (ganze Haltestelle)
+              <span v-if="modeFilter !== null" class="text-slate-500">
+                ({{ board.open_count }} an der ganzen Haltestelle)
               </span>
             </p>
           </div>
+
+          <!-- Der Widerspruch, den die Auswahlliste sonst unerklaert liesse: Sie zaehlt ueber
+               die ganze Periode, das Board ueber den gewaehlten Stand. -->
+          <p
+            v-if="offeneInAnderenStaenden.length"
+            class="mt-2 rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-900"
+          >
+            In diesem Versionsstand ist nichts mehr offen, in
+            <template v-for="(eintrag, i) in offeneInAnderenStaenden" :key="eintrag.stand.index">
+              <template v-if="i > 0">{{ i === offeneInAnderenStaenden.length - 1 ? ' und ' : ', ' }}</template>
+              <button
+                type="button"
+                class="font-medium underline underline-offset-2 hover:text-amber-950"
+                @click="gewaehlterStand = eintrag.stand.index"
+              >
+                {{ formatDate(eintrag.stand.valid_from) }}–{{ formatDate(eintrag.stand.valid_to) }}
+              </button>
+              ({{ eintrag.offen }})
+            </template>
+            aber schon. Nachtlinien tragen im Mo-Fr-Strang oft Eintagsversionen — daraus wird ein
+            eigener Stand, der leicht übersehen wird.
+          </p>
 
           <p
             v-if="board.ending.length === 0 && board.starting.length === 0"
@@ -628,28 +794,10 @@ watch(gewaehlterStand, (neu, alt) => {
           <div :class="loadingBoard ? 'pointer-events-none opacity-60 transition-opacity' : ''">
           <!-- Filter: An einem Umsteigepunkt liegen schnell 60 Fahrten nebeneinander. Wer
                eine Linie pflegt, will nur die sehen. -->
+          <!-- Das Verkehrsmittel steht jetzt oben bei der Auswahl: Es entscheidet schon
+               mit, welche Haltestellen ueberhaupt angeboten werden. Hier bleibt der
+               Linienfilter, der nur innerhalb einer Haltestelle Sinn ergibt. -->
           <div v-if="board.ending.length || board.starting.length" class="mt-4 flex flex-wrap items-center gap-4">
-            <div v-if="mittelAmHalt.length > 1" class="flex flex-wrap gap-1 rounded-lg bg-slate-200/60 p-1">
-              <button
-                type="button"
-                class="rounded-md px-3 py-1 text-sm transition"
-                :class="modeFilter === null ? 'bg-white font-medium text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/60'"
-                @click="modeFilter = null; lineFilter = []; leereBereich()"
-              >
-                Alle
-              </button>
-              <button
-                v-for="mittel in mittelAmHalt"
-                :key="mittel"
-                type="button"
-                class="rounded-md px-3 py-1 text-sm transition"
-                :class="modeFilter === mittel ? 'bg-white font-medium text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/60'"
-                @click="modeFilter = mittel; lineFilter = []; leereBereich()"
-              >
-                {{ mittel === 'tram' ? 'Tram' : 'Bus' }}
-              </button>
-            </div>
-
             <div v-if="linienAmHalt.length > 1" class="flex flex-wrap items-center gap-1.5">
               <span class="text-xs uppercase tracking-wide text-slate-500">Linie</span>
               <button

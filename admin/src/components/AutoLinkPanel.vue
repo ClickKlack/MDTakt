@@ -5,6 +5,7 @@ import {
   applyAutoLinks,
   previewAutoLinks,
   type AutoLinkAction,
+  type AutoLinkPair,
   type AutoLinkParams,
   type AutoLinkResult,
   type AutoLinkSkip,
@@ -153,6 +154,101 @@ function zeitDerSeite(zeile: AutoLinkSkip): string {
   return formatClock(zeile.side === 'starting' ? zeile.trip.departure_time : zeile.trip.arrival_time)
 }
 
+// ---------------------------------------------------------------- Kursnummern in der Vorschau
+
+/** Marke einer Kette, die eine Nummer traegt — wie der Kursknopf im Board. */
+const KURS_GESETZT = 'bg-slate-800 font-semibold text-white'
+/** Keine Nummer, und es kommt auch keine dazu. */
+const KURS_LEER = 'border border-dashed border-slate-300 text-slate-400'
+/** Keine Nummer — bekommt sie aber durch diesen Anschluss von der Gegenseite. */
+const KURS_ERBT = 'border border-dashed border-emerald-500 text-emerald-700'
+/** Beide Seiten tragen eine, und zwar verschiedene. Der laute Fall. */
+const KURS_STREIT = 'bg-rose-100 font-semibold text-rose-900 ring-1 ring-rose-300'
+
+interface KursLage {
+  von: string
+  nach: string
+  vonKlasse: string
+  nachKlasse: string
+  /** Der auffaellige Zusatz hinter der Zeile — `null`, wenn es nichts zu sagen gibt. */
+  hinweis: string | null
+  hinweisKlasse: string
+  titel: string
+}
+
+/**
+ * Wie die Kursnummern der beiden Seiten zueinander stehen.
+ *
+ * Zwei verknuepfte Fahrten sind dasselbe Fahrzeug, also derselbe Kurs (KURSE §2 K2) — der Lauf
+ * traegt die Nummer deshalb weiter. Das ist die eine Folge, die man der Vorschau nicht ansieht,
+ * wenn dort nur Uhrzeiten stehen. Verglichen wird ueber die **Kurs-Id**, wortgleich zur Engine:
+ * Zwei Umlaeufe koennen dieselbe Nummer tragen und trotzdem verschieden sein, weil die Nummer
+ * nur je Linie eindeutig ist.
+ */
+function kursLage(paar: AutoLinkPair): KursLage {
+  const a = paar.from_trip.course
+  const b = paar.to_trip.course
+
+  if (a !== null && b !== null) {
+    if (a.id === b.id) {
+      return {
+        von: a.display,
+        nach: b.display,
+        vonKlasse: KURS_GESETZT,
+        nachKlasse: KURS_GESETZT,
+        hinweis: null,
+        hinweisKlasse: '',
+        titel: 'Beide Ketten tragen bereits denselben Kurs.',
+      }
+    }
+
+    return {
+      von: a.display,
+      nach: b.display,
+      vonKlasse: KURS_STREIT,
+      nachKlasse: KURS_STREIT,
+      hinweis:
+        a.display === b.display
+          ? 'zwei Umläufe mit derselben Nummer'
+          : `Kurs ${a.display} ≠ ${b.display}`,
+      hinweisKlasse: 'bg-rose-100 font-medium text-rose-900',
+      titel:
+        'Beide Ketten tragen schon eine Nummer, und zwar verschiedene. Der Anschluss wird trotzdem '
+        + 'angelegt — er ist eine Aussage über das Fahrzeug. Überschrieben wird nichts; welche Nummer '
+        + 'die richtige ist, weißt nur du.',
+    }
+  }
+
+  if (a === null && b === null) {
+    return {
+      von: 'ohne Kurs',
+      nach: 'ohne Kurs',
+      vonKlasse: KURS_LEER,
+      nachKlasse: KURS_LEER,
+      hinweis: null,
+      hinweisKlasse: '',
+      titel: 'Keine der beiden Ketten trägt eine Nummer — der Lauf vergibt auch keine.',
+    }
+  }
+
+  const nummer = (a ?? b)!.display
+
+  return {
+    von: a?.display ?? 'ohne Kurs',
+    nach: b?.display ?? 'ohne Kurs',
+    vonKlasse: a === null ? KURS_ERBT : KURS_GESETZT,
+    nachKlasse: b === null ? KURS_ERBT : KURS_GESETZT,
+    hinweis: `Kurs ${nummer} wird übertragen`,
+    hinweisKlasse: 'bg-emerald-100 text-emerald-900',
+    titel:
+      'Nur eine Seite trägt eine Nummer. Nach dem Lauf gilt sie für die ganze Kette — beide Fahrten '
+      + 'sind dasselbe Fahrzeug.',
+  }
+}
+
+/** Die geplanten Uebergaenge samt Kurs-Lage — einmal gerechnet statt achtmal je Zeile. */
+const paare = computed(() => (vorschau.value?.pairs ?? []).map((paar) => ({ paar, kurs: kursLage(paar) })))
+
 /** Gleiche Gruende zusammenfassen — zwoelf gleichlautende Zeilen sagen nicht mehr als eine. */
 const uebersprungen = computed(() => {
   const gruppen = new Map<string, { reason: string; zeiten: string[] }>()
@@ -238,10 +334,11 @@ const uebersprungen = computed(() => {
       <label class="flex items-start gap-2 text-sm text-slate-700">
         <input v-model="auchBetriebsfahrten" type="checkbox" class="mt-0.5" />
         <span>
-          Auch Aus- und Einrücken lösen
+          Auch Betriebshof-Fahrten lösen
           <span class="block text-xs text-slate-500">
-            Ohne Haken bleiben Betriebsfahrten stehen — sie sind eine eigenständige Aussage und sollen nicht
-            nebenbei verschwinden.
+            Gemeint sind die Marken „In den Betriebshof“ und „Aus dem Betriebshof“ (Ein- und Ausrücken). Ohne
+            Haken bleiben sie stehen — sie sind eine eigenständige Aussage und sollen nicht nebenbei
+            verschwinden.
           </span>
         </span>
       </label>
@@ -289,17 +386,33 @@ const uebersprungen = computed(() => {
 
       <ul v-else class="mt-2 divide-y divide-slate-100 rounded-md border border-slate-200">
         <li
-          v-for="paar in vorschau.pairs"
+          v-for="{ paar, kurs } in paare"
           :key="`p${paar.from_trip.id}`"
           class="flex flex-wrap items-center gap-2 px-3 py-1.5 text-sm"
         >
           <LineBadge :line="signet(paar.from_trip)" size="sm" />
           <span class="tabular-nums">{{ formatClock(paar.from_trip.arrival_time) }}</span>
+          <!-- Die Kursnummer ist die Folge, die man der Vorschau sonst nicht ansieht: Der Lauf
+               traegt sie ueber den Anschluss hinweg weiter. -->
+          <span class="rounded px-1.5 py-0.5 text-xs tabular-nums" :class="kurs.vonKlasse" :title="kurs.titel">
+            {{ kurs.von }}
+          </span>
           <span class="text-slate-400">→</span>
+          <span class="rounded px-1.5 py-0.5 text-xs tabular-nums" :class="kurs.nachKlasse" :title="kurs.titel">
+            {{ kurs.nach }}
+          </span>
           <span class="tabular-nums">{{ formatClock(paar.to_trip.departure_time) }}</span>
           <LineBadge :line="signet(paar.to_trip)" size="sm" />
           <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs tabular-nums text-slate-600">
             {{ formatDuration(paar.turnaround_seconds) }} Wende
+          </span>
+          <span
+            v-if="kurs.hinweis"
+            class="rounded-full px-2 py-0.5 text-xs"
+            :class="kurs.hinweisKlasse"
+            :title="kurs.titel"
+          >
+            {{ kurs.hinweis }}
           </span>
           <span
             v-for="hinweis in paar.warnings"
@@ -326,8 +439,12 @@ const uebersprungen = computed(() => {
             <span class="tabular-nums">{{ formatClock(zeile.to_trip.departure_time) }}</span>
             <LineBadge :line="signet(zeile.to_trip)" size="sm" />
           </template>
-          <span v-if="zeile.kind !== 'link'" class="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-900">
-            {{ zeile.kind === 'end' ? 'Einrücken' : 'Ausrücken' }}
+          <span
+            v-if="zeile.kind !== 'link'"
+            class="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-900"
+            :title="zeile.kind === 'end' ? 'Einrücken' : 'Ausrücken'"
+          >
+            {{ zeile.kind === 'end' ? 'In den Betriebshof' : 'Aus dem Betriebshof' }}
           </span>
           <span
             v-if="zeile.partner_outside_range"

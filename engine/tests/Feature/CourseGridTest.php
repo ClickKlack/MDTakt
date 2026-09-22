@@ -288,6 +288,88 @@ final class CourseGridTest extends TestCase
     }
 
     /**
+     * Der früheste Umlauf gehört nach **oben** — nicht nach unten.
+     *
+     * Gemessen wird der Takt erst, wenn alle Fahrzeuge draußen sind. Setzte man den Anker auf
+     * die erste Runde der ersten Spalte, misst man ihn an einem Morgen, an dem die halbe Flotte
+     * noch im Hof steht: Die übrigen Spalten müssten über Stunden nach unten ausweichen, und
+     * ausgerechnet der früheste Umlauf landete am tiefsten. Auf der Linie 10 stand Kurs 1 mit
+     * Tagesbeginn 04:05 dadurch in Zeile 105, während Kurs 6 mit 04:29 in Zeile 0 stand.
+     */
+    public function test_the_earliest_course_stays_at_the_top(): void
+    {
+        $version = $this->version();
+
+        // Runde = 60 Minuten. Kurs 01 faehrt ab 04:00, die beiden anderen ruecken erst spaeter
+        // aus — und Kurs 03 beginnt vor Kurs 02, damit die Greedy-Kette wirklich klettert.
+        $fahrplan = [
+            '01' => ['04:00:00', '05:00:00', '06:00:00', '07:00:00'],
+            '02' => ['06:30:00', '07:30:00'],
+            '03' => ['06:10:00', '07:10:00', '08:10:00'],
+        ];
+
+        foreach ($fahrplan as $nummer => $runden) {
+            $vorher = null;
+
+            foreach ($runden as $ab) {
+                $start = ((int) substr($ab, 0, 2)) * 60 + (int) substr($ab, 3, 2);
+                $uhr = static fn (int $plus): string => sprintf('%02d:%02d:00', intdiv($start + $plus, 60), ($start + $plus) % 60);
+
+                // Je Runde hin und zurueck, damit die Achse eine echte Runde kennt.
+                $hin = $this->f->fahrt($version, ['A', 'B'], [$uhr(0), $uhr(20)]);
+                $rueck = $this->f->fahrt($version, ['B', 'A'], [$uhr(30), $uhr(50)]);
+
+                if ($vorher !== null) {
+                    $this->verknuepfe($vorher, $hin);
+                }
+
+                $this->verknuepfe($hin, $rueck);
+                $vorher = $rueck;
+            }
+
+            $this->setzeKurs($vorher, $nummer);
+        }
+
+        $daten = $this->hole();
+
+        $erste = [];
+
+        foreach ($daten['courses'] as $spalte) {
+            foreach ($spalte['cells'] as $i => $zelle) {
+                if ($zelle !== null) {
+                    $erste[$spalte['number']] = $i;
+                    break;
+                }
+            }
+        }
+
+        $this->assertSame(
+            0,
+            $erste['01'],
+            'Der frueheste Umlauf muss ganz oben beginnen, sonst steht 04:00 unter 06:10.',
+        );
+        $this->assertGreaterThan($erste['01'], $erste['02'], 'Ein spaeter ausrueckender Umlauf beginnt weiter unten.');
+        $this->assertGreaterThan($erste['01'], $erste['03'], 'Ein spaeter ausrueckender Umlauf beginnt weiter unten.');
+
+        // Und die Zeilen lesen sich quer weiterhin aufsteigend.
+        foreach ($daten['rows'] as $zeile) {
+            $quer = array_map(
+                static fn (array $s): ?string => $s['cells'][$zeile['position']]['time'] ?? null,
+                $daten['courses'],
+            );
+
+            if (in_array(null, $quer, true)) {
+                continue;
+            }
+
+            $sortiert = $quer;
+            sort($sortiert);
+
+            $this->assertSame($sortiert, $quer, "Zeile {$zeile['position']} laeuft rueckwaerts.");
+        }
+    }
+
+    /**
      * Ein Umlauf, der eine Runde weniger fährt, lässt seine Spalte unten leer — statt die
      * Zeilen der anderen zu verschieben.
      */

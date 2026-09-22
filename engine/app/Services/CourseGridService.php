@@ -327,7 +327,13 @@ final class CourseGridService
     private function roundOffsets(array $spalten, array $splits): array
     {
         $gewaehlt = [];
-        $vorher = null;
+
+        // **Gemessen wird erst, wenn alle Fahrzeuge draußen sind.** Vorher steht der Takt noch
+        // nicht: Auf der 10 rückt Kurs 1 um 04:09 aus und Kurs 2 erst um 06:48. Setzte man den
+        // Anker auf die erste Runde von Kurs 1, misst man ihn an einem Morgen, an dem die halbe
+        // Flotte noch im Hof steht — die übrigen Spalten müssten dann alle über Stunden nach
+        // unten ausweichen, und ausgerechnet der früheste Umlauf landete am tiefsten.
+        $vorher = $this->serviceStart($spalten, $splits);
 
         foreach ($spalten as $i => $spalte) {
             $treffer = 0;
@@ -353,6 +359,35 @@ final class CourseGridService
         // Die Runde mit dem höchsten Index gibt den Takt vor; alle anderen rücken so weit nach
         // unten, dass ihre gewählte Runde daneben zu stehen kommt.
         return array_map(static fn (int $r): int => $hoechste - $r, $gewaehlt);
+    }
+
+    /**
+     * Der Zeitpunkt, ab dem **jeder** Umlauf im Dienst ist — die späteste erste Runde.
+     *
+     * Eine Sekunde davor, damit die erste Spalte ihre Runde genau dort noch greifen kann. `null`,
+     * wenn sich keine finden lässt; dann setzt die Messung wie bisher an der ersten Runde an.
+     *
+     * @param  array<int, array<string, mixed>>  $spalten
+     * @param  array<int, array<int, int>>  $splits
+     */
+    private function serviceStart(array $spalten, array $splits): ?int
+    {
+        $spaeteste = null;
+
+        foreach ($spalten as $i => $spalte) {
+            $erste = $splits[$i][0] ?? null;
+
+            if ($erste === null) {
+                continue;
+            }
+
+            $zelle = $spalte['cells'][$erste];
+            $key = $this->operatingDay->sortKey($zelle['line'], $zelle['time']);
+
+            $spaeteste = $spaeteste === null ? $key : max($spaeteste, $key);
+        }
+
+        return $spaeteste === null ? null : $spaeteste - 1;
     }
 
     /**

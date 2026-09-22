@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\TripLinkKind;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\TripLinkDepotRequest;
 use App\Http\Requests\TripLinkRequest;
 use App\Http\Resources\TripLinkResource;
 use App\Models\TripLink;
@@ -49,7 +50,17 @@ final class TripLinkController extends Controller
             ], Response::HTTP_CONFLICT);
         }
 
-        $link = $this->links->create($kind, $von, $nach, $request->note());
+        // `has('depot_id')` statt eines Werte-Vergleichs: Ein ausdrueckliches `null` heisst
+        // „bewusst offen" und darf die Automatik nicht ausloesen. Fehlt das Feld ganz — der
+        // uebliche Weg aus dem Board —, schlaegt die Haltestelle den Hof vor.
+        $link = $this->links->create(
+            $kind,
+            $von,
+            $nach,
+            $request->note(),
+            $request->depotId(),
+            $request->has('depot_id'),
+        );
 
         // Zwei verknuepfte Fahrten sind dasselbe Fahrzeug — also derselbe Kurs. Traegt eine
         // Seite bereits eine Nummer, gilt sie ab jetzt fuer die ganze Kette; das von Hand
@@ -75,6 +86,17 @@ final class TripLinkController extends Controller
         $daten['course_trips_assigned'] = $kurs['trips_assigned'];
 
         return TripLinkResource::make($daten)->response()->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /** PUT /api/v1/admin/trip-links/{tripLink}/depot — Betriebshof setzen oder offen lassen */
+    public function depot(TripLinkDepotRequest $request, TripLink $tripLink): TripLinkResource
+    {
+        $link = $this->links->setDepot($tripLink, $request->depotId());
+
+        return TripLinkResource::make($this->links->describe($link) + [
+            'course' => null,
+            'course_trips_assigned' => 0,
+        ]);
     }
 
     /** DELETE /api/v1/admin/trip-links/{tripLink} */

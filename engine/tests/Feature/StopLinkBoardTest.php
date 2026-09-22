@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\FahrplanTyp;
+use App\Models\Depot;
 use App\Models\SchedulePeriod;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -260,6 +261,50 @@ final class StopLinkBoardTest extends TestCase
         $this->assertNull($daten['starting'][0]['decision']['partner']);
         $this->assertSame('Ausrücken', $daten['starting'][0]['decision']['note']);
         $this->assertSame(0, $daten['open_count']);
+    }
+
+    /**
+     * Der Betriebshof hängt an der Entscheidung und muss mit ihr im Board stehen — sonst
+     * müsste der Pflegende für die Angabe „ausgerückt aus Nord" in eine andere Ansicht.
+     */
+    public function test_a_terminal_decision_carries_its_depot(): void
+    {
+        $periode = $this->f->periode();
+        $version = $this->f->version('1', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($version);
+
+        $beginnt = $this->f->fahrt($version, ['Betriebshof', 'Kannenstieg'], ['04:30:00', '04:42:00']);
+        $hof = Depot::factory()->create(['name' => 'Nord-Hof', 'short_name' => 'Nord']);
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'start',
+            'to_trip_id' => $beginnt->id,
+            'depot_id' => $hof->id,
+        ])->assertCreated();
+
+        $daten = $this->hole($this->haltestelleId('Betriebshof'), $periode);
+
+        $this->assertSame($hof->id, $daten['starting'][0]['decision']['depot']['id']);
+        $this->assertSame('Nord', $daten['starting'][0]['decision']['depot']['display']);
+    }
+
+    /** Ohne Hof ist die Angabe `null` — „noch offen", nicht „kein Hof". */
+    public function test_a_terminal_decision_without_a_depot_reports_null(): void
+    {
+        $periode = $this->f->periode();
+        $version = $this->f->version('1', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($version);
+
+        $beginnt = $this->f->fahrt($version, ['Betriebshof', 'Kannenstieg'], ['04:30:00', '04:42:00']);
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'start',
+            'to_trip_id' => $beginnt->id,
+        ])->assertCreated();
+
+        $daten = $this->hole($this->haltestelleId('Betriebshof'), $periode);
+
+        $this->assertNull($daten['starting'][0]['decision']['depot']);
     }
 
     public function test_a_stop_without_trips_yields_empty_lists(): void

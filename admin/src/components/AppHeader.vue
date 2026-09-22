@@ -65,6 +65,13 @@ async function logout(): Promise<void> {
             Kurse
           </RouterLink>
           <RouterLink
+            to="/betriebshoefe"
+            class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
+            active-class="bg-slate-100 font-medium text-slate-900"
+          >
+            Betriebshöfe
+          </RouterLink>
+          <RouterLink
             to="/versions"
             class="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
             active-class="bg-slate-100 font-medium text-slate-900"

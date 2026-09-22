@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\CourseController;
 use App\Http\Controllers\Admin\CourseGridController;
 use App\Http\Controllers\Admin\CourseSequenceController;
 use App\Http\Controllers\Admin\CoverageController;
+use App\Http\Controllers\Admin\DepotController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\ImportController as AdminImportController;
 use App\Http\Controllers\Admin\LineColorController;
@@ -90,7 +91,17 @@ Route::prefix('v1')->group(function (): void {
                 ->name('admin.stop-links.auto.store');
 
             Route::post('trip-links', [TripLinkController::class, 'store'])->name('admin.trip-links.store');
+            // Der Betriebshof wird nachgetragen, nicht mitgesetzt: Erst wird markiert, der Hof
+            // kommt dazu, sobald er feststeht (KURSE §3.2).
+            Route::put('trip-links/{tripLink}/depot', [TripLinkController::class, 'depot'])
+                ->name('admin.trip-links.depot');
             Route::delete('trip-links/{tripLink}', [TripLinkController::class, 'destroy'])->name('admin.trip-links.destroy');
+
+            // Betriebshoefe — das Verzeichnis hinter Aus- und Einruecken (KURSE §3.2).
+            Route::get('depots', [DepotController::class, 'index'])->name('admin.depots.index');
+            Route::post('depots', [DepotController::class, 'store'])->name('admin.depots.store');
+            Route::put('depots/{depot}', [DepotController::class, 'update'])->name('admin.depots.update');
+            Route::delete('depots/{depot}', [DepotController::class, 'destroy'])->name('admin.depots.destroy');
 
             // Kursnummern — das Etikett am Umlauf, nie an der einzelnen Fahrt (KURSE §2 K2).
             Route::get('courses', [CourseController::class, 'index'])->name('admin.courses.index');

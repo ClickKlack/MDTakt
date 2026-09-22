@@ -7,8 +7,10 @@ import LineBadge from '../components/LineBadge.vue'
 import {
   fetchCourseGrid,
   fetchLineCourses,
+  type CourseChain,
   type CourseChainTrip,
   type CourseGrid,
+  type CourseTerminal,
   type LineCourseOverview,
 } from '../services/courses'
 import { FAHRPLAN_TYPEN, fetchLines, type FahrplanTyp, type Line } from '../services/lines'
@@ -165,6 +167,56 @@ watch(ansicht, () => {
  * Ein Abstand ist erst dann auffällig, wenn dort **kein** Anschluss steht — dann ist die Kette
  * gerissen. Mit Anschluss ist auch eine lange Wende in Ordnung.
  */
+/**
+ * Die Betriebshof-Marke an einem Ketten-Ende in Anzeigeform.
+ *
+ * Drei Zustaende, die auseinanderzuhalten sind — und der erste ist der einzige, der auffallen
+ * soll: Ein Umlauf, der ins Leere beginnt oder endet, ist eine Luecke. Eine Marke **ohne** Hof
+ * ist dagegen vollstaendig gepflegt: An einer Endstelle steht der Hof oft nicht fest.
+ */
+function hofMarke(terminal: CourseTerminal, richtung: 'aus' | 'ein'): {
+  text: string
+  klasse: string
+  fehlt: boolean
+} {
+  if (!terminal.marked) {
+    return {
+      text:
+        richtung === 'aus'
+          ? 'Kein Ausrücken markiert — der Umlauf beginnt ins Leere'
+          : 'Kein Einrücken markiert — der Umlauf endet ins Leere',
+      klasse: 'bg-amber-50 text-amber-900',
+      fehlt: true,
+    }
+  }
+
+  const wohin = richtung === 'aus' ? 'Aus dem Betriebshof' : 'In den Betriebshof'
+
+  return {
+    text: terminal.depot === null ? `${wohin} — welcher, ist offen` : `${wohin} ${terminal.depot.name}`,
+    klasse: 'bg-sky-50 text-sky-900',
+    fehlt: false,
+  }
+}
+
+/**
+ * Aus- und Einrueckhof nebeneinander — sie sind **nicht** zwangslaeufig derselbe, und genau das
+ * soll am Umlauf auf einen Blick zu sehen sein.
+ */
+function hofSpanne(kurs: CourseChain): { text: string; verschieden: boolean } | null {
+  const aus = kurs.terminal_out.depot
+  const ein = kurs.terminal_in.depot
+
+  if (aus === null && ein === null) {
+    return null
+  }
+
+  return {
+    text: `${aus?.display ?? '?'} → ${ein?.display ?? '?'}`,
+    verschieden: aus !== null && ein !== null && aus.id !== ein.id,
+  }
+}
+
 function istRiss(trip: CourseChainTrip, index: number): boolean {
   return index > 0 && !trip.linked_to_previous
 }
@@ -295,8 +347,8 @@ watch([gewaehlteLinie, gewaehltePeriode, dayType], () => {
             deshalb mehrfach untereinander. Das ist die nächste Runde, keine Doppelung.
             <br />
             Die Spalten sind gegeneinander <strong>um ganze Umläufe verschoben</strong>, damit eine Taktzeile quer
-            gelesen aufsteigt — Kurs 2 zeigt neben der ersten Runde von Kurs 1 also seine zweite. Am Ausrücken
-            bleiben die Zeilen ungeordnet: Dort hat jedes Fahrzeug sein eigenes Muster.
+            gelesen aufsteigt — Kurs 2 zeigt neben der ersten Runde von Kurs 1 also seine zweite. Auf dem Weg aus
+            dem Betriebshof bleiben die Zeilen ungeordnet: Dort hat jedes Fahrzeug sein eigenes Muster.
           </p>
 
           <!-- Tabelle: alle Umläufe nebeneinander -->
@@ -335,9 +387,30 @@ watch([gewaehlteLinie, gewaehltePeriode, dayType], () => {
               <span v-if="kurs.duplicate" class="rounded bg-rose-50 px-2 py-0.5 text-xs text-rose-800">
                 Nummer doppelt vergeben
               </span>
+              <!-- Ausrück- und Einrückhof nebeneinander: Sie sind nicht zwangsläufig derselbe. -->
+              <span
+                v-if="hofSpanne(kurs)"
+                class="rounded px-2 py-0.5 text-xs"
+                :class="hofSpanne(kurs)!.verschieden ? 'bg-violet-100 font-medium text-violet-900' : 'bg-sky-50 text-sky-900'"
+                :title="
+                  hofSpanne(kurs)!.verschieden
+                    ? 'Das Fahrzeug rückt aus einem anderen Hof aus, als es abends einrückt.'
+                    : 'Aus- und Einrückhof sind derselbe.'
+                "
+              >
+                Hof {{ hofSpanne(kurs)!.text }}
+              </span>
             </header>
 
-            <ol class="mt-3 space-y-1">
+            <!-- Die Klammer um den Fahrzeugtag: Woher es kommt und wohin es abends geht. -->
+            <p
+              class="mt-3 rounded-md px-3 py-1 text-xs"
+              :class="hofMarke(kurs.terminal_out, 'aus').klasse"
+            >
+              {{ hofMarke(kurs.terminal_out, 'aus').text }}
+            </p>
+
+            <ol class="mt-1 space-y-1">
               <li v-for="(trip, i) in kurs.trips" :key="trip.id">
                 <!-- Der Abstand zur Vorfahrt: mit Anschluss eine Wende, ohne Anschluss ein Riss. -->
                 <p v-if="i > 0" class="flex items-center gap-2 py-0.5 pl-4 text-xs">
@@ -361,6 +434,13 @@ watch([gewaehlteLinie, gewaehltePeriode, dayType], () => {
                 </div>
                 </li>
               </ol>
+
+            <p
+              class="mt-1 rounded-md px-3 py-1 text-xs"
+              :class="hofMarke(kurs.terminal_in, 'ein').klasse"
+            >
+              {{ hofMarke(kurs.terminal_in, 'ein').text }}
+            </p>
             </section>
           </template>
 

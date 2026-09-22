@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\Log;
  * | Gegenstand | Verhalten |
  * |---|---|
  * | Kursnummer | wird übertragen, sobald es eine Partnerfahrt gibt — auch bei verschobener Zeit |
- * | Aus-/Einrücken | wird übertragen; die Entscheidung hängt an einer Fahrt allein |
+ * | Aus-/Einrücken | wird übertragen, samt Betriebshof; die Entscheidung hängt an einer Fahrt allein |
  * | Anschluss **innerhalb** der Version | wird übertragen, wenn beide Enden eine Partnerfahrt haben |
  * | Anschluss zu einer **anderen** Linie | bleibt liegen — siehe unten |
  *
@@ -172,6 +172,9 @@ final class CourseCarryoverService
                     'from_trip_id' => $link->kind === TripLinkKind::End ? $ziel : null,
                     'to_trip_id' => $link->kind === TripLinkKind::Start ? $ziel : null,
                     'stop_id' => $link->stop_id,
+                    // Der Betriebshof geht mit: Er hängt an derselben Entscheidung, und ein
+                    // Fahrplanwechsel ändert nicht, aus welchem Hof ein Umlauf ausrückt.
+                    'depot_id' => $link->depot_id,
                     'note' => $link->note,
                 ];
 
@@ -198,6 +201,8 @@ final class CourseCarryoverService
                 'from_trip_id' => $vonNeu,
                 'to_trip_id' => $nachNeu,
                 'stop_id' => $link->stop_id,
+                // Ein Anschluss führt zu keinem Hof.
+                'depot_id' => null,
                 'note' => $link->note,
             ];
         }

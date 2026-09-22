@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Enums\FahrplanTyp;
 use App\Models\ConsolidatedTrip;
+use App\Models\Depot;
 use App\Models\LineVersion;
 use App\Models\SchedulePeriod;
 use App\Models\TripLink;
@@ -126,6 +127,289 @@ final class TripLinkTest extends TestCase
         $this->assertSame('end', $daten['kind']);
         $this->assertNull($daten['to_trip']);
         $this->assertSame($fahrt->last_stop_id, $daten['stop_id']);
+    }
+
+    // ---------------------------------------------------------------- Betriebshof (KURSE §3.2)
+
+    /**
+     * Der Hof ist **freiwillig**. An einer Endstelle steht er oft nicht fest, und eine erzwungene
+     * Angabe wäre dort geraten — Geratenes ist schlimmer als eine offene Angabe.
+     */
+    public function test_a_terminal_decision_may_be_marked_without_a_depot(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Kannenstieg', 'Sudenburg'], ['23:12:00', '23:30:00']);
+
+        $daten = $this->anlegen(['kind' => 'end', 'from_trip_id' => $fahrt->id])
+            ->assertCreated()->json('data');
+
+        $this->assertNull($daten['depot']);
+    }
+
+    public function test_a_depot_can_be_set_when_the_decision_is_made(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Betriebshof', 'Kannenstieg'], ['04:30:00', '04:42:00']);
+        $hof = Depot::factory()->create(['name' => 'Betriebshof Nord X', 'short_name' => 'Nord']);
+
+        $daten = $this->anlegen(['kind' => 'start', 'to_trip_id' => $fahrt->id, 'depot_id' => $hof->id])
+            ->assertCreated()->json('data');
+
+        $this->assertSame($hof->id, $daten['depot']['id']);
+        $this->assertSame('Nord', $daten['depot']['display']);
+        $this->assertDatabaseHas('trip_links', ['to_trip_id' => $fahrt->id, 'depot_id' => $hof->id]);
+    }
+
+    // ------------------------------------------------ Automatische Zuordnung über die Haltestelle
+
+    /**
+     * Ordnet ein Hof die Haltestelle zu, ist er beim Markieren gleich gesetzt.
+     *
+     * Das ist der Regelfall in Westerhüsen: Die Ausrückfahrten beginnen an der *Schleswiger
+     * Straße*, nicht am Hof selbst — der Weg dorthin steht im Fahrplan gar nicht. Ihn je Fahrt
+     * von Hand nachzuklicken wäre Arbeit, die aus der Zuordnung schon folgt.
+     */
+    public function test_the_depot_is_set_automatically_from_the_stop_group(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Schleswiger Straße', 'Kannenstieg'], ['04:30:00', '05:05:00']);
+
+        $halt = $this->f->halt('Schleswiger Straße');
+        $gruppe = $this->f->haltestelle('Westerhüsen');
+        $this->f->zurHaltestelle($halt, $gruppe);
+
+        $hof = Depot::factory()->forModes(['tram'])->create(['name' => 'West-Hof']);
+        $hof->stopGroups()->attach($gruppe->id);
+
+        $daten = $this->anlegen(['kind' => 'start', 'to_trip_id' => $fahrt->id])
+            ->assertCreated()->json('data');
+
+        $this->assertSame($hof->id, $daten['depot']['id']);
+    }
+
+    /** Dasselbe am anderen Ende der Kette: Wer hier endet, fährt in diesen Hof. */
+    public function test_the_depot_is_set_automatically_when_a_chain_ends(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Kannenstieg', 'Schleswiger Straße'], ['23:10:00', '23:45:00']);
+
+        $halt = $this->f->halt('Schleswiger Straße');
+        $gruppe = $this->f->haltestelle('Westerhüsen');
+        $this->f->zurHaltestelle($halt, $gruppe);
+
+        $hof = Depot::factory()->forModes(['tram'])->create(['name' => 'West-Hof']);
+        $hof->stopGroups()->attach($gruppe->id);
+
+        $daten = $this->anlegen(['kind' => 'end', 'from_trip_id' => $fahrt->id])
+            ->assertCreated()->json('data');
+
+        $this->assertSame($hof->id, $daten['depot']['id']);
+    }
+
+    /** Ein Tram-Hof an dieser Haltestelle hilft einem Bus nicht — dann bleibt der Hof offen. */
+    public function test_the_automatic_depot_respects_the_mode(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Schleswiger Straße', 'Kannenstieg'], ['04:30:00', '05:05:00']);
+        $fahrt->update(['route_type' => 3]);
+
+        $halt = $this->f->halt('Schleswiger Straße');
+        $gruppe = $this->f->haltestelle('Westerhüsen');
+        $this->f->zurHaltestelle($halt, $gruppe);
+
+        $nurTram = Depot::factory()->forModes(['tram'])->create(['name' => 'Tram-Hof']);
+        $nurTram->stopGroups()->attach($gruppe->id);
+
+        $daten = $this->anlegen(['kind' => 'start', 'to_trip_id' => $fahrt->id])
+            ->assertCreated()->json('data');
+
+        $this->assertNull($daten['depot']);
+    }
+
+    /**
+     * **Geraten wird nicht.** Passen zwei Höfe, bleibt die Angabe offen: Sie ist als „noch
+     * offen" lesbar, ein falscher Hof dagegen stünde als Tatsache in den Daten.
+     */
+    public function test_an_ambiguous_stop_group_leaves_the_depot_open(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Schleswiger Straße', 'Kannenstieg'], ['04:30:00', '05:05:00']);
+
+        $halt = $this->f->halt('Schleswiger Straße');
+        $gruppe = $this->f->haltestelle('Westerhüsen');
+        $this->f->zurHaltestelle($halt, $gruppe);
+
+        foreach (['Hof A', 'Hof B'] as $name) {
+            Depot::factory()->create(['name' => $name])->stopGroups()->attach($gruppe->id);
+        }
+
+        $daten = $this->anlegen(['kind' => 'start', 'to_trip_id' => $fahrt->id])
+            ->assertCreated()->json('data');
+
+        $this->assertNull($daten['depot']);
+    }
+
+    /** Ein stillgelegter Hof wird auch nicht mehr automatisch vergeben. */
+    public function test_a_retired_depot_is_not_suggested(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Schleswiger Straße', 'Kannenstieg'], ['04:30:00', '05:05:00']);
+
+        $halt = $this->f->halt('Schleswiger Straße');
+        $gruppe = $this->f->haltestelle('Westerhüsen');
+        $this->f->zurHaltestelle($halt, $gruppe);
+
+        Depot::factory()->inactive()->create(['name' => 'Alter Hof'])->stopGroups()->attach($gruppe->id);
+
+        $this->anlegen(['kind' => 'start', 'to_trip_id' => $fahrt->id])
+            ->assertCreated()
+            ->assertJsonPath('data.depot', null);
+    }
+
+    /**
+     * Ein ausdrückliches `depot_id: null` heißt „bewusst offen" und darf die Automatik **nicht**
+     * auslösen. Ohne diese Unterscheidung liesse sich ein automatisch gesetzter Hof beim Neu-
+     * Markieren nicht abwählen.
+     */
+    public function test_an_explicit_null_suppresses_the_automatic_depot(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Schleswiger Straße', 'Kannenstieg'], ['04:30:00', '05:05:00']);
+
+        $halt = $this->f->halt('Schleswiger Straße');
+        $gruppe = $this->f->haltestelle('Westerhüsen');
+        $this->f->zurHaltestelle($halt, $gruppe);
+
+        Depot::factory()->create(['name' => 'West-Hof'])->stopGroups()->attach($gruppe->id);
+
+        $this->anlegen(['kind' => 'start', 'to_trip_id' => $fahrt->id, 'depot_id' => null])
+            ->assertCreated()
+            ->assertJsonPath('data.depot', null);
+    }
+
+    /** Ein Anschluss bleibt unberührt — er führt zu keinem Hof, auch nicht automatisch. */
+    public function test_a_link_gets_no_automatic_depot(): void
+    {
+        $version = $this->version();
+        $hin = $this->f->fahrt($version, ['Kannenstieg', 'Schleswiger Straße'], ['06:00:00', '06:30:00']);
+        $zurueck = $this->f->fahrt($version, ['Schleswiger Straße', 'Kannenstieg'], ['06:36:00', '07:06:00']);
+
+        $halt = $this->f->halt('Schleswiger Straße');
+        $gruppe = $this->f->haltestelle('Westerhüsen');
+        $this->f->zurHaltestelle($halt, $gruppe);
+
+        Depot::factory()->create(['name' => 'West-Hof'])->stopGroups()->attach($gruppe->id);
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $hin->id, 'to_trip_id' => $zurueck->id])
+            ->assertCreated()
+            ->assertJsonPath('data.depot', null);
+    }
+
+    /** Der übliche Weg: erst markieren, den Hof nachtragen, sobald er feststeht. */
+    public function test_a_depot_can_be_added_and_removed_afterwards(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Kannenstieg', 'Sudenburg'], ['23:12:00', '23:30:00']);
+        $hof = Depot::factory()->create();
+
+        $id = $this->anlegen(['kind' => 'end', 'from_trip_id' => $fahrt->id])->json('data.id');
+
+        $this->withToken($this->token())
+            ->putJson('/api/v1/admin/trip-links/'.$id.'/depot', ['depot_id' => $hof->id])
+            ->assertOk()
+            ->assertJsonPath('data.depot.id', $hof->id);
+
+        // Zurück auf „noch offen" — das ist kein Rückschritt, sondern die ehrliche Angabe.
+        $this->withToken($this->token())
+            ->putJson('/api/v1/admin/trip-links/'.$id.'/depot', ['depot_id' => null])
+            ->assertOk()
+            ->assertJsonPath('data.depot', null);
+
+        $this->assertDatabaseHas('trip_links', ['id' => $id, 'depot_id' => null]);
+    }
+
+    /**
+     * Aus- und Einrückhof sind **nicht** zwangsläufig derselbe: Ein Fahrzeug rückt morgens aus
+     * Nord aus und abends in Westerhüsen ein, wenn der Umlauf es dorthin trägt.
+     */
+    public function test_the_outbound_and_inbound_depot_may_differ(): void
+    {
+        $version = $this->version();
+        $morgens = $this->f->fahrt($version, ['Nord', 'Kannenstieg'], ['04:30:00', '04:42:00']);
+        $abends = $this->f->fahrt($version, ['Kannenstieg', 'Westerhüsen'], ['23:12:00', '23:40:00']);
+
+        $nord = Depot::factory()->create(['name' => 'Nord-Hof']);
+        $west = Depot::factory()->create(['name' => 'West-Hof']);
+
+        $this->anlegen(['kind' => 'start', 'to_trip_id' => $morgens->id, 'depot_id' => $nord->id])
+            ->assertCreated()
+            ->assertJsonPath('data.depot.id', $nord->id);
+
+        $this->anlegen(['kind' => 'end', 'from_trip_id' => $abends->id, 'depot_id' => $west->id])
+            ->assertCreated()
+            ->assertJsonPath('data.depot.id', $west->id);
+    }
+
+    /** Ein Anschluss führt zu keinem Hof — das Fahrzeug fährt weiter, es rückt nicht ein. */
+    public function test_a_link_rejects_a_depot(): void
+    {
+        $version = $this->version();
+        $hin = $this->f->fahrt($version, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:30:00']);
+        $zurueck = $this->f->fahrt($version, ['Sudenburg', 'Kannenstieg'], ['06:36:00', '07:06:00']);
+        $hof = Depot::factory()->create();
+
+        $this->anlegen([
+            'kind' => 'link',
+            'from_trip_id' => $hin->id,
+            'to_trip_id' => $zurueck->id,
+            'depot_id' => $hof->id,
+        ])->assertStatus(422);
+
+        $this->assertDatabaseCount('trip_links', 0);
+    }
+
+    /** Ein Tram-Hof nimmt keinen Bus auf — wer das zulässt, schreibt einen Umlauf fest, den es nicht gibt. */
+    public function test_a_depot_that_does_not_take_this_mode_is_rejected(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Betriebshof', 'Kannenstieg'], ['04:30:00', '04:42:00']);
+        $fahrt->update(['route_type' => 3]);
+
+        $nurTram = Depot::factory()->forModes(['tram'])->create(['name' => 'Tram-Hof']);
+
+        $this->anlegen(['kind' => 'start', 'to_trip_id' => $fahrt->id, 'depot_id' => $nurTram->id])
+            ->assertStatus(422)
+            ->assertJsonPath('error.message', 'Der Betriebshof „Tram-Hof" nimmt dieses Verkehrsmittel nicht auf.');
+    }
+
+    /** Stillgelegt heißt: an alten Entscheidungen lesbar, aber nichts Neues mehr. */
+    public function test_a_retired_depot_takes_no_new_decisions(): void
+    {
+        $version = $this->version();
+        $fahrt = $this->f->fahrt($version, ['Betriebshof', 'Kannenstieg'], ['04:30:00', '04:42:00']);
+        $alt = Depot::factory()->inactive()->create(['name' => 'Alter Hof']);
+
+        $this->anlegen(['kind' => 'start', 'to_trip_id' => $fahrt->id, 'depot_id' => $alt->id])
+            ->assertStatus(422)
+            ->assertJsonPath(
+                'error.message',
+                'Der Betriebshof „Alter Hof" ist stillgelegt und nimmt keine neuen Fahrten mehr auf.',
+            );
+    }
+
+    public function test_setting_a_depot_on_a_link_is_rejected(): void
+    {
+        $version = $this->version();
+        $hin = $this->f->fahrt($version, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:30:00']);
+        $zurueck = $this->f->fahrt($version, ['Sudenburg', 'Kannenstieg'], ['06:36:00', '07:06:00']);
+        $hof = Depot::factory()->create();
+
+        $id = $this->anlegen(['kind' => 'link', 'from_trip_id' => $hin->id, 'to_trip_id' => $zurueck->id])
+            ->json('data.id');
+
+        $this->withToken($this->token())
+            ->putJson('/api/v1/admin/trip-links/'.$id.'/depot', ['depot_id' => $hof->id])
+            ->assertStatus(422);
     }
 
     /**

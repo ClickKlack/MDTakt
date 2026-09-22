@@ -29,6 +29,9 @@ final class TripLinkResource extends JsonResource
             'from_trip' => $this->resource['from_trip'],
             'to_trip' => $this->resource['to_trip'],
             'turnaround_seconds' => $this->resource['turnaround_seconds'],
+            // Nur bei `start`/`end` belegt, und auch dort freiwillig — `null` heisst „noch
+            // offen", nicht „kein Hof".
+            'depot' => $this->resource['depot'] ?? null,
             'note' => $this->resource['note'],
             'warnings' => $this->resource['warnings'],
             // Der Kurs der Kette nach dem Anschluss. `course_trips_assigned` nennt, auf wie

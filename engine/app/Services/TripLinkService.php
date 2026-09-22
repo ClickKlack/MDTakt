@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\RouteType;
 use App\Enums\TripLinkKind;
 use App\Http\Requests\TripLinkRequest;
 use App\Models\ConsolidatedTrip;
+use App\Models\Depot;
 use App\Models\TripLink;
 use App\Support\TripChainGraph;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +26,7 @@ final class TripLinkService
 {
     public function __construct(
         private readonly ConsolidatedTripInfoResolver $tripInfo,
+        private readonly DepotService $depots,
     ) {}
 
     /**
@@ -77,6 +80,7 @@ final class TripLinkService
             'from_trip' => $von,
             'to_trip' => $nach,
             'turnaround_seconds' => $wendezeit,
+            'depot' => $this->describeDepot($link),
             'note' => $link->note,
             'warnings' => $hinweise,
         ];
@@ -91,16 +95,21 @@ final class TripLinkService
         ?ConsolidatedTrip $from,
         ?ConsolidatedTrip $to,
         ?string $note = null,
+        ?int $depotId = null,
+        bool $depotAngegeben = false,
     ): TripLink {
         $stopId = $kind === TripLinkKind::Start
             ? $to?->first_stop_id
             : $from?->last_stop_id;
+
+        $hof = $this->resolveDepot($kind, $from, $to, $stopId, $depotId, $depotAngegeben);
 
         $link = TripLink::query()->create([
             'from_trip_id' => $from?->id,
             'to_trip_id' => $to?->id,
             'stop_id' => $stopId,
             'kind' => $kind,
+            'depot_id' => $hof,
             'note' => $note,
         ]);
 
@@ -110,9 +119,87 @@ final class TripLinkService
             'from_trip_id' => $from?->id,
             'to_trip_id' => $to?->id,
             'stop_id' => $stopId,
+            'depot_id' => $link->depot_id,
+            'depot_auto' => $hof !== null && ! $depotAngegeben,
         ]);
 
         return $link;
+    }
+
+    /**
+     * Welcher Betriebshof an dieser Entscheidung steht.
+     *
+     * Drei Fälle in dieser Reihenfolge:
+     *
+     * 1. **Ein Anschluss führt zu keinem Hof** — das Fahrzeug fährt weiter, es rückt nicht ein.
+     *    Eine mitgeschickte Angabe wird hier verworfen; der Request weist sie ohnehin ab.
+     * 2. **Der Aufrufer hat sich geäußert** — dann gilt das, auch das ausdrückliche `null`.
+     * 3. **Sonst die Haltestelle fragen.** Wer an der Schleswiger Straße ausrücken lässt, meint
+     *    Westerhüsen; das von Hand nachzuklicken wäre Arbeit, die aus der Zuordnung schon folgt.
+     *    Ergibt sich nichts Eindeutiges, bleibt der Hof offen — {@see DepotService::suggestFor()}.
+     */
+    private function resolveDepot(
+        TripLinkKind $kind,
+        ?ConsolidatedTrip $from,
+        ?ConsolidatedTrip $to,
+        ?int $stopId,
+        ?int $depotId,
+        bool $depotAngegeben,
+    ): ?int {
+        if ($kind === TripLinkKind::Link) {
+            return null;
+        }
+
+        if ($depotAngegeben) {
+            return $depotId;
+        }
+
+        $fahrt = $kind === TripLinkKind::Start ? $to : $from;
+
+        if ($fahrt === null) {
+            return null;
+        }
+
+        return $this->depots->suggestFor($stopId, RouteType::modeFor($fahrt->route_type))?->id;
+    }
+
+    /**
+     * Den Betriebshof einer Betriebsfahrt setzen oder wieder offen lassen.
+     *
+     * Getrennt vom Anlegen, weil es die übliche Reihenfolge ist: Erst wird markiert — das ist
+     * die Aussage, die zählt —, und der Hof kommt dazu, sobald er feststeht. `null` nimmt ihn
+     * wieder heraus; das ist kein Rückschritt, sondern die ehrliche Angabe „noch offen".
+     */
+    public function setDepot(TripLink $link, ?int $depotId): TripLink
+    {
+        $link->update(['depot_id' => $depotId]);
+
+        Log::info('Trip link depot set', [
+            'trip_link_id' => $link->id,
+            'kind' => $link->kind->value,
+            'depot_id' => $depotId,
+        ]);
+
+        return $link->refresh();
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function describeDepot(TripLink $link): ?array
+    {
+        if ($link->depot_id === null) {
+            return null;
+        }
+
+        $hof = $link->relationLoaded('depot') ? $link->depot : Depot::query()->find($link->depot_id);
+
+        return $hof === null ? null : [
+            'id' => $hof->id,
+            'name' => $hof->name,
+            'display' => $hof->display(),
+            'active' => $hof->active,
+        ];
     }
 
     public function remove(TripLink $link): void
@@ -121,6 +208,7 @@ final class TripLinkService
         $kind = $link->kind->value;
         $from = $link->from_trip_id;
         $to = $link->to_trip_id;
+        $depot = $link->depot_id;
 
         $link->delete();
 
@@ -129,6 +217,7 @@ final class TripLinkService
             'kind' => $kind,
             'from_trip_id' => $from,
             'to_trip_id' => $to,
+            'depot_id' => $depot,
         ]);
     }
 

@@ -385,7 +385,8 @@ final class TripLinkAutoService
 
             if ($art !== TripLinkKind::Link && ! $scope->includeTerminals) {
                 $uebersprungen[] = $this->skip('ending', $fahrt, null, 'terminal_decision', sprintf(
-                    'Die Fahrt rückt ein (%s). Betriebsfahrten werden nur mit „auch Aus-/Einrücken lösen" entfernt.',
+                    'Die Fahrt fährt von hier in den Betriebshof (%s). Betriebsfahrten werden nur mit '
+                    .'„auch Betriebshof-Fahrten lösen" entfernt.',
                     $art->label(),
                 ));
 

@@ -412,15 +412,23 @@ final class StopLinkBoardService
             return;
         }
 
-        $links = DB::table('trip_links')
+        // Der Betriebshof haengt an der Entscheidung, nicht an der Fahrt — er kommt deshalb
+        // im selben Zug mit. Ein Join statt einer zweiten Abfrage: Die Zahl der Hoefe ist
+        // winzig, die der Entscheidungen nicht.
+        $links = DB::table('trip_links as tl')
+            ->leftJoin('depots as d', 'd.id', '=', 'tl.depot_id')
             ->where(function ($q) use ($endendeIds, $beginnendeIds): void {
                 if ($endendeIds !== []) {
-                    $q->whereIn('from_trip_id', $endendeIds);
+                    $q->whereIn('tl.from_trip_id', $endendeIds);
                 }
                 if ($beginnendeIds !== []) {
-                    $q->orWhereIn('to_trip_id', $beginnendeIds);
+                    $q->orWhereIn('tl.to_trip_id', $beginnendeIds);
                 }
             })
+            ->select(
+                'tl.id', 'tl.from_trip_id', 'tl.to_trip_id', 'tl.kind', 'tl.note', 'tl.depot_id',
+                'd.name as depot_name', 'd.short_name as depot_short_name', 'd.active as depot_active',
+            )
             ->get();
 
         if ($links->isEmpty()) {
@@ -487,7 +495,32 @@ final class StopLinkBoardService
             'kind' => $kind->value,
             'partner' => $partnerId === null ? null : ($partner[$partnerId] ?? null),
             'turnaround_seconds' => $wendezeit,
+            'depot' => $this->describeDepot($link),
             'note' => $link->note,
+        ];
+    }
+
+    /**
+     * Der Betriebshof an dieser Entscheidung — `null` heisst **noch offen**, nicht „kein Hof".
+     *
+     * Beginnt eine Kette an einer Endstelle, ist der Hof oft nicht bekannt; die Angabe ist
+     * deshalb freiwillig, und ihr Fehlen ist kein Pflegerueckstand.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function describeDepot(object $link): ?array
+    {
+        if ($link->depot_id === null) {
+            return null;
+        }
+
+        $kurz = $link->depot_short_name;
+
+        return [
+            'id' => (int) $link->depot_id,
+            'name' => (string) $link->depot_name,
+            'display' => $kurz === null || $kurz === '' ? (string) $link->depot_name : (string) $kurz,
+            'active' => (bool) $link->depot_active,
         ];
     }
 }

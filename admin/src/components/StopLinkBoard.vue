@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, type VNode } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type VNode } from 'vue'
+import type { Depot } from '../services/depots'
 import type { Line } from '../services/lines'
 import type { StopLinkBoard, StopLinkTrip } from '../services/stopLinks'
 import { formatClock, formatDuration } from '../utils/timezone'
@@ -24,6 +25,11 @@ const props = defineProps<{
   rangeMode: boolean
   rangeFrom: number | null
   rangeTo: number | null
+  /**
+   * Die waehlbaren Betriebshoefe. Stillgelegte sind hier **nicht** dabei: Sie bleiben an
+   * bestehenden Entscheidungen lesbar, nehmen aber nichts Neues mehr auf.
+   */
+  depots: Depot[]
 }>()
 
 const emit = defineEmits<{
@@ -34,6 +40,8 @@ const emit = defineEmits<{
   assignCourse: [tripId: number, number: string]
   detachCourse: [tripId: number]
   rangePick: [tripId: number]
+  /** `null` laesst den Hof wieder offen — das ist eine gueltige Angabe, kein Rueckschritt. */
+  setDepot: [linkId: number, depotId: number | null]
 }>()
 
 /** Die Fahrt, deren Kursnummer gerade bearbeitet wird. */
@@ -207,6 +215,8 @@ function istZiel(trip: StopLinkTrip | null): boolean {
 }
 
 function klickEndend(trip: StopLinkTrip): void {
+  hofOffen.value = null
+
   // Im Bereichsmodus ist auch eine bereits entschiedene Fahrt als Grenze waehlbar — sie wird
   // im Lauf ohnehin uebersprungen, waere als Markierung aber unverzichtbar, wenn der Bereich
   // genau dort beginnen soll.
@@ -282,6 +292,8 @@ function istGrenze(trip: StopLinkTrip | null): 'von' | 'bis' | null {
 }
 
 function klickBeginnend(trip: StopLinkTrip): void {
+  hofOffen.value = null
+
   if (!istZiel(trip) || props.selected === null) {
     return
   }
@@ -290,6 +302,63 @@ function klickBeginnend(trip: StopLinkTrip): void {
 
 function kurz(wendezeit: number | null): boolean {
   return wendezeit !== null && wendezeit < 180
+}
+
+// ---------------------------------------------------------------- Betriebshof an der Marke
+
+/** Die Entscheidung, deren Hof gerade gewaehlt wird. */
+const hofOffen = ref<number | null>(null)
+
+/**
+ * Die Hoefe, die dieses Fahrzeug aufnehmen.
+ *
+ * Eine leere Modus-Liste heisst **alle** — das ist der Vorgabefall und nicht „keines". Ein
+ * Tram-Hof taucht bei einem Bus gar nicht erst auf: Die Engine weist ihn ohnehin ab, und eine
+ * Auswahl, die eine Fehlermeldung produziert, ist keine Auswahl.
+ */
+function hoefeFuer(trip: StopLinkTrip): Depot[] {
+  return props.depots.filter((hof) => hof.modes.length === 0 || hof.modes.includes(trip.mode as 'tram' | 'bus'))
+}
+
+function waehleHof(linkId: number, depotId: number | null): void {
+  hofOffen.value = null
+  emit('setDepot', linkId, depotId)
+}
+
+/**
+ * Traegt diese Karte gerade das offene Hof-Menue?
+ *
+ * Daran haengt mehr als eine Hervorhebung: Die Karte darf, solange das Menue offen ist, **kein**
+ * `opacity` unter 1 tragen. Ein transparentes Element bildet einen eigenen Stacking-Context —
+ * das Menue waere damit an die Karte gefesselt, die naechste Zeile legte sich darueber, und es
+ * schiene obendrein zu 55 % durch. Genau die unschoenen Effekte. Deshalb faellt die Daempfung
+ * weg und die Karte steigt mit `relative z-30` ueber ihre Nachbarn.
+ */
+function hofMenueOffen(trip: StopLinkTrip | null): boolean {
+  const id = trip?.decision?.id
+
+  return id !== undefined && hofOffen.value === id
+}
+
+/** Ein Klick irgendwo sonst schliesst das Menue — sonst bliebe es beim Weiterarbeiten stehen. */
+function schliesseHofMenue(): void {
+  hofOffen.value = null
+}
+
+onMounted(() => {
+  document.addEventListener('click', schliesseHofMenue)
+  document.addEventListener('keydown', aufEscape)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', schliesseHofMenue)
+  document.removeEventListener('keydown', aufEscape)
+})
+
+function aufEscape(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    hofOffen.value = null
+  }
 }
 </script>
 
@@ -327,17 +396,28 @@ function kurz(wendezeit: number | null): boolean {
         <!-- Linke Seite: endende Fahrt -->
         <div
           v-if="zeile.ending"
-          class="rounded-lg border px-3 py-2 transition hover:opacity-100"
+          class="rounded-lg border px-3 py-2 hover:opacity-100"
           :class="[
             zeile.ending.decision === null
               ? 'cursor-pointer border-slate-200 bg-white hover:border-slate-400'
-              // Entschieden heisst erledigt: gedaempft, damit das Auge die offenen findet.
-              // Beim Ueberfahren wieder voll lesbar — aendern muss man sie ja koennen.
-              : 'border-slate-100 bg-white opacity-55',
+              : 'border-slate-100 bg-white',
+            // Entschieden heisst erledigt: gedaempft, damit das Auge die offenen findet.
+            // Beim Ueberfahren wieder voll lesbar — aendern muss man sie ja koennen. Nur
+            // solange das Hof-Menue zu ist: siehe hofMenueOffen().
+            // Im Bereichsmodus faellt sie ebenfalls weg: Dort ist jede Zeile anklickbar und
+            // soll voll lesbar sein. Zwei widerspruechliche `opacity`-Klassen nebeneinander
+            // entschiede nicht die Reihenfolge hier, sondern die im Stylesheet.
+            zeile.ending.decision !== null && !rangeMode && !hofMenueOffen(zeile.ending)
+              ? 'opacity-55'
+              : '',
+            // Ohne Uebergang, solange das Menue offen ist: Die Animation von 0,55 auf 1 liesse
+            // die Karte fuer ihre Dauer transparent — und damit das Menue kurz hinter der
+            // naechsten Zeile aufblitzen.
+            hofMenueOffen(zeile.ending) ? 'relative z-30' : 'transition',
             selected === zeile.ending.id ? 'border-slate-800 ring-2 ring-slate-800' : '',
             // Im Bereichsmodus ist jede Zeile anklickbar, auch eine entschiedene: Sie wird im
             // Lauf uebersprungen, muss aber als Grenze waehlbar bleiben.
-            rangeMode ? 'cursor-pointer opacity-100' : '',
+            rangeMode ? 'cursor-pointer' : '',
             rangeMode && imBereich(zeile.ending)
               ? 'border-l-4 border-l-emerald-500 bg-emerald-50/40'
               : '',
@@ -389,13 +469,72 @@ function kurz(wendezeit: number | null): boolean {
               type="button"
               class="shrink-0 text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:opacity-50"
               :disabled="busy"
+              title="Einrücken: Das Fahrzeug fährt von hier in den Betriebshof — die Kette endet bewusst."
               @click.stop="emit('mark', zeile.ending.id, 'end')"
             >
-              Einrücken
+              In den Betriebshof
             </button>
-            <span v-else-if="zeile.ending.decision.kind === 'end'" class="shrink-0 rounded bg-sky-50 px-1.5 text-sky-900">
-              Einrücken
-            </span>
+            <!-- Die Marke ist eine Entscheidung wie jede andere und muss deshalb auch wieder
+                 zurückzunehmen sein — ohne „Lösen" bliebe ein Fehlgriff für immer stehen. -->
+            <template v-else-if="zeile.ending.decision.kind === 'end'">
+              <span class="shrink-0 rounded bg-sky-50 px-1.5 text-sky-900" title="Einrücken">
+                In den Betriebshof
+              </span>
+              <!-- Welcher Hof — freiwillig. An einer Endstelle steht er oft nicht fest, und
+                   „offen" ist dort die ehrlichere Angabe als ein geratener Hof. -->
+              <div class="relative shrink-0">
+                <button
+                  type="button"
+                  class="rounded px-1.5 text-xs transition disabled:opacity-50"
+                  :class="
+                    zeile.ending.decision.depot
+                      ? 'bg-sky-100 font-medium text-sky-900 hover:bg-sky-200'
+                      : 'border border-dashed border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-700'
+                  "
+                  :disabled="busy"
+                  :title="zeile.ending.decision.depot?.name ?? 'Betriebshof wählen — freiwillig'"
+                  @click.stop="hofOffen = hofOffen === zeile.ending.decision.id ? null : zeile.ending.decision.id"
+                >
+                  {{ zeile.ending.decision.depot?.display ?? 'Hof offen' }}
+                </button>
+                <div
+                  v-if="hofOffen === zeile.ending.decision.id"
+                  class="absolute right-0 top-full z-40 mt-1 w-52 rounded-md border border-slate-300 bg-white py-1 text-left shadow-xl"
+                  @click.stop
+                >
+                  <button
+                    v-for="hof in hoefeFuer(zeile.ending)"
+                    :key="hof.id"
+                    type="button"
+                    class="block w-full px-3 py-1 text-left text-xs hover:bg-slate-100"
+                    :class="zeile.ending.decision.depot?.id === hof.id ? 'font-semibold text-slate-900' : 'text-slate-700'"
+                    @click.stop="waehleHof(zeile.ending.decision.id, hof.id)"
+                  >
+                    {{ hof.name }}
+                  </button>
+                  <p v-if="hoefeFuer(zeile.ending).length === 0" class="px-3 py-1 text-xs text-slate-500">
+                    Für dieses Verkehrsmittel ist kein Betriebshof gepflegt.
+                  </p>
+                  <button
+                    v-if="zeile.ending.decision.depot"
+                    type="button"
+                    class="mt-1 block w-full border-t border-slate-100 px-3 pt-1.5 text-left text-xs text-slate-500 hover:bg-slate-100"
+                    @click.stop="waehleHof(zeile.ending.decision.id, null)"
+                  >
+                    Wieder offen lassen
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="shrink-0 text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:opacity-50"
+                :disabled="busy"
+                title="Die Marke wieder entfernen — die Fahrt gilt dann wieder als nicht gepflegt."
+                @click.stop="emit('unlink', zeile.ending.decision.id)"
+              >
+                Lösen
+              </button>
+            </template>
           </div>
         </div>
         <div v-else />
@@ -403,13 +542,17 @@ function kurz(wendezeit: number | null): boolean {
         <!-- Rechte Seite: beginnende Fahrt -->
         <div
           v-if="zeile.starting"
-          class="rounded-lg border px-3 py-2 transition hover:opacity-100"
+          class="rounded-lg border px-3 py-2 hover:opacity-100"
           :class="[
             istZiel(zeile.starting)
               ? 'cursor-pointer border-emerald-400 bg-emerald-50/40 hover:border-emerald-600'
               : zeile.starting.decision === null
                 ? 'border-slate-200 bg-white'
-                : 'border-slate-100 bg-white opacity-55',
+                : 'border-slate-100 bg-white',
+            zeile.starting.decision !== null && !istZiel(zeile.starting) && !hofMenueOffen(zeile.starting)
+              ? 'opacity-55'
+              : '',
+            hofMenueOffen(zeile.starting) ? 'relative z-30' : 'transition',
           ]"
           @click="klickBeginnend(zeile.starting)"
         >
@@ -453,16 +596,68 @@ function kurz(wendezeit: number | null): boolean {
               type="button"
               class="shrink-0 text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:opacity-50"
               :disabled="busy"
+              title="Ausrücken: Das Fahrzeug kommt aus dem Betriebshof — die Kette beginnt bewusst hier."
               @click.stop="emit('mark', zeile.starting.id, 'start')"
             >
-              Ausrücken
+              Aus dem Betriebshof
             </button>
-            <span
-              v-else-if="zeile.starting.decision.kind === 'start'"
-              class="shrink-0 rounded bg-sky-50 px-1.5 text-sky-900"
-            >
-              Ausrücken
-            </span>
+            <template v-else-if="zeile.starting.decision.kind === 'start'">
+              <span class="shrink-0 rounded bg-sky-50 px-1.5 text-sky-900" title="Ausrücken">
+                Aus dem Betriebshof
+              </span>
+              <div class="relative shrink-0">
+                <button
+                  type="button"
+                  class="rounded px-1.5 text-xs transition disabled:opacity-50"
+                  :class="
+                    zeile.starting.decision.depot
+                      ? 'bg-sky-100 font-medium text-sky-900 hover:bg-sky-200'
+                      : 'border border-dashed border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-700'
+                  "
+                  :disabled="busy"
+                  :title="zeile.starting.decision.depot?.name ?? 'Betriebshof wählen — freiwillig'"
+                  @click.stop="hofOffen = hofOffen === zeile.starting.decision.id ? null : zeile.starting.decision.id"
+                >
+                  {{ zeile.starting.decision.depot?.display ?? 'Hof offen' }}
+                </button>
+                <div
+                  v-if="hofOffen === zeile.starting.decision.id"
+                  class="absolute right-0 top-full z-40 mt-1 w-52 rounded-md border border-slate-300 bg-white py-1 text-left shadow-xl"
+                  @click.stop
+                >
+                  <button
+                    v-for="hof in hoefeFuer(zeile.starting)"
+                    :key="hof.id"
+                    type="button"
+                    class="block w-full px-3 py-1 text-left text-xs hover:bg-slate-100"
+                    :class="zeile.starting.decision.depot?.id === hof.id ? 'font-semibold text-slate-900' : 'text-slate-700'"
+                    @click.stop="waehleHof(zeile.starting.decision.id, hof.id)"
+                  >
+                    {{ hof.name }}
+                  </button>
+                  <p v-if="hoefeFuer(zeile.starting).length === 0" class="px-3 py-1 text-xs text-slate-500">
+                    Für dieses Verkehrsmittel ist kein Betriebshof gepflegt.
+                  </p>
+                  <button
+                    v-if="zeile.starting.decision.depot"
+                    type="button"
+                    class="mt-1 block w-full border-t border-slate-100 px-3 pt-1.5 text-left text-xs text-slate-500 hover:bg-slate-100"
+                    @click.stop="waehleHof(zeile.starting.decision.id, null)"
+                  >
+                    Wieder offen lassen
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="shrink-0 text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:opacity-50"
+                :disabled="busy"
+                title="Die Marke wieder entfernen — die Fahrt gilt dann wieder als nicht gepflegt."
+                @click.stop="emit('unlink', zeile.starting.decision.id)"
+              >
+                Lösen
+              </button>
+            </template>
           </div>
         </div>
         <div v-else />

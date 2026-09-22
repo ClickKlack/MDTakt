@@ -292,7 +292,8 @@ const spaltenbreite = computed(() => `${props.grid.courses.length * 4 + 16}rem`)
 
     <p v-else class="mx-auto mt-2 max-w-6xl text-xs text-slate-500">
       <span class="font-medium text-slate-400">│</span> heißt: Das Fahrzeug gehört zu diesem Umlauf, fährt diese
-      Haltestelle aber nicht an — es hält gerade, oder die Zeile gehört zum Ausrückweg eines anderen Kurses.
+      Haltestelle aber nicht an — es hält gerade, oder die Zeile gehört zum Weg eines anderen Kurses aus dem
+      Betriebshof.
       <span class="text-slate-300">·</span> heißt: Der Umlauf hat hier noch nicht begonnen oder ist schon zu Ende.
     </p>
 

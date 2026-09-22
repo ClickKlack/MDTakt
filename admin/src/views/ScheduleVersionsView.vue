@@ -354,7 +354,7 @@ onMounted(async () => {
               <dd class="font-medium tabular-nums text-slate-900">{{ vorschau.summary.links_carried }}</dd>
             </div>
             <div class="flex justify-between gap-2">
-              <dt class="text-slate-600">Aus-/Einrücken</dt>
+              <dt class="text-slate-600" title="Ein- und Ausrücken">Betriebshof-Fahrten</dt>
               <dd class="font-medium tabular-nums text-slate-900">{{ vorschau.summary.terminals_carried }}</dd>
             </div>
             <div class="flex justify-between gap-2">

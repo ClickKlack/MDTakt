@@ -1,0 +1,150 @@
+meta {
+  name: Betriebshoefe
+  type: http
+  seq: 32
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/depots
+  body: none
+  auth: bearer
+}
+
+params:query {
+  ~active_only: 1
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+}
+
+script:post-response {
+  const hoefe = res.body.data;
+
+  for (const hof of hoefe) {
+    // Die Anzeige ist nie leer: Ohne Kurzform traegt sie den vollen Namen. Waere sie leer,
+    // liesse sich im Board eine Marke mit Hof nicht von einer ohne unterscheiden.
+    if (!hof.display) {
+      throw new Error("Betriebshof " + hof.id + " hat keine Anzeigeform");
+    }
+
+    // Leer heisst „alle Verkehrsmittel" — nicht „keines". Immer eine Liste, nie null: Das
+    // Frontend soll nicht zwei Leer-Faelle unterscheiden muessen.
+    if (!Array.isArray(hof.modes)) {
+      throw new Error("modes ist keine Liste");
+    }
+  }
+
+  // Die Migrationen legen die drei Magdeburger Hoefe an — so findet der Pflegende es vor.
+  const nachName = Object.fromEntries(hoefe.map(h => [h.name, h]));
+
+  const erwartet = {
+    "Betriebshof Nord": "tram",
+    "Betriebshof Westerhüsen": "tram",
+    "Betriebshof Kroatenwuhne": "bus",
+  };
+
+  for (const [name, mittel] of Object.entries(erwartet)) {
+    const hof = nachName[name];
+
+    if (!hof) {
+      throw new Error("Vorbelegter Hof fehlt: " + name);
+    }
+
+    // Die Hoefe sind nach Verkehrsmittel getrennt. Ohne die Einschraenkung boete die Auswahl
+    // an einer Busfahrt einen Tram-Hof mit an.
+    if (hof.modes.length !== 1 || hof.modes[0] !== mittel) {
+      throw new Error(name + " sollte nur " + mittel + " aufnehmen, traegt aber " + JSON.stringify(hof.modes));
+    }
+  }
+
+  // Kroatenwuhne ist keiner Haltestelle zugeordnet — genau der Fall, an dem sich zeigt, dass
+  // der Hof eine eigene Entitaet ist und kein Haken an einer Haltestelle. Dort greift die
+  // Automatik nicht.
+  if (nachName["Betriebshof Kroatenwuhne"].stop_groups.length !== 0) {
+    throw new Error("Kroatenwuhne sollte keiner Haltestelle zugeordnet sein");
+  }
+
+  // Westerhuesen traegt **zwei**: den Hof selbst und die Schleswiger Strasse, von der die
+  // Ausrueckfahrten fast immer beginnen.
+  const west = nachName["Betriebshof Westerhüsen"].stop_groups.map(g => g.name).sort();
+
+  if (west.join(" | ") !== "Schleswiger Straße | Westerhüsen (Betriebshof)") {
+    throw new Error("Westerhuesen sollte zwei Haltestellen tragen, traegt aber: " + west.join(", "));
+  }
+}
+
+docs {
+  # Betriebshof-Verzeichnis
+
+  Die Hoefe, aus denen ausgerueckt und in die eingerueckt wird (KURSE §3.2). Magdeburg hat drei,
+  und sie sind nach Verkehrsmittel getrennt: **Nord** und **Westerhuesen** nehmen Strassenbahnen
+  auf, **Kroatenwuhne** Busse. Alle drei legen die Migrationen an.
+
+  ## Worauf zu achten ist
+
+  **Der Hof haengt an der Entscheidung, nicht am Kurs.** Aus- und Einrueckhof sind *nicht*
+  zwangslaeufig derselbe: Ein Fahrzeug rueckt morgens aus Nord aus und abends in Westerhuesen
+  ein, wenn der Umlauf es dorthin traegt. Deshalb zwei getrennte `trip_links`-Zeilen mit je
+  eigenem `depot_id` — und kein Feld am Kurs.
+
+  **`modes: []` heisst alle, nicht keine.** Der Vorgabefall ist der unbeschraenkte Hof. Steht
+  dort `["tram"]`, bietet die Auswahl im Board ihn bei einem Bus gar nicht erst an, und die
+  Engine weist ihn mit 422 ab.
+
+  **`usage_count > 0` heisst: nicht loeschbar.** Ein `DELETE` antwortet dann mit 409 und dem
+  Hinweis aufs Stilllegen (`PUT` mit `active: false`). Der Hof verschwindet damit aus der
+  Auswahl, bleibt an den bestehenden Entscheidungen aber lesbar — die Angabe „ausgerueckt aus
+  Nord" soll nicht still verschwinden, nur weil der Hof heute nicht mehr betrieben wird.
+
+  **Ein Hof traegt mehrere Haltestellen — und das ist der Regelfall.** Die Westerhuesener
+  Ausrueckfahrten beginnen fast immer an der *Schleswiger Strasse*, nicht am Hof selbst: Der Weg
+  dorthin ist eine Betriebsfahrt, die im Fahrplan gar nicht steht.
+
+  **Daraus entsteht die Automatik.** Wer an einer zugeordneten Haltestelle eine Fahrt als
+  Betriebsfahrt markiert (`POST /trip-links` **ohne** `depot_id`), bekommt den Hof gleich
+  mitgesetzt — sofern genau einer passt. Bei mehreren, bei falschem Verkehrsmittel oder bei
+  einem stillgelegten Hof bleibt die Angabe offen: Eine offene Angabe ist als „noch offen"
+  lesbar, ein geratener Hof steht als Tatsache in den Daten.
+
+  **Eine leere Liste ist in Ordnung.** Kroatenwuhne hat keine Haltestelle — dort wird der Hof
+  von Hand gewaehlt.
+
+  Beispiel-Response:
+
+  ```json
+  {
+    "data": [
+      {
+        "id": 3, "name": "Betriebshof Kroatenwuhne", "short_name": "Kroatenwuhne",
+        "display": "Kroatenwuhne",
+        "stop_groups": [],
+        "modes": ["bus"], "active": true, "note": null, "usage_count": 0
+      },
+      {
+        "id": 1, "name": "Betriebshof Nord", "short_name": "Nord", "display": "Nord",
+        "stop_groups": [{ "id": 20, "name": "Betriebshof Nord / AMROC" }],
+        "modes": ["tram"], "active": true, "note": null, "usage_count": 42
+      },
+      {
+        "id": 2, "name": "Betriebshof Westerhüsen", "short_name": "Westerhüsen",
+        "display": "Westerhüsen",
+        "stop_groups": [
+          { "id": 77, "name": "Schleswiger Straße" },
+          { "id": 266, "name": "Westerhüsen (Betriebshof)" }
+        ],
+        "modes": ["tram"], "active": true, "note": null, "usage_count": 17
+      }
+    ]
+  }
+  ```
+}

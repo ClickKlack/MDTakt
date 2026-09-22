@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Enums\RouteType;
 use App\Enums\TripLinkKind;
 use App\Models\ConsolidatedTrip;
+use App\Models\Depot;
 use App\Services\TripLinkRuleService;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -34,6 +36,7 @@ final class TripLinkRequest extends ApiFormRequest
             'kind' => ['required', Rule::enum(TripLinkKind::class)],
             'from_trip_id' => ['nullable', 'integer', 'exists:consolidated_trips,id'],
             'to_trip_id' => ['nullable', 'integer', 'exists:consolidated_trips,id'],
+            'depot_id' => ['nullable', 'integer', 'exists:depots,id'],
             'note' => ['nullable', 'string', 'max:255'],
         ];
     }
@@ -76,11 +79,72 @@ final class TripLinkRequest extends ApiFormRequest
             }
 
             if ($kind !== TripLinkKind::Link) {
+                $this->pruefeBetriebshof($validator, $kind);
+
+                return;
+            }
+
+            // Ein Anschluss führt zu keinem Hof: Das Fahrzeug fährt weiter, es rückt nicht ein.
+            if ($this->input('depot_id') !== null) {
+                $validator->errors()->add(
+                    'depot_id',
+                    'Ein Anschluss führt zu keinem Betriebshof — die Angabe gehört an eine Fahrt, '
+                    .'die aus dem Hof kommt oder in ihn fährt.',
+                );
+
                 return;
             }
 
             $this->pruefeAnschluss($validator, $this->fromTrip(), $this->toTrip());
         });
+    }
+
+    /**
+     * Der Hof ist freiwillig — steht aber einer da, muss er das Fahrzeug aufnehmen können.
+     *
+     * Ein stillgelegter Hof wird neu nicht mehr vergeben: Er bleibt an alten Entscheidungen
+     * lesbar, nimmt aber nichts Neues auf. Und ein Tram-Hof nimmt keinen Bus — wer das zulässt,
+     * schreibt einen Umlauf fest, den es nicht geben kann.
+     */
+    private function pruefeBetriebshof(Validator $validator, TripLinkKind $kind): void
+    {
+        $id = $this->input('depot_id');
+
+        if ($id === null) {
+            return;
+        }
+
+        $hof = Depot::query()->find($id);
+
+        if ($hof === null) {
+            return;
+        }
+
+        if (! $hof->active) {
+            $validator->errors()->add(
+                'depot_id',
+                sprintf('Der Betriebshof „%s" ist stillgelegt und nimmt keine neuen Fahrten mehr auf.', $hof->name),
+            );
+
+            return;
+        }
+
+        $fahrt = $kind === TripLinkKind::Start ? $this->toTrip() : $this->fromTrip();
+        $mode = $fahrt === null ? null : RouteType::modeFor((int) $fahrt->route_type);
+
+        if ($mode !== null && ! $hof->acceptsMode($mode)) {
+            $validator->errors()->add(
+                'depot_id',
+                sprintf('Der Betriebshof „%s" nimmt dieses Verkehrsmittel nicht auf.', $hof->name),
+            );
+        }
+    }
+
+    public function depotId(): ?int
+    {
+        $wert = $this->input('depot_id');
+
+        return $wert === null || $wert === '' ? null : (int) $wert;
     }
 
     private function pruefeAnschluss(Validator $validator, ConsolidatedTrip $von, ConsolidatedTrip $nach): void

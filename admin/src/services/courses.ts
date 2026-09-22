@@ -1,4 +1,5 @@
 import api from './api'
+import type { DepotRef } from './depots'
 import type { FahrplanTyp } from './lines'
 
 /**
@@ -100,9 +101,24 @@ export interface CourseChain {
   lines: string[]
   first_departure: string | null
   last_arrival: string | null
+  /**
+   * Die beiden Ketten-Enden. Drei Zustände, die auseinanderzuhalten sind:
+   * `marked: false` = gar keine Marke — der Umlauf endet ins Leere, das ist die Lücke.
+   * `marked: true, depot: null` = festgehalten, Hof noch offen (an einer Endstelle der Regelfall).
+   * `marked: true, depot: {…}` = vollständig.
+   *
+   * **Aus- und Einrückhof sind nicht zwangsläufig derselbe.**
+   */
+  terminal_out: CourseTerminal
+  terminal_in: CourseTerminal
   /** Stellen, an denen die Kette reißt. */
   breaks: number
   trips: CourseChainTrip[]
+}
+
+export interface CourseTerminal {
+  marked: boolean
+  depot: DepotRef | null
 }
 
 export interface LineCourseOverview {

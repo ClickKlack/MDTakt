@@ -1,0 +1,59 @@
+meta {
+  name: Betriebshof anlegen
+  type: http
+  seq: 33
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/depots
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "name": "Abstellanlage Rothensee",
+    "short_name": "Rothensee",
+    "stop_group_ids": [],
+    "modes": ["tram"],
+    "note": "Nur Nachtabstellung"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.name: eq Abstellanlage Rothensee
+  res.body.data.display: eq Rothensee
+  res.body.data.active: eq true
+  res.body.data.usage_count: eq 0
+}
+
+docs {
+  # Betriebshof anlegen
+
+  Ein neu angelegter Hof ist immer aktiv und traegt keine Verwendung — `usage_count` ist 0, und
+  damit ist er auch wieder loeschbar.
+
+  ## Worauf zu achten ist
+
+  **Der Name ist eindeutig.** „Nord" zweimal im Verzeichnis waere an der Fahrt nicht
+  auseinanderzuhalten, und die Zuordnung ist genau die Angabe, die stimmen muss. Ein zweiter Hof
+  gleichen Namens ist ein 422.
+
+  **`modes` einschraenken ist die Ausnahme.** Ohne Angabe (oder mit `[]`) nimmt der Hof alles
+  auf. `["tram"]` heisst: Bei einer Busfahrt taucht er in der Auswahl gar nicht erst auf.
+
+  **`stop_group_ids` darf leer bleiben** — dann greift die automatische Zuordnung beim Markieren
+  nicht, und der Hof wird von Hand gewaehlt. Steht dort eine Haltestelle, setzt
+  `POST /trip-links` ohne `depot_id` den Hof dort von selbst. Eine leere Liste beim `PUT` hebt
+  bestehende Zuordnungen auf.
+}

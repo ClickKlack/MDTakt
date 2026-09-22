@@ -1,0 +1,77 @@
+meta {
+  name: Betriebshof an einer Fahrt setzen
+  type: http
+  seq: 34
+}
+
+put {
+  url: {{baseUrl}}/api/v1/admin/trip-links/1/depot
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "depot_id": 1
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.depot.id: eq 1
+}
+
+script:post-response {
+  const d = res.body.data;
+
+  // Ein Anschluss fuehrt zu keinem Hof — dieser Endpunkt trifft nur `start`/`end`.
+  if (d.kind === "link") {
+    throw new Error("Ein Anschluss traegt keinen Betriebshof");
+  }
+}
+
+docs {
+  # Betriebshof einer Betriebsfahrt setzen
+
+  Traegt den Hof an einer bestehenden `start`/`end`-Entscheidung nach. `"depot_id": null` nimmt
+  ihn wieder heraus.
+
+  ## Warum ein eigener Endpunkt
+
+  **Es ist die uebliche Reihenfolge.** Erst wird markiert — *dass* die Kette hier beginnt oder
+  endet, ist die Aussage, die zaehlt —, und der Hof kommt dazu, sobald er feststeht. Am
+  Anlege-Weg (`POST /trip-links`) geht `depot_id` ebenfalls mit, aber an einer Endstelle ohne
+  zugeordneten Hof ist er beim Markieren oft noch gar nicht bekannt.
+
+  **Ist die Haltestelle einem Hof zugeordnet, braucht es diesen Endpunkt gar nicht:** `POST
+  /trip-links` ohne `depot_id` setzt ihn dann von selbst. Hier landet, was die Automatik nicht
+  eindeutig entscheiden konnte — oder was von Hand zu korrigieren ist.
+
+  ## Worauf zu achten ist
+
+  **`null` ist kein Rueckschritt.** Es ist die ehrliche Angabe „noch offen". Sie ist etwas
+  anderes als eine fehlende Marke: Die Marke sagt, dass hier eine Betriebsfahrt ist; der Hof
+  sagt, welche. Im Kurs-Ueberblick stehen beide Zustaende getrennt (`terminal_out.marked` vs.
+  `terminal_out.depot`).
+
+  **Aus- und Einrueckhof sind nicht derselbe.** Sie haengen an zwei verschiedenen Zeilen — der
+  `start`-Zeile der ersten Fahrt und der `end`-Zeile der letzten. Wer beide gleichsetzt, verliert
+  genau die Auskunft, wegen der die Angabe gepflegt wird.
+
+  ## 422-Faelle
+
+  | Fall | Grund |
+  |---|---|
+  | `kind=link` | Ein Anschluss fuehrt zu keinem Hof — das Fahrzeug faehrt weiter |
+  | stillgelegter Hof | Bleibt an alten Entscheidungen lesbar, nimmt aber nichts Neues auf |
+  | falsches Verkehrsmittel | Ein Tram-Hof nimmt keinen Bus — das waere ein Umlauf, den es nicht geben kann |
+}

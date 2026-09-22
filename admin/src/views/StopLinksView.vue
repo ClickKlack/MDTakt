@@ -7,6 +7,7 @@ import StopLinkBoard from '../components/StopLinkBoard.vue'
 import { FAHRPLAN_TYPEN, fetchLines, type FahrplanTyp, type Line } from '../services/lines'
 import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
 import { assignCourse, detachCourse } from '../services/courses'
+import { fetchDepots, setTripLinkDepot, type Depot } from '../services/depots'
 import { fetchStopGroups, type StopGroup } from '../services/stopGroups'
 import {
   createTripLink,
@@ -42,6 +43,11 @@ const lineFilter = ref<string[]>([])
 
 const board = ref<Board | null>(null)
 const auswahl = ref<number | null>(null)
+/**
+ * Nur die aktiven Hoefe: Ein stillgelegter bleibt an bestehenden Entscheidungen lesbar, nimmt
+ * aber nichts Neues mehr auf — er gehoert deshalb nicht in die Auswahl.
+ */
+const betriebshoefe = ref<Depot[]>([])
 
 const loading = ref(true)
 const loadingBoard = ref(false)
@@ -87,10 +93,16 @@ onMounted(async () => {
   try {
     // Nur Endstellen: An einem reinen Durchfahrts-Halt kann die Umlauf-Pflege nichts tun,
     // und netzweit sind das rund 250 von 315 Haltestellen.
-    const [h, p, l] = await Promise.all([fetchStopGroups(null, true), fetchSchedulePeriods(), fetchLines()])
+    const [h, p, l, b] = await Promise.all([
+      fetchStopGroups(null, true),
+      fetchSchedulePeriods(),
+      fetchLines(),
+      fetchDepots(true),
+    ])
     haltestellen.value = h
     perioden.value = p
     linienVerzeichnis.value = Object.fromEntries(l.map((linie) => [linie.route_short_name, linie]))
+    betriebshoefe.value = b
 
     // Auswahl aus der URL übernehmen, damit eine Haltestelle verlinkbar bleibt.
     gewaehlteHaltestelle.value = Number(route.query.stop_group) || null
@@ -194,9 +206,19 @@ async function markiere(tripId: number, kind: 'start' | 'end'): Promise<void> {
   erfolg.value = null
 
   try {
-    await createTripLink(
+    // Bewusst **ohne** `depot_id`: Fehlt das Feld, schlaegt die Engine den Hof aus der
+    // Haltestelle vor. Ein mitgeschicktes `null` hiesse dagegen „bewusst offen" und
+    // unterdrueckte die Automatik.
+    const ergebnis = await createTripLink(
       kind === 'start' ? { kind, to_trip_id: tripId } : { kind, from_trip_id: tripId },
     )
+
+    // Wurde der Hof dabei von selbst gesetzt, sagen wir das — sonst wirkt es, als haette die
+    // App etwas eigenmaechtig getan.
+    if (ergebnis.depot !== null) {
+      erfolg.value = `Betriebshof ${ergebnis.depot.name} aus der Haltestelle übernommen.`
+    }
+
     await ladeBoard()
   } catch (e: unknown) {
     error.value = meldung(e, 'Die Entscheidung konnte nicht gespeichert werden.')
@@ -263,6 +285,28 @@ async function loese(linkId: number): Promise<void> {
     await ladeBoard()
   } catch (e: unknown) {
     error.value = meldung(e, 'Die Entscheidung konnte nicht gelöst werden.')
+  } finally {
+    busy.value = false
+  }
+}
+
+/**
+ * Den Betriebshof einer Betriebsfahrt setzen — `null` laesst ihn wieder offen.
+ *
+ * Getrennt vom Markieren, weil es die uebliche Reihenfolge ist: Erst wird markiert — das ist
+ * die Aussage, die zaehlt —, der Hof kommt dazu, sobald er feststeht.
+ */
+async function setzeBetriebshof(linkId: number, depotId: number | null): Promise<void> {
+  busy.value = true
+  error.value = null
+  hinweise.value = []
+  erfolg.value = null
+
+  try {
+    await setTripLinkDepot(linkId, depotId)
+    await ladeBoard()
+  } catch (e: unknown) {
+    error.value = meldung(e, 'Der Betriebshof konnte nicht gesetzt werden.')
   } finally {
     busy.value = false
   }
@@ -398,7 +442,10 @@ watch(gewaehlterStand, (neu, alt) => {
         Hier entstehen die Umläufe: Fahrten, die an einer Haltestelle enden, werden mit Fahrten verknüpft, die dort
         beginnen — auch über Linien hinweg, denn eine 1 wird in Sudenburg durchaus zur 13. Beginnt oder endet eine
         Kette bewusst ohne Anschluss, ist das eine Betriebsfahrt und wird als solche festgehalten. Das ist etwas
-        anderes als „noch nicht gepflegt“.
+        anderes als „noch nicht gepflegt“. An einer solchen Marke steht der
+        <RouterLink to="/betriebshoefe" class="underline underline-offset-2">Betriebshof</RouterLink> — von selbst,
+        wenn die Haltestelle einem zugeordnet ist, sonst von Hand und freiwillig: An einer Endstelle ohne
+        zugeordneten Hof steht er oft nicht fest.
       </p>
 
       <p v-if="loading" class="mt-4 text-sm text-slate-500">Wird geladen …</p>
@@ -671,7 +718,9 @@ watch(gewaehlterStand, (neu, alt) => {
             :range-mode="autoModus"
             :range-from="bereichVon"
             :range-to="bereichBis"
+            :depots="betriebshoefe"
             @range-pick="waehleBereich"
+            @set-depot="setzeBetriebshof"
             @select="auswahl = $event"
             @link="verknuepfe"
             @mark="markiere"

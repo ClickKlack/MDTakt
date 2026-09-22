@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Enums\FahrplanTyp;
 use App\Models\ConsolidatedTrip;
+use App\Models\Depot;
 use App\Models\LineVersion;
 use App\Models\SchedulePeriod;
 use App\Models\TripLink;
@@ -85,6 +86,69 @@ final class CourseOverviewTest extends TestCase
             ->getJson('/api/v1/admin/lines/1/courses')
             ->assertStatus(422)
             ->assertJsonPath('error.code', 422);
+    }
+
+    // ---------------------------------------------------------------- Betriebshof (KURSE §3.2)
+
+    /**
+     * Aus- und Einrückhof stehen am Umlauf — und sie sind **nicht** zwangsläufig derselbe.
+     * Ein Fahrzeug rückt morgens aus Nord aus und abends in Westerhüsen ein, wenn der Umlauf
+     * es dorthin trägt.
+     */
+    public function test_a_course_reports_its_outbound_and_inbound_depot(): void
+    {
+        $version = $this->version();
+        $a = $this->f->fahrt($version, ['Nord', 'B'], ['04:30:00', '05:00:00']);
+        $b = $this->f->fahrt($version, ['B', 'Westerhüsen'], ['05:05:00', '05:35:00']);
+
+        $this->verknuepfe($a, $b);
+        $this->setzeKurs($a, '03');
+
+        $nord = Depot::factory()->create(['name' => 'Nord-Hof', 'short_name' => 'Nord']);
+        $west = Depot::factory()->create(['name' => 'West-Hof', 'short_name' => 'West']);
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'start', 'to_trip_id' => $a->id, 'depot_id' => $nord->id,
+        ])->assertCreated();
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'end', 'from_trip_id' => $b->id, 'depot_id' => $west->id,
+        ])->assertCreated();
+
+        $kurs = $this->hole('1')['courses'][0];
+
+        $this->assertTrue($kurs['terminal_out']['marked']);
+        $this->assertSame('Nord', $kurs['terminal_out']['depot']['display']);
+        $this->assertTrue($kurs['terminal_in']['marked']);
+        $this->assertSame('West', $kurs['terminal_in']['depot']['display']);
+    }
+
+    /**
+     * Drei Zustände, die auseinanderzuhalten sind: keine Marke (die Lücke), Marke ohne Hof
+     * (festgehalten, Hof offen) und Marke mit Hof. Fielen die ersten beiden zusammen, wäre
+     * eine gepflegte Betriebsfahrt von einem Pflegerückstand nicht zu unterscheiden.
+     */
+    public function test_a_mark_without_a_depot_is_not_the_same_as_no_mark(): void
+    {
+        $version = $this->version();
+        $a = $this->f->fahrt($version, ['Nord', 'B'], ['04:30:00', '05:00:00']);
+        $b = $this->f->fahrt($version, ['B', 'Westerhüsen'], ['05:05:00', '05:35:00']);
+
+        $this->verknuepfe($a, $b);
+        $this->setzeKurs($a, '03');
+
+        // Nur das Ausrücken markiert, und zwar ohne Hof.
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'start', 'to_trip_id' => $a->id,
+        ])->assertCreated();
+
+        $kurs = $this->hole('1')['courses'][0];
+
+        $this->assertTrue($kurs['terminal_out']['marked'], 'Markiert, aber ohne Hof.');
+        $this->assertNull($kurs['terminal_out']['depot']);
+
+        $this->assertFalse($kurs['terminal_in']['marked'], 'Gar nicht markiert — das ist die Lücke.');
+        $this->assertNull($kurs['terminal_in']['depot']);
     }
 
     public function test_a_chain_appears_in_order_with_its_trips(): void

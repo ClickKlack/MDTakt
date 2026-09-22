@@ -787,6 +787,15 @@ components:
                     items: { type: string }
                   first_departure: { type: string, nullable: true }
                   last_arrival: { type: string, nullable: true }
+                  terminal_out:
+                    allOf: [{ $ref: '#/components/schemas/CourseTerminal' }]
+                    description: Das Ketten-Ende am Morgen — woher das Fahrzeug kommt.
+                  terminal_in:
+                    allOf: [{ $ref: '#/components/schemas/CourseTerminal' }]
+                    description: >
+                      Das Ketten-Ende am Abend. **Nicht zwangslaeufig derselbe Hof** wie
+                      `terminal_out` — ein Fahrzeug rueckt aus Nord aus und in Westerhuesen ein,
+                      wenn der Umlauf es dorthin traegt.
                   breaks:
                     type: integer
                     description: Stellen, an denen die Kette reisst — Fahrten ohne Anschluss zur Vorfahrt.
@@ -1329,6 +1338,109 @@ components:
           items: { type: integer }
         line_count: { type: integer }
 
+    CourseTerminal:
+      type: object
+      required: [marked, depot]
+      description: >
+        Ein Ketten-Ende. **Drei Zustaende, die auseinanderzuhalten sind:** `marked: false` heisst,
+        der Umlauf beginnt oder endet ins Leere — das ist die Luecke. `marked: true` mit
+        `depot: null` heisst, die Betriebsfahrt ist festgehalten, der Hof aber noch offen; das ist
+        ein gueltiger Endzustand, denn an einer Endstelle steht der Hof oft nicht fest. Fielen die
+        ersten beiden zusammen, waere eine gepflegte Betriebsfahrt von einem Pflegerueckstand
+        nicht zu unterscheiden.
+      properties:
+        marked: { type: boolean }
+        depot: { allOf: [{ $ref: '#/components/schemas/DepotRef' }], nullable: true }
+
+    DepotRef:
+      type: object
+      required: [id, name, display, active]
+      description: >
+        Ein Betriebshof an einer Entscheidung — knapper als das Verzeichnis, mehr braucht die
+        Anzeige nicht.
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        display:
+          type: string
+          description: Kurzform, wo der Platz knapp ist — sonst der volle Name. Nie leer.
+        active: { type: boolean }
+
+    Depot:
+      type: object
+      required: [id, name, display, stop_groups, modes, active, usage_count]
+      description: >
+        Ein **Betriebshof** (KURSE §3.2). Er haengt an der einzelnen Entscheidung, nicht am Kurs:
+        Ein Fahrzeug rueckt morgens aus dem einen Hof aus und abends in einen anderen ein, wenn
+        der Umlauf es dorthin traegt. Aus- und Einrueckhof sind deshalb zwei getrennte Angaben.
+      properties:
+        id: { type: integer }
+        name: { type: string, maxLength: 120 }
+        short_name: { type: string, nullable: true, maxLength: 16 }
+        display: { type: string }
+        stop_groups:
+          type: array
+          description: >
+            Die Haltestellen, an denen dieser Hof aus- und einruecken laesst. **Mehrere**, und
+            das ist der Regelfall: Die Westerhuesener Fahrten beginnen fast immer an der
+            *Schleswiger Strasse* und nicht am Hof selbst — der Weg dorthin ist eine
+            Betriebsfahrt, die im Fahrplan gar nicht steht. An diesen Haltestellen setzt
+            `POST /trip-links` den Hof von selbst (siehe dort). Leer heisst: Die Automatik
+            greift nicht, der Hof wird von Hand gewaehlt.
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+        modes:
+          type: array
+          description: >
+            Leer = **alle** Verkehrsmittel. Das ist der Vorgabefall, nicht „keines". Sonst nimmt
+            der Hof nur die genannten auf, und die Auswahl an der Fahrt bietet ihn nur dort an.
+          items: { type: string, enum: [tram, bus] }
+        active:
+          type: boolean
+          description: >
+            Stillgelegt heisst: an alten Entscheidungen lesbar, nimmt aber nichts Neues mehr auf.
+        note: { type: string, nullable: true, maxLength: 255 }
+        usage_count:
+          type: integer
+          description: >
+            Wie viele Entscheidungen daran haengen. Groesser 0 heisst: nicht loeschbar, nur
+            stilllegbar — sonst ginge die Angabe „ausgerueckt aus Nord" still verloren.
+
+    DepotRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 120 }
+        short_name: { type: string, nullable: true, maxLength: 16 }
+        stop_group_ids:
+          type: array
+          description: >
+            Die zugeordneten Haltestellen. Eine leere Liste hebt alle Zuordnungen auf — ohne
+            sie liesse sich ein Fehlgriff nie zuruecknehmen.
+          items: { type: integer }
+        modes:
+          type: array
+          items: { type: string, enum: [tram, bus] }
+        active: { type: boolean, default: true }
+        note: { type: string, nullable: true, maxLength: 255 }
+
+    DepotResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Depot' }
+
+    DepotListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Depot' }
+
     StopLinkDecision:
       type: object
       required: [id, kind]
@@ -1352,6 +1464,13 @@ components:
             Wendezeit in Sekunden, nur bei `kind=link`. Gerechnet über Betriebstag-Sekunden,
             nicht lexikalisch — eine Ankunft um `24:50:00` und eine Abfahrt um `25:10:00`
             ergeben 1200.
+        depot:
+          allOf: [{ $ref: '#/components/schemas/DepotRef' }]
+          nullable: true
+          description: >
+            Der Betriebshof — nur bei `kind=start`/`end`, und auch dort **freiwillig**. `null`
+            heisst „noch offen", nicht „kein Hof": Beginnt eine Kette an einer Endstelle, steht
+            der Hof oft nicht fest, und ein erzwungener Wert waere dort geraten.
         note: { type: string, nullable: true }
 
     StopLinkTrip:
@@ -1458,6 +1577,18 @@ components:
           type: integer
           nullable: true
           description: Pflicht bei `kind=link` und `kind=start`, verboten bei `kind=end`.
+        depot_id:
+          type: integer
+          nullable: true
+          description: >
+            Nur bei `kind=start`/`end`, und auch dort freiwillig. Bei `kind=link` ein 422 — ein
+            Anschluss fuehrt zu keinem Hof, das Fahrzeug faehrt weiter.
+
+
+            **Fehlt das Feld, waehlt die Haltestelle.** Ist der Halt einem Betriebshof
+            zugeordnet, der das Verkehrsmittel aufnimmt, steht er danach an der Entscheidung —
+            genau ein passender Hof muss es sein, sonst bleibt die Angabe offen. Ein
+            ausdrueckliches `null` heisst dagegen „bewusst offen" und unterdrueckt das.
         note: { type: string, nullable: true, maxLength: 255 }
 
     TripLinkResponse:
@@ -1474,6 +1605,7 @@ components:
             from_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
             to_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
             turnaround_seconds: { type: integer, nullable: true }
+            depot: { allOf: [{ $ref: '#/components/schemas/DepotRef' }], nullable: true }
             note: { type: string, nullable: true }
             course:
               allOf: [{ $ref: '#/components/schemas/Course' }]
@@ -1558,9 +1690,11 @@ components:
                 include_terminals:
                   type: boolean
                   description: >
-                    Nur bei `action=unlink`: Auch Aus- und Einruecken loesen. Vorgabe `false` —
-                    „Verbindungen aufloesen" meint die Anschluesse, und eine Betriebsfahrt ist
-                    eine eigenstaendige Aussage, die nicht nebenbei verschwinden soll.
+                    Nur bei `action=unlink`: Auch die Betriebshof-Fahrten loesen (`start`/`end`,
+                    fachlich Aus- und Einruecken). Vorgabe `false` — „Verbindungen aufloesen" meint
+                    die Anschluesse, und eine Betriebsfahrt ist eine eigenstaendige Aussage, die
+                    nicht nebenbei verschwinden soll. Einzeln nimmt
+                    `DELETE /admin/trip-links/{id}` jede Marke zurueck.
             defaults:
               type: object
               description: >
@@ -3303,8 +3437,11 @@ paths:
           in: query
           required: false
           description: >
-            Nur bei `action=unlink`: auch Aus- und Einrücken lösen. Vorgabe `false` — eine
-            Betriebsfahrt ist eine eigenständige Aussage und soll nicht nebenbei verschwinden.
+            Nur bei `action=unlink`: auch die Betriebshof-Fahrten lösen (`start`/`end`, fachlich
+            Aus- und Einrücken). Vorgabe `false` — eine Betriebsfahrt ist eine eigenständige
+            Aussage und soll nicht nebenbei verschwinden.
+
+            In der Query ist der Wert **Text**: `true`/`false`/`1`/`0` werden alle angenommen.
           schema: { type: boolean }
       responses:
         '200':
@@ -3437,6 +3574,182 @@ paths:
             Haltestelle passt nicht, verschiedene Periode oder Fahrplantyp, **Gattungswechsel**
             (Tram auf Bus), Gueltigkeiten ueberschneiden sich nicht, Zyklus, oder negative
             Wendezeit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/trip-links/{tripLink}/depot:
+    parameters:
+      - name: tripLink
+        in: path
+        required: true
+        description: '`trip_links.id` — muss `kind=start` oder `kind=end` tragen.'
+        schema: { type: integer }
+    put:
+      operationId: setTripLinkDepot
+      summary: Betriebshof einer Betriebsfahrt setzen oder offen lassen
+      description: >
+        Traegt den Betriebshof an einer bestehenden `start`/`end`-Entscheidung nach. `null` nimmt
+        ihn wieder heraus — das ist kein Rueckschritt, sondern die ehrliche Angabe „noch offen".
+
+
+        **Getrennt vom Anlegen**, weil es die uebliche Reihenfolge ist: Erst wird markiert — das
+        ist die Aussage, die zaehlt —, der Hof kommt dazu, sobald er feststeht. An einer
+        Endstelle ist er oft gar nicht bekannt.
+
+
+        **Aus- und Einrueckhof sind nicht zwangslaeufig derselbe.** Ein Fahrzeug rueckt morgens
+        aus Nord aus und abends in Westerhuesen ein, wenn der Umlauf es dorthin traegt — deshalb
+        haengt der Hof an der einzelnen Entscheidung und nicht am Kurs.
+
+
+        Abgewiesen wird ein Hof, der **stillgelegt** ist oder das **Verkehrsmittel** dieser Fahrt
+        nicht aufnimmt, und jeder Hof an einem `kind=link`.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [depot_id]
+              properties:
+                depot_id: { type: integer, nullable: true }
+      responses:
+        '200':
+          description: Gesetzt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TripLinkResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannte Verknuepfung
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: >
+            Unbekannter Hof, stillgelegter Hof, falsches Verkehrsmittel, oder die Entscheidung
+            ist ein Anschluss
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/depots:
+    get:
+      operationId: listDepots
+      summary: Betriebshof-Verzeichnis
+      description: >
+        Die Hoefe, aus denen ausgerueckt und in die eingerueckt wird (KURSE §3.2). Magdeburg hat
+        zwei; beide legt die Migration an und beide sind hier aenderbar.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: active_only
+          in: query
+          required: false
+          description: >
+            `1` blendet stillgelegte Hoefe aus. In einer Query ist der Wert **Text** — `1` und
+            `true` werden angenommen.
+          schema: { type: string, enum: ['1', 'true'] }
+      responses:
+        '200':
+          description: Verzeichnis, nach Name sortiert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepotListResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: createDepot
+      summary: Betriebshof anlegen
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DepotRequest' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepotResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Name schon vergeben oder unbekanntes Verkehrsmittel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/depots/{depot}:
+    parameters:
+      - name: depot
+        in: path
+        required: true
+        description: '`depots.id`'
+        schema: { type: integer }
+    put:
+      operationId: updateDepot
+      summary: Betriebshof aendern oder stilllegen
+      description: >
+        `active: false` legt den Hof still: Er verschwindet aus der Auswahl, bleibt an
+        bestehenden Entscheidungen aber lesbar. Das ist der Weg fuer einen Hof, an dem schon
+        etwas haengt — Loeschen ist es nicht.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DepotRequest' }
+      responses:
+        '200':
+          description: Gespeichert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepotResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Name schon vergeben oder unbekanntes Verkehrsmittel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      operationId: deleteDepot
+      summary: Betriebshof loeschen
+      description: >
+        Nur, solange **nichts** daran haengt. Sonst 409 mit dem Hinweis auf das Stilllegen: Die
+        Angabe „ausgerueckt aus Nord" ginge beim Loeschen still verloren.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      responses:
+        '204':
+          description: Geloescht
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Am Hof haengen noch Entscheidungen — stilllegen statt loeschen
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

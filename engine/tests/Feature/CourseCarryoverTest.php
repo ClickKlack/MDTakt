@@ -8,6 +8,7 @@ use App\Enums\FahrplanTyp;
 use App\Models\ConsolidatedTrip;
 use App\Models\Course;
 use App\Models\CourseTrip;
+use App\Models\Depot;
 use App\Models\LineVersion;
 use App\Models\SchedulePeriod;
 use App\Models\TripLink;
@@ -219,6 +220,35 @@ final class CourseCarryoverTest extends TestCase
             'to_trip_id' => $neueFahrt->id,
             'kind' => 'start',
             'note' => 'Ausrücken',
+        ]);
+    }
+
+    /**
+     * Der Betriebshof geht mit: Ein Fahrplanwechsel ändert nicht, aus welchem Hof ein Umlauf
+     * ausrückt. Bliebe er liegen, wäre die Angabe nach jedem Wechsel von Hand nachzutragen.
+     */
+    public function test_the_depot_is_carried_with_the_terminal_decision(): void
+    {
+        $alt = $this->version('1', 1);
+        $neu = $this->version('1', 2);
+
+        $alteFahrt = $this->f->fahrt($alt, ['Betriebshof', 'A'], ['04:30:00', '04:42:00'], 'sig-gleich');
+        $neueFahrt = $this->f->fahrt($neu, ['Betriebshof', 'A'], ['04:30:00', '04:42:00'], 'sig-gleich');
+
+        $hof = Depot::factory()->create(['name' => 'Nord-Hof']);
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'start',
+            'to_trip_id' => $alteFahrt->id,
+            'depot_id' => $hof->id,
+        ])->assertCreated();
+
+        $this->uebernimm($alt, $neu)->assertOk();
+
+        $this->assertDatabaseHas('trip_links', [
+            'to_trip_id' => $neueFahrt->id,
+            'kind' => 'start',
+            'depot_id' => $hof->id,
         ]);
     }
 

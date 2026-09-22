@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $to_trip_id
  * @property int $stop_id
  * @property TripLinkKind $kind
+ * @property int|null $depot_id
  * @property string|null $note
  */
 final class TripLink extends Model
@@ -29,7 +30,7 @@ final class TripLink extends Model
     /** @use HasFactory<TripLinkFactory> */
     use HasFactory;
 
-    protected $fillable = ['from_trip_id', 'to_trip_id', 'stop_id', 'kind', 'note'];
+    protected $fillable = ['from_trip_id', 'to_trip_id', 'stop_id', 'kind', 'depot_id', 'note'];
 
     /**
      * @return array<string, string>
@@ -61,5 +62,18 @@ final class TripLink extends Model
     public function stop(): BelongsTo
     {
         return $this->belongsTo(ConsolidatedStop::class, 'stop_id');
+    }
+
+    /**
+     * Der Betriebshof, aus dem ausgerückt oder in den eingerückt wird.
+     *
+     * Nur bei `kind=start`/`end` belegt, und auch dort freiwillig: Beginnt eine Kette an einer
+     * Endstelle, steht der Hof nicht fest.
+     *
+     * @return BelongsTo<Depot, $this>
+     */
+    public function depot(): BelongsTo
+    {
+        return $this->belongsTo(Depot::class);
     }
 }

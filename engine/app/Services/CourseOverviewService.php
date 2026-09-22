@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\FahrplanTyp;
+use App\Enums\TripLinkKind;
 use App\Models\Course;
 use App\Models\SchedulePeriod;
 use Illuminate\Support\Collection;
@@ -67,6 +68,8 @@ final class CourseOverviewService
             ))));
         }
 
+        $marken = $this->terminals($alleTripIds);
+
         $ergebnis = [];
 
         foreach ($kurse as $kurs) {
@@ -95,6 +98,15 @@ final class CourseOverviewService
                 'lines' => $this->sortiert($linien),
                 'first_departure' => $fahrten === [] ? null : $fahrten[0]['departure_time'],
                 'last_arrival' => $fahrten === [] ? null : $fahrten[count($fahrten) - 1]['arrival_time'],
+                // Ausrück- und Einrückhof des Umlaufs. Sie sind **nicht** zwangsläufig
+                // derselbe: Ein Fahrzeug rückt morgens aus Nord aus und abends in Westerhüsen
+                // ein, wenn der Umlauf es dorthin trägt.
+                'terminal_out' => $this->terminalOf($marken, 'start', $fahrten === [] ? null : $fahrten[0]['id']),
+                'terminal_in' => $this->terminalOf(
+                    $marken,
+                    'end',
+                    $fahrten === [] ? null : $fahrten[count($fahrten) - 1]['id'],
+                ),
                 'trips' => $this->withChainInfo($fahrten, $anschluesse, $halte),
                 'breaks' => $this->countBreaks($fahrten, $anschluesse),
             ];
@@ -265,6 +277,79 @@ final class CourseOverviewService
             ->get(['from_trip_id', 'to_trip_id'])
             ->mapWithKeys(static fn (object $l): array => [$l->from_trip_id.'>'.$l->to_trip_id => true])
             ->all();
+    }
+
+    /**
+     * Die Betriebshof-Marken der Ketten-Enden, nach Art und Fahrt geschlüsselt.
+     *
+     * @param  array<int, int>  $tripIds
+     * @return array<string, array<int, array<string, mixed>>> `start`/`end` => Fahrt-Id => Marke
+     */
+    private function terminals(array $tripIds): array
+    {
+        $leer = ['start' => [], 'end' => []];
+
+        if ($tripIds === []) {
+            return $leer;
+        }
+
+        $zeilen = DB::table('trip_links as tl')
+            ->leftJoin('depots as d', 'd.id', '=', 'tl.depot_id')
+            ->whereIn('tl.kind', [TripLinkKind::Start->value, TripLinkKind::End->value])
+            ->where(function ($q) use ($tripIds): void {
+                $q->whereIn('tl.to_trip_id', $tripIds)->orWhereIn('tl.from_trip_id', $tripIds);
+            })
+            ->get([
+                'tl.kind', 'tl.from_trip_id', 'tl.to_trip_id', 'tl.depot_id',
+                'd.name as depot_name', 'd.short_name as depot_short_name', 'd.active as depot_active',
+            ]);
+
+        $ergebnis = $leer;
+
+        foreach ($zeilen as $zeile) {
+            // `start` hängt an der beginnenden Fahrt, `end` an der endenden — die jeweils
+            // andere Seite ist bei einer Betriebsfahrt leer.
+            $istStart = $zeile->kind === TripLinkKind::Start->value;
+            $fahrtId = $istStart ? $zeile->to_trip_id : $zeile->from_trip_id;
+
+            if ($fahrtId === null) {
+                continue;
+            }
+
+            $kurz = $zeile->depot_short_name;
+
+            $ergebnis[$istStart ? 'start' : 'end'][(int) $fahrtId] = [
+                'marked' => true,
+                'depot' => $zeile->depot_id === null ? null : [
+                    'id' => (int) $zeile->depot_id,
+                    'name' => (string) $zeile->depot_name,
+                    'display' => $kurz === null || $kurz === '' ? (string) $zeile->depot_name : (string) $kurz,
+                    'active' => (bool) $zeile->depot_active,
+                ],
+            ];
+        }
+
+        return $ergebnis;
+    }
+
+    /**
+     * Die Marke an einem Ketten-Ende.
+     *
+     * Drei Zustände, die auseinanderzuhalten sind: **keine Marke** (`marked: false`) heißt, der
+     * Umlauf endet ins Leere — das ist die Lücke. **Marke ohne Hof** heißt, die Betriebsfahrt
+     * ist festgehalten, der Hof aber noch offen; das ist ein gültiger Endzustand, denn an einer
+     * Endstelle steht der Hof oft nicht fest.
+     *
+     * @param  array<string, array<int, array<string, mixed>>>  $marken
+     * @return array<string, mixed>
+     */
+    private function terminalOf(array $marken, string $art, ?int $fahrtId): array
+    {
+        if ($fahrtId === null) {
+            return ['marked' => false, 'depot' => null];
+        }
+
+        return $marken[$art][$fahrtId] ?? ['marked' => false, 'depot' => null];
     }
 
     /**

@@ -54,7 +54,7 @@ script:post-response {
     throw new Error("Ein Aufloesen meldet angelegte Anschluesse");
   }
 
-  // Ohne den Schalter bleiben Aus- und Einruecken stehen.
+  // Ohne den Schalter bleiben die Betriebshof-Fahrten stehen.
   if (!d.filter.include_terminals) {
     for (const zeile of d.removals) {
       if (zeile.kind !== "link") {
@@ -86,10 +86,16 @@ docs {
   | `unlink` | zerschnitten | bleibt, an beiden Haelften |
   | `clear`  | bleibt       | entfernt, ueber die ganze Kette |
 
-  **Aus- und Einruecken bleiben ohne `include_terminals` stehen.** „Verbindungen aufloesen" meint
-  die Anschluesse; eine Betriebsfahrt ist eine eigenstaendige Aussage und soll nicht nebenbei
-  verschwinden. Mit dem Schalter werden sie mitgeloest — das ist zugleich der einzige Weg, eine
-  falsch gesetzte `start`/`end`-Entscheidung wieder loszuwerden.
+  **Betriebshof-Fahrten bleiben ohne `include_terminals` stehen.** „Verbindungen aufloesen" meint
+  die Anschluesse; eine Betriebsfahrt (`start`/`end`, fachlich Aus- und Einruecken) ist eine
+  eigenstaendige Aussage und soll nicht nebenbei verschwinden. Mit dem Schalter gehen sie mit.
+  Einzeln nimmt `DELETE /api/v1/admin/trip-links/{id}` jede Marke zurueck — im Board haengt dafuer
+  an jeder ein „Loesen".
+
+  **Im `GET` ist der Schalter Text, nicht Boolean.** Siehe `auto-trip-links-unlink-preview.bru`:
+  Dort steht `include_terminals=false` in der Query, und genau diese Schreibweise hat die Engine
+  bis 22.09.2026 mit 422 abgewiesen. Hier im `POST` ist es ein echter Boolean im JSON-Rumpf — der
+  Fall faellt in dieser Datei also nicht auf.
 
   **Der Bereich ist der des Bildschirms.** Ein Anschluss wird in der Zeile seiner *endenden*
   Fahrt angezeigt; zum Bereich gehoert er ueber deren `arrival_sort`. Liegt die zugehoerige
@@ -119,7 +125,7 @@ docs {
           "reason": "An dieser Fahrt haengt keine Entscheidung." },
         { "side": "ending", "trip": { "id": 9851, "line": "1" }, "partner": null,
           "reason_code": "terminal_decision",
-          "reason": "Die Fahrt rueckt ein. Betriebsfahrten werden nur mit „auch Aus-/Einruecken loesen" entfernt." }
+          "reason": "Die Fahrt faehrt von hier in den Betriebshof. Betriebsfahrten werden nur mit „auch Betriebshof-Fahrten loesen" entfernt." }
       ]
     }
   }

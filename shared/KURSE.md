@@ -18,7 +18,8 @@
 - **Eine Kette endet oder beginnt auch ohne Anschluss** (Ausrücken/Einrücken, Betriebsfahrt —
   besonders morgens). Das ist eine **bewusste Entscheidung**, die gespeichert wird, nicht die
   Abwesenheit einer Pflege. Nur so ist „noch nicht gepflegt" von „hier ist wirklich Schluss"
-  unterscheidbar.
+  unterscheidbar. An dieser Marke hängt **optional der Betriebshof** — Aus- und Einrückhof sind
+  nicht zwangsläufig derselbe (§3.2).
 - **Die Kursnummer ist ein Etikett an der Kette**, nicht an der Fahrt. Beim Linienwechsel bleibt
   sie erhalten; nur der Linien-Präfix der Anzeige wechselt: `1/03` → `13/03`.
 - **Perioden und Versionen gelten durchgehend.** Eine Fahrt hängt an einer `line_version`, diese an
@@ -35,9 +36,14 @@
 | **Fahrt** | Eine `consolidated_trip` — eine Linienfahrt von A nach B innerhalb einer `line_version` |
 | **Anschluss** | Die Aussage „dasselbe Fahrzeug fährt nach Fahrt A die Fahrt B" |
 | **Kette / Umlauf** | Die maximale Folge von Fahrten, die über Anschlüsse verbunden sind |
-| **Ausrücken** | Die Kette beginnt hier ohne Vorgänger — das Fahrzeug kommt vom Betriebshof |
-| **Einrücken** | Die Kette endet hier ohne Nachfolger |
+| **Ausrücken** | Die Kette beginnt hier ohne Vorgänger — das Fahrzeug kommt vom Betriebshof. In der Oberfläche heißt das **„Aus dem Betriebshof"** |
+| **Einrücken** | Die Kette endet hier ohne Nachfolger — das Fahrzeug fährt in den Betriebshof. In der Oberfläche **„In den Betriebshof"** |
+
+Die Fachbegriffe bleiben im Modell und in den Kommentaren; die Oberfläche schreibt die Richtung
+aus. „Ein-" und „Ausrücken" unterscheiden sich um einen Buchstaben und bezeichnen entgegengesetzte
+Fahrten — an einem Knopf, der eine Entscheidung festschreibt, ist das zu wenig Abstand.
 | **Kurs / Kursnummer** | Die am Fahrzeug angeschlagene Bezeichnung des Umlaufs, z. B. `03` |
+| **Betriebshof** | Der Ort, aus dem ausgerückt und in den eingerückt wird. Magdeburg hat drei: Nord und Westerhüsen (Tram), Kroatenwuhne (Bus) — §3.2 |
 
 Das Glossar in `SPEC.md` §2.1 setzte „Umlauf" mit `block_id` gleich. Das trägt nicht: Das Feld ist
 leer, und der Umlauf ist hier ein gepflegtes Faktum, kein importiertes.
@@ -239,10 +245,12 @@ Fahrten, nicht der Spalten. Und bleibt ein Kurs danach ohne jede Fahrt, ist sein
 die leere Hülle meldet sich aber als Dublette (sie hängt an keiner Linie und kollidiert mit jeder).
 Gelöscht wird sie **nicht** — das bleibt eine ausdrückliche Entscheidung über den Kurs-Endpunkt.
 
-Aus- und Einrücken bleiben beim Auflösen stehen, solange man sie nicht ausdrücklich einschließt:
+Betriebshof-Fahrten bleiben beim Auflösen stehen, solange man sie nicht ausdrücklich einschließt:
 „Verbindungen auflösen" meint die Anschlüsse, und eine Betriebsfahrt ist eine eigenständige Aussage,
-die nicht nebenbei verschwinden soll. Der Schalter dafür schließt zugleich eine Lücke — bis dahin
-ließ sich eine einmal gesetzte `start`/`end`-Entscheidung in der Oberfläche gar nicht mehr lösen.
+die nicht nebenbei verschwinden soll. Wer eine einzelne wieder loswerden will, löst sie im Board
+direkt an der Fahrt — die Marke trägt dafür ein „Lösen" wie jeder Anschluss auch. Eine Entscheidung,
+die sich setzen lässt, muss sich auch zurücknehmen lassen; sonst bliebe ein Fehlgriff für immer
+stehen.
 
 ---
 
@@ -255,6 +263,7 @@ schedule_periods ─┐
                   └─ courses
 
 stop_groups (Haltestelle) ── stop_group_members ── consolidated_stops (Halt)
+                  └─ depots (Betriebshof) ── trip_links.depot_id
 ```
 
 ### 3.1 Die Haltestelle über dem Halt
@@ -285,7 +294,8 @@ sie ordnet nur zu, was noch keiner Haltestelle angehört.
 | `to_trip_id` | bigint NULL → `consolidated_trips` | **unique** |
 | `stop_id` | bigint → `consolidated_stops` | wo der Übergang stattfindet |
 | `kind` | varchar(8) | `link` \| `start` \| `end` |
-| `note` | varchar NULL | z. B. „Ausrücken Betriebshof" |
+| `depot_id` | bigint NULL → `depots` | nur bei `start`/`end`, und auch dort **freiwillig** (§3.2) |
+| `note` | varchar NULL | z. B. „über Schleswiger Straße" |
 
 - `kind=link` — beide gesetzt: A endet, B beginnt.
 - `kind=start` — nur `to_trip_id`: Ausrücken.
@@ -295,6 +305,95 @@ Die beiden Unique-Constraints **sind** die Fachregel: Ein Fahrzeug hat höchsten
 und höchstens einen Vorgänger. `NULL` gilt in SQL als ungleich zu `NULL` — in PostgreSQL wie in
 SQLite —, beliebig viele Fahrten dürfen also „ohne Vorgänger" sein. `kind` ist aus den NULL-Spalten
 ableitbar und wird trotzdem gespeichert: Es macht Abfragen und Absicht lesbar.
+
+### 3.2 Der Betriebshof
+
+**Entschieden 22.09.2026.** Magdeburg hat drei Betriebshöfe, und sie sind nach Verkehrsmittel
+getrennt:
+
+| Hof | Nimmt auf | Haltestellen |
+|---|---|---|
+| **Nord** | Tram | `Betriebshof Nord / AMROC` |
+| **Westerhüsen** | Tram | `Westerhüsen (Betriebshof)`, `Schleswiger Straße` |
+| **Kroatenwuhne** | Bus | *keine* |
+
+Eine Kette, die bewusst ohne Anschluss beginnt oder endet, fährt aus einem von ihnen aus oder in
+einen von ihnen ein — und *welcher* das ist, ist eine Auskunft, die die Marke allein nicht gibt.
+
+Kroatenwuhne ist zugleich der Beleg dafür, dass `depots` eine eigene Tabelle sein muss: Der Hof
+ist **keiner Haltestelle zugeordnet**. Als Haken an einer `stop_group` ließe er sich gar nicht
+führen.
+
+**`depots`**
+
+| Spalte | Typ | Anmerkung |
+|---|---|---|
+| `name` | varchar(120) | **unique** — „Nord" zweimal wäre an der Fahrt nicht auseinanderzuhalten |
+| `short_name` | varchar(16) NULL | Kurzform für enge Stellen; fehlt sie, trägt die Anzeige den vollen Namen |
+| `modes` | json NULL | leer = **alle** Verkehrsmittel; sonst `tram`/`bus` |
+| `active` | boolean | stillgelegt = aus der Auswahl, an alten Entscheidungen lesbar |
+| `note` | varchar NULL | |
+
+**`depot_stop_groups`** — `depot_id`, `stop_group_id`, unique auf beide zusammen.
+
+**Mehrere Haltestellen je Hof, und das ist der Regelfall.** Die Westerhüsener Ausrückfahrten
+beginnen fast immer an der **Schleswiger Straße**, nicht am Hof selbst: Der Weg dorthin ist eine
+Betriebsfahrt, die im Fahrplan gar nicht steht. Eine einzelne `stop_group_id` am Hof hätte genau
+den Normalfall verfehlt.
+
+Bewusst **kein** Unique auf `stop_group_id` allein: An einer Haltestelle können ein Tram- und ein
+Bushof hängen.
+
+#### Die Zuordnung setzt den Hof von selbst
+
+Wer an einer zugeordneten Haltestelle eine Fahrt als Betriebsfahrt markiert, bekommt den Hof
+gleich mitgesetzt. Das ist keine Bequemlichkeit, sondern folgt aus der Zuordnung: Wer an der
+Schleswiger Straße ausrücken lässt, meint Westerhüsen.
+
+**Geraten wird dabei nicht.** Der Hof bleibt offen, wenn
+
+- keiner an dieser Haltestelle hängt,
+- keiner das Verkehrsmittel der Fahrt aufnimmt,
+- der passende stillgelegt ist,
+- **oder mehrere passen.**
+
+Der letzte Fall ist der wichtigste: Eine offene Angabe ist als „noch offen" lesbar und lädt zur
+Pflege ein; ein zufällig gewählter Hof steht als Tatsache in den Daten und fällt niemandem auf.
+
+Ein ausdrückliches `depot_id: null` beim Anlegen heißt „bewusst offen" und unterdrückt die
+Automatik. Fehlt das Feld ganz — der übliche Weg aus dem Board —, greift sie.
+
+**Der Hof hängt an der Entscheidung, nicht am Kurs.** Das ist die eigentliche Festlegung hier:
+Aus- und Einrückhof sind **nicht zwangsläufig derselbe**. Ein Fahrzeug rückt morgens aus Nord aus
+und abends in Westerhüsen ein, wenn der Umlauf es dorthin trägt. Ein Feld am Kurs könnte das nicht
+ausdrücken; zwei Felder am Kurs wären eine Verdopplung der Marken, die es schon gibt.
+
+**Die Angabe ist freiwillig.** Beginnt eine Kette an einer Endstelle, steht der Hof oft nicht fest
+— ein erzwungener Wert wäre dort geraten, und Geratenes ist schlimmer als eine offene Angabe.
+Daraus folgen drei Zustände, die auseinanderzuhalten sind:
+
+| Zustand | Bedeutung |
+|---|---|
+| keine Marke | Der Umlauf beginnt oder endet ins Leere — **das ist die Lücke** |
+| Marke ohne Hof | Die Betriebsfahrt ist festgehalten, der Hof ist offen — gültiger Endzustand |
+| Marke mit Hof | vollständig |
+
+Fielen die ersten beiden zusammen, wäre eine gepflegte Betriebsfahrt von einem Pflegerückstand
+nicht zu unterscheiden — derselbe Grund, aus dem `start`/`end` überhaupt von „noch nicht gepflegt"
+getrennt sind (§1).
+
+**Warum eine eigene Tabelle und kein Haken an der Haltestelle.** Kroatenwuhne liegt an keiner —
+als Haken an einer `stop_group` ließe er sich gar nicht führen. Dazu kommt, dass die
+`stop_groups` beim Import über den Namen neu gebildet werden, ein Betriebshof aber gepflegtes
+Wissen ist und das überstehen soll. Und ein Hof kann mehrere Haltestellen haben, eine Haltestelle
+mehrere Höfe — das ist eine Beziehung, kein Feld.
+
+**Gelöscht wird nur, was niemand benutzt.** Hängt eine Entscheidung daran, antwortet der Endpunkt
+mit 409 und verweist aufs Stilllegen: Die Angabe „ausgerückt aus Nord" soll nicht verschwinden,
+nur weil der Hof heute nicht mehr betrieben wird.
+
+**Der Hof geht beim Versionswechsel mit** (K4): Ein Fahrplanwechsel ändert nicht, aus welchem Hof
+ein Umlauf ausrückt.
 
 **`courses`** — `period_id`, `day_type`, `number`, `note`. Index auf
 `(period_id, day_type, number)`, bewusst **kein** Unique (K3).

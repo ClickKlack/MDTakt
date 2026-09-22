@@ -1,4 +1,5 @@
 import api from './api'
+import type { DepotRef } from './depots'
 import type { FahrplanTyp } from './lines'
 
 /**
@@ -30,7 +31,8 @@ export type TripLinkKind = 'link' | 'start' | 'end'
  * Die an einer Fahrt getroffene Entscheidung.
  *
  * `null` heißt **noch nicht gepflegt** — ausdrücklich etwas anderes als `start`/`end`, die eine
- * bewusst offen gelassene Kette bezeichnen (Aus- bzw. Einrücken, Betriebsfahrt).
+ * bewusst offen gelassene Kette bezeichnen — die Betriebsfahrt aus dem bzw. in den Betriebshof
+ * (fachlich: Aus- bzw. Einrücken).
  */
 export interface StopLinkDecision {
   id: number
@@ -38,6 +40,11 @@ export interface StopLinkDecision {
   partner: StopLinkTrip | null
   /** Nur bei `kind: 'link'`. In Betriebstag-Sekunden — 24:50 → 25:10 ergibt 1200. */
   turnaround_seconds: number | null
+  /**
+   * Der Betriebshof — nur bei `start`/`end`, und auch dort freiwillig. `null` heißt **noch
+   * offen**, nicht „kein Hof": An einer Endstelle steht er oft nicht fest.
+   */
+  depot: DepotRef | null
   note: string | null
 }
 
@@ -95,6 +102,7 @@ export interface TripLinkResult {
   from_trip: StopLinkTrip | null
   to_trip: StopLinkTrip | null
   turnaround_seconds: number | null
+  depot: DepotRef | null
   note: string | null
   /** Hinweise, die die Verknüpfung **nicht** verhindern. */
   warnings: TripLinkWarning[]
@@ -111,6 +119,8 @@ export interface TripLinkInput {
   kind: TripLinkKind
   from_trip_id?: number | null
   to_trip_id?: number | null
+  /** Nur bei `start`/`end`. Meist wird erst markiert und der Hof danach nachgetragen. */
+  depot_id?: number | null
   note?: string | null
 }
 

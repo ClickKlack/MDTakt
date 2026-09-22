@@ -23,8 +23,10 @@ enum TripLinkKind: string
     {
         return match ($this) {
             self::Link => 'Anschluss',
-            self::Start => 'Beginnt hier (Ausrücken)',
-            self::End => 'Endet hier (Einrücken)',
+            // Die Richtung ausgeschrieben statt als Fachbegriff: „Einrücken" und „Ausrücken"
+            // sind im Betrieb eindeutig, in einer Meldung aber zu leicht zu verwechseln.
+            self::Start => 'Beginnt hier, aus dem Betriebshof',
+            self::End => 'Endet hier, in den Betriebshof',
         };
     }
 

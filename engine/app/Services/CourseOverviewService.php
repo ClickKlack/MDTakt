@@ -8,6 +8,7 @@ use App\Enums\FahrplanTyp;
 use App\Enums\TripLinkKind;
 use App\Models\Course;
 use App\Models\SchedulePeriod;
+use App\Support\DayRange;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -27,6 +28,8 @@ final class CourseOverviewService
     public function __construct(
         private readonly ConsolidatedTripInfoResolver $tripInfo,
         private readonly ConsolidatedTripStopsResolver $tripStops,
+        private readonly VersionStandService $stands,
+        private readonly TripLinkValidity $validity,
     ) {}
 
     /**
@@ -39,8 +42,13 @@ final class CourseOverviewService
      *
      * @return array<string, mixed>
      */
-    public function forLine(string $line, SchedulePeriod $period, FahrplanTyp $typ, bool $withStops = false): array
-    {
+    public function forLine(
+        string $line,
+        SchedulePeriod $period,
+        FahrplanTyp $typ,
+        bool $withStops = false,
+        ?int $standIndex = null,
+    ): array {
         $kurse = Course::query()
             ->where('period_id', $period->id)
             ->where('day_type', $typ->value)
@@ -50,7 +58,6 @@ final class CourseOverviewService
         $alleTripIds = array_merge(...array_values($zuordnungen)) ?: [];
 
         $info = $this->tripInfo->forIds($alleTripIds);
-        $anschluesse = $this->links($alleTripIds);
 
         // Einmal für alle Fahrten aller Umläufe — nicht je Kurs, sonst fragte dieselbe Linie
         // achtmal dieselbe Tabelle ab.
@@ -70,6 +77,37 @@ final class CourseOverviewService
 
         $marken = $this->terminals($alleTripIds);
 
+        // **Der Versionsstand.** Ein Umlauf verzweigt sich, wenn eine beteiligte Linie mitten in
+        // der Periode die Version wechselt: Vor dem Wechseltag fährt das Fahrzeug auf die eine
+        // Fahrt weiter, danach auf die andere (KURSE §3). Beide gehören demselben Kurs, aber nie
+        // demselben Tag — untereinander gezeigt sähe es aus, als führe das Fahrzeug beide.
+        //
+        // Gefaltet wird über die Versionen der Fahrten, die hier überhaupt erscheinen: die der
+        // Umläufe, die diese Linie berühren.
+        $beteiligt = [];
+
+        foreach ($zuordnungen as $kursId => $tripIds) {
+            if (! in_array($line, $linienJeKurs[$kursId] ?? [], true)) {
+                continue;
+            }
+
+            foreach ($tripIds as $id) {
+                if (isset($info[$id])) {
+                    $beteiligt[$info[$id]['line_version_id']] = true;
+                }
+            }
+        }
+
+        $staende = $this->stands->foldFor(array_keys($beteiligt), $typ);
+        $stand = $this->stands->pick($staende, $standIndex);
+        $aktiv = $stand === null ? null : array_flip($stand['line_version_ids']);
+        $zeitraum = $stand === null ? [] : $this->validity->forRanges($stand['ranges']);
+
+        // Auch die Anschlüsse: Einer, der nur in einem anderen Stand gilt, ist hier keiner —
+        // sonst stünde „verknüpft" an einer Stelle, an der das Fahrzeug an diesen Tagen gar
+        // nicht weiterfährt.
+        $anschluesse = $this->links($alleTripIds, $zeitraum);
+
         $ergebnis = [];
 
         foreach ($kurse as $kurs) {
@@ -84,6 +122,20 @@ final class CourseOverviewService
             // Nur Umläufe, die diese Linie berühren — ein Umlauf kann mehrere umfassen und
             // erscheint dann bei jeder von ihnen.
             if (! in_array($line, $linien, true)) {
+                continue;
+            }
+
+            // Erst jetzt auf den Stand beschneiden: Die Linien des Umlaufs sollen die des
+            // **ganzen** Umlaufs bleiben, sonst verschwände er aus einer Linie, nur weil er
+            // sie in diesem Stand nicht berührt.
+            if ($aktiv !== null) {
+                $fahrten = array_values(array_filter(
+                    $fahrten,
+                    static fn (array $f): bool => isset($aktiv[$f['line_version_id']]),
+                ));
+            }
+
+            if ($fahrten === []) {
                 continue;
             }
 
@@ -114,13 +166,15 @@ final class CourseOverviewService
 
         usort($ergebnis, static fn (array $a, array $b): int => strnatcmp($a['number'], $b['number']));
 
-        $offen = $this->unassigned($line, $period, $typ);
+        $offen = $this->unassigned($line, $period, $typ, $aktiv);
 
         return [
             'line' => $line,
             'period' => ['id' => $period->id, 'label' => $period->label, 'status' => $period->status->value],
             'day_type' => $typ->value,
             'day_type_label' => $typ->label(),
+            'stands' => $staende,
+            'stand' => $stand,
             'courses' => $ergebnis,
             'unassigned' => $offen,
             'summary' => [
@@ -216,9 +270,10 @@ final class CourseOverviewService
      *
      * @return array<int, array<string, mixed>>
      */
-    private function unassigned(string $line, SchedulePeriod $period, FahrplanTyp $typ): array
+    private function unassigned(string $line, SchedulePeriod $period, FahrplanTyp $typ, ?array $aktiv = null): array
     {
         $ids = DB::table('consolidated_trips as ct')
+            ->when($aktiv !== null, static fn ($q) => $q->whereIn('ct.line_version_id', array_keys($aktiv ?? [])))
             ->join('line_versions as lv', 'lv.id', '=', 'ct.line_version_id')
             ->leftJoin('course_trips as k', 'k.consolidated_trip_id', '=', 'ct.id')
             ->where('lv.period_id', $period->id)
@@ -260,21 +315,33 @@ final class CourseOverviewService
     }
 
     /**
-     * Bestehende Anschlüsse als Nachschlagewerk „A>B".
+     * Bestehende Anschlüsse als Nachschlagewerk „A>B" — mit `$zeitraum` nur die, die dort
+     * gelten.
      *
      * @param  array<int, int>  $tripIds
+     * @param  array<int, DayRange>  $zeitraum
      * @return array<string, bool>
      */
-    private function links(array $tripIds): array
+    private function links(array $tripIds, array $zeitraum = []): array
     {
         if ($tripIds === []) {
             return [];
         }
 
-        return DB::table('trip_links')
+        $zeilen = DB::table('trip_links')
             ->whereIn('from_trip_id', $tripIds)
             ->whereNotNull('to_trip_id')
-            ->get(['from_trip_id', 'to_trip_id'])
+            ->get(['from_trip_id', 'to_trip_id']);
+
+        if ($zeitraum !== []) {
+            $zeilen = $zeilen->filter(fn (object $l): bool => $this->validity->appliesIn(
+                (int) $l->from_trip_id,
+                (int) $l->to_trip_id,
+                $zeitraum,
+            ));
+        }
+
+        return $zeilen
             ->mapWithKeys(static fn (object $l): array => [$l->from_trip_id.'>'.$l->to_trip_id => true])
             ->all();
     }

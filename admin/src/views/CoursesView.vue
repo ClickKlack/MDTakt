@@ -16,7 +16,7 @@ import {
 import { FAHRPLAN_TYPEN, fetchLines, type FahrplanTyp, type Line } from '../services/lines'
 import { lineSortKey, lineTypeOrder } from '../utils/lineStyle'
 import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
-import { formatClock, formatDuration } from '../utils/timezone'
+import { formatClock, formatDate, formatDuration } from '../utils/timezone'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,6 +26,11 @@ const perioden = ref<SchedulePeriod[]>([])
 const uebersicht = ref<LineCourseOverview | null>(null)
 
 const gewaehlteLinie = ref<string | null>(null)
+/**
+ * Der Versionsstand. `null` = die Engine waehlt den, der heute enthaelt, sonst den letzten —
+ * dieselbe Regel wie im Anschlusseditor.
+ */
+const gewaehlterStand = ref<number | null>(null)
 const gewaehltePeriode = ref<number | null>(null)
 const dayType = ref<FahrplanTyp>('mo_fr')
 const nurUnvollstaendige = ref(false)
@@ -89,6 +94,7 @@ onMounted(async () => {
 
     // Auswahl aus der URL uebernehmen, damit eine Kursliste verlinkbar bleibt.
     gewaehlteLinie.value = (route.query.line as string) ?? linien.value[0]?.route_short_name ?? null
+    gewaehlterStand.value = route.query.stand === undefined ? null : Number(route.query.stand)
     gewaehltePeriode.value =
       Number(route.query.period) || p.find((periode) => periode.status === 'current')?.id || p[0]?.id || null
     dayType.value = ((route.query.day_type as FahrplanTyp) ?? 'mo_fr') as FahrplanTyp
@@ -115,14 +121,17 @@ async function lade(): Promise<void> {
     // Die Kennzahlen und die Fahrten ohne Kurs kommen immer aus der Uebersicht; die Tabelle
     // liegt auf einem eigenen Endpunkt und wird nur geholt, wenn sie gerade gezeigt wird.
     const [u, g] = await Promise.all([
-      fetchLineCourses(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value),
+      fetchLineCourses(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value, gewaehlterStand.value),
       ansicht.value === 'tabelle'
-        ? fetchCourseGrid(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value)
+        ? fetchCourseGrid(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value, gewaehlterStand.value)
         : Promise.resolve(null),
     ])
 
     uebersicht.value = u
     grid.value = g
+    // Die Engine hat den Stand gewaehlt, wenn keiner vorgegeben war — uebernehmen, damit der
+    // Wechsel der Ansicht nicht auf einen anderen faellt.
+    gewaehlterStand.value = u.stand?.index ?? null
 
     spiegelUrl()
   } catch {
@@ -141,6 +150,7 @@ function spiegelUrl(): void {
       line: gewaehlteLinie.value,
       period: gewaehltePeriode.value,
       day_type: dayType.value,
+      stand: gewaehlterStand.value ?? undefined,
       view: ansicht.value === 'tabelle' ? 'tabelle' : undefined,
     },
   })
@@ -222,9 +232,22 @@ function istRiss(trip: CourseChainTrip, index: number): boolean {
 }
 
 watch([gewaehlteLinie, gewaehltePeriode, dayType], () => {
-  if (!loading.value) {
-    void lade()
+  if (loading.value) {
+    return
   }
+  // Eine andere Linie oder ein anderer Strang hat eigene Versionsstaende — der alte Index
+  // benennt dort einen anderen Zeitraum oder gar keinen.
+  gewaehlterStand.value = null
+  grid.value = null
+  void lade()
+})
+
+watch(gewaehlterStand, (neu, alt) => {
+  if (loading.value || loadingKurse.value || neu === alt) {
+    return
+  }
+  grid.value = null
+  void lade()
 })
 </script>
 
@@ -288,6 +311,39 @@ watch([gewaehlteLinie, gewaehltePeriode, dayType], () => {
                 {{ typ.label }}
               </button>
             </div>
+          </div>
+        </div>
+
+        <!-- Versionsstände: nur nötig, wenn eine der beteiligten Linien in dieser Periode
+             mehr als einen Fahrplanstand hatte. -->
+        <div v-if="uebersicht && uebersicht.stands.length > 1" class="mt-4">
+          <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Versionsstand</label>
+          <p class="mt-1 max-w-3xl text-xs text-slate-500">
+            Wechselt eine beteiligte Linie mitten in der Periode den Fahrplan, verzweigt sich der Umlauf: Vor dem
+            Wechseltag fährt das Fahrzeug auf die eine Fahrt weiter, danach auf die andere. Beide gehören demselben
+            Kurs, aber nie demselben Tag — nebeneinander gezeigt sähe es aus, als führe es beide.
+          </p>
+          <div class="mt-1.5 flex flex-wrap gap-2">
+            <button
+              v-for="stand in uebersicht.stands"
+              :key="stand.index"
+              type="button"
+              class="rounded-md border px-3 py-1.5 text-sm transition"
+              :class="
+                gewaehlterStand === stand.index
+                  ? 'border-slate-800 bg-white font-medium text-slate-900'
+                  : 'border-slate-200 text-slate-600 hover:border-slate-400'
+              "
+              @click="gewaehlterStand = stand.index"
+            >
+              {{ formatDate(stand.valid_from) }} – {{ formatDate(stand.valid_to) }}
+              <span class="ml-1 text-xs text-slate-400">
+                {{ stand.line_count }} {{ stand.line_count === 1 ? 'Linie' : 'Linien' }}<template
+                  v-if="stand.ranges.length > 1"
+                  >, {{ stand.ranges.length }} Zeiträume</template
+                >
+              </span>
+            </button>
           </div>
         </div>
 

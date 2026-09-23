@@ -27,6 +27,8 @@ final class CourseGridResource extends JsonResource
             'period' => $this->resource['period'],
             'day_type' => $this->resource['day_type'],
             'day_type_label' => $this->resource['day_type_label'],
+            'stands' => $this->resource['stands'],
+            'stand' => $this->resource['stand'],
             'rows' => $this->resource['rows'],
             'courses' => $this->resource['courses'],
 

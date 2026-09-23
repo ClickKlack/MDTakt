@@ -1,5 +1,6 @@
 import api from './api'
 import type { DepotRef } from './depots'
+import type { StopLinkStand } from './stopLinks'
 import type { FahrplanTyp } from './lines'
 
 /**
@@ -126,6 +127,16 @@ export interface LineCourseOverview {
   period: { id: number; label: string; status: 'current' | 'frozen' }
   day_type: FahrplanTyp
   day_type_label: string
+  /**
+   * Die Versionsstände, über die sich die hier gezeigten Umläufe erstrecken.
+   *
+   * Nötig, seit eine Fahrt je Tag einen anderen Nachfolger haben darf: Wechselt eine beteiligte
+   * Linie mitten in der Periode die Version, verzweigt sich der Umlauf. Beide Zweige gehören
+   * demselben Fahrzeug, aber nie demselben Tag — untereinander gezeigt sähe es aus, als führe
+   * es beide.
+   */
+  stands: StopLinkStand[]
+  stand: StopLinkStand | null
   courses: CourseChain[]
   /** Fahrten dieser Linie, die zu keinem Umlauf gehören. */
   unassigned: CourseChainTrip[]
@@ -136,9 +147,10 @@ export async function fetchLineCourses(
   line: string,
   periodId: number,
   dayType: FahrplanTyp,
+  stand?: number | null,
 ): Promise<LineCourseOverview> {
   const { data } = await api.get(`/api/v1/admin/lines/${encodeURIComponent(line)}/courses`, {
-    params: { period: periodId, day_type: dayType },
+    params: { period: periodId, day_type: dayType, stand: stand ?? undefined },
   })
   return data.data
 }
@@ -192,6 +204,9 @@ export interface CourseGridColumn {
 
 export interface CourseGrid {
   line: string
+  /** Derselbe Versionsstand wie in der Kettenansicht — der Umschalter wechselt nur die Form. */
+  stands?: StopLinkStand[]
+  stand?: StopLinkStand | null
   period: { id: number; label: string; status: 'current' | 'frozen' }
   day_type: FahrplanTyp
   day_type_label: string
@@ -218,9 +233,10 @@ export async function fetchCourseGrid(
   line: string,
   periodId: number,
   dayType: FahrplanTyp,
+  stand?: number | null,
 ): Promise<CourseGrid> {
   const { data } = await api.get(`/api/v1/admin/lines/${encodeURIComponent(line)}/course-grid`, {
-    params: { period: periodId, day_type: dayType },
+    params: { period: periodId, day_type: dayType, stand: stand ?? undefined },
   })
   return data.data
 }

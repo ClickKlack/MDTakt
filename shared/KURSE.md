@@ -251,6 +251,21 @@ auf die der neuen Version weiterfährt, ändert nichts daran, dass es dasselbe F
 Nummer gilt für beide Zweige. Vorher fand die Kettenwanderung nur einen der beiden Nachfolger,
 und welchen, entschied die Reihenfolge der Datenbankzeilen; der andere Zweig blieb ohne Nummer.
 
+**Die Kursansicht bekommt denselben Versionsstand-Wähler wie der Anschlusseditor.** Sie zeigt
+einen Umlauf als *eine* Folge; verzweigt er sich, stünden Fahrten beider Versionen
+untereinander, als führe das Fahrzeug sie am selben Tag — und der Umlauf sähe doppelt so lang
+aus, wie er ist. Gefaltet wird über die Versionen der Fahrten, die dort überhaupt erscheinen:
+die der Umläufe, die diese Linie berühren. Auch die Anschlüsse werden beschnitten, sonst stünde
+„verknüpft" an einer Stelle, an der das Fahrzeug an diesen Tagen gar nicht weiterfährt.
+
+Die Faltung selbst ist dafür aus dem Haltestellen-Editor herausgelöst worden
+({@see VersionStandService}): Sie ist keine Sache eines Editors mehr, sondern eine eigene
+Ebene. Die Versionsmenge kommt vom Aufrufer — am Halt die Versionen, die ihn berühren, im
+Umlauf die der beteiligten Fahrten.
+
+Die **Linien** eines Umlaufs bleiben dabei die des ganzen Umlaufs, nicht die des Stands: Sonst
+verschwände er aus einer Linie, nur weil er sie in diesem Stand nicht berührt.
+
 Auch die **Zyklusprüfung** rechnet je Tag: Zwei Anschlüsse, die einander nie begegnen, können
 das Fahrzeug an keinem Tag im Kreis fahren lassen. Das ist eher Absicherung als häufiger Fall —
 ein Ring verlangt, dass jedes aufeinanderfolgende Paar gemeinsame Tage hat, und dann

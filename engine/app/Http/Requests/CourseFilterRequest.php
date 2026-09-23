@@ -23,6 +23,8 @@ final class CourseFilterRequest extends ApiFormRequest
             'period' => ['required', 'integer', 'exists:schedule_periods,id'],
             'day_type' => ['required', Rule::enum(FahrplanTyp::class)],
             'line' => ['nullable', 'string', 'max:255'],
+            // Ohne Angabe waehlt die Engine den Stand, der heute enthaelt — sonst den letzten.
+            'stand' => ['nullable', 'integer', 'min:0'],
         ];
     }
 
@@ -34,6 +36,13 @@ final class CourseFilterRequest extends ApiFormRequest
     public function dayType(): FahrplanTyp
     {
         return FahrplanTyp::from((string) $this->query('day_type'));
+    }
+
+    public function standIndex(): ?int
+    {
+        $wert = $this->query('stand');
+
+        return $wert === null || $wert === '' ? null : (int) $wert;
     }
 
     public function line(): ?string

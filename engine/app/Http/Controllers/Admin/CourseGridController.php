@@ -20,11 +20,11 @@ final class CourseGridController extends Controller
 {
     public function __construct(private readonly CourseGridService $grid) {}
 
-    /** GET /api/v1/admin/lines/{line}/course-grid?period=&day_type= */
+    /** GET /api/v1/admin/lines/{line}/course-grid?period=&day_type=&stand= */
     public function index(CourseFilterRequest $request, string $line): CourseGridResource
     {
         return CourseGridResource::make(
-            $this->grid->forLine($line, $request->period(), $request->dayType())
+            $this->grid->forLine($line, $request->period(), $request->dayType(), $request->standIndex())
         );
     }
 }

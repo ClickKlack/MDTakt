@@ -2588,6 +2588,20 @@ paths:
           in: query
           required: true
           schema: { $ref: '#/components/schemas/FahrplanTyp' }
+        - name: stand
+          in: query
+          required: false
+          description: >
+            Der Versionsstand. Ohne Angabe waehlt die Engine den, der heute enthaelt, sonst den
+            letzten.
+
+
+            Noetig, seit eine Fahrt je Tag einen anderen Nachfolger haben darf (KURSE §3):
+            Wechselt eine beteiligte Linie mitten in der Periode die Version, verzweigt sich der
+            Umlauf. Beide Zweige gehoeren demselben Kurs, aber nie demselben Tag — ohne die
+            Trennung stuenden ihre Fahrten untereinander, als fuehre das Fahrzeug sie am selben
+            Tag, und der Umlauf saehe doppelt so lang aus.
+          schema: { type: integer, minimum: 0 }
       responses:
         '200':
           description: Umlaeufe, Ketten und offene Fahrten
@@ -2734,6 +2748,11 @@ paths:
           in: query
           required: true
           schema: { $ref: '#/components/schemas/FahrplanTyp' }
+        - name: stand
+          in: query
+          required: false
+          description: Derselbe Versionsstand wie in der Kettenansicht — der Umschalter wechselt nur die Form.
+          schema: { type: integer, minimum: 0 }
       responses:
         '200':
           description: Zeilenachse, Spalten je Umlauf und die Fahrten ohne Kurs

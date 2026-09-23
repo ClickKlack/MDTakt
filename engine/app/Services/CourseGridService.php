@@ -47,9 +47,9 @@ final class CourseGridService
     /**
      * @return array<string, mixed>
      */
-    public function forLine(string $line, SchedulePeriod $period, FahrplanTyp $typ): array
+    public function forLine(string $line, SchedulePeriod $period, FahrplanTyp $typ, ?int $standIndex = null): array
     {
-        $uebersicht = $this->overview->forLine($line, $period, $typ, withStops: true);
+        $uebersicht = $this->overview->forLine($line, $period, $typ, withStops: true, standIndex: $standIndex);
 
         [$varianten, $spalten, $namen] = $this->collect($uebersicht['courses']);
 
@@ -429,6 +429,10 @@ final class CourseGridService
             'period' => $uebersicht['period'],
             'day_type' => $uebersicht['day_type'],
             'day_type_label' => $uebersicht['day_type_label'],
+            // Derselbe Versionsstand wie in der Kettenansicht: Der Umschalter soll die
+            // Darstellung wechseln, nicht den Ausschnitt.
+            'stands' => $uebersicht['stands'],
+            'stand' => $uebersicht['stand'],
             'rows' => $zeilen,
             'courses' => $spalten,
             'alignment_warning' => $warnung,

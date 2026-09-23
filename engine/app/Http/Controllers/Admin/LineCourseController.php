@@ -16,11 +16,16 @@ final class LineCourseController extends Controller
 {
     public function __construct(private readonly CourseOverviewService $overview) {}
 
-    /** GET /api/v1/admin/lines/{line}/courses?period=&day_type= */
+    /** GET /api/v1/admin/lines/{line}/courses?period=&day_type=&stand= */
     public function index(CourseFilterRequest $request, string $line): JsonResponse
     {
         return response()->json([
-            'data' => $this->overview->forLine($line, $request->period(), $request->dayType()),
+            'data' => $this->overview->forLine(
+                $line,
+                $request->period(),
+                $request->dayType(),
+                standIndex: $request->standIndex(),
+            ),
         ]);
     }
 }

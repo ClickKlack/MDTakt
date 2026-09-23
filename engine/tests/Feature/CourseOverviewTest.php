@@ -49,10 +49,12 @@ final class CourseOverviewTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    private function hole(string $linie): array
+    private function hole(string $linie, ?int $stand = null): array
     {
+        $abfrage = "period={$this->periode->id}&day_type=mo_fr".($stand === null ? '' : "&stand={$stand}");
+
         return $this->withToken($this->token())
-            ->getJson("/api/v1/admin/lines/{$linie}/courses?period={$this->periode->id}&day_type=mo_fr")
+            ->getJson("/api/v1/admin/lines/{$linie}/courses?{$abfrage}")
             ->assertOk()
             ->json('data');
     }
@@ -86,6 +88,75 @@ final class CourseOverviewTest extends TestCase
             ->getJson('/api/v1/admin/lines/1/courses')
             ->assertStatus(422)
             ->assertJsonPath('error.code', 422);
+    }
+
+    // ------------------------------------------- Versionsstand (KURSE §2 K7)
+
+    /**
+     * Verzweigt sich ein Umlauf am Versionswechsel einer beteiligten Linie, zeigt die Ansicht
+     * je Versionsstand nur den Zweig, der dort gilt.
+     *
+     * Ohne diese Trennung stuenden Fahrten beider Versionen untereinander, als fuehre das
+     * Fahrzeug sie am selben Tag — und der Umlauf saehe doppelt so lang aus, wie er ist.
+     */
+    public function test_a_branched_course_shows_one_branch_per_stand(): void
+    {
+        $zwei = $this->f->version('2', FahrplanTyp::MoFrNormal, 1, $this->periode);
+        $this->f->gueltigkeit($zwei, '2026-08-17', '2026-08-28');
+
+        $alt = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $this->periode);
+        $this->f->gueltigkeit($alt, '2026-08-17', '2026-08-21');
+
+        $neu = $this->f->version('13', FahrplanTyp::MoFrNormal, 2, $this->periode);
+        $this->f->gueltigkeit($neu, '2026-08-24', '2026-08-28');
+
+        $ankunft = $this->f->fahrt($zwei, ['A', 'B'], ['06:00:00', '06:42:00']);
+        $alteAbfahrt = $this->f->fahrt($alt, ['B', 'C'], ['06:44:00', '07:20:00']);
+        $neueAbfahrt = $this->f->fahrt($neu, ['B', 'C'], ['06:44:00', '07:20:00'], 'sig-neu');
+
+        $this->verknuepfe($ankunft, $alteAbfahrt);
+        $this->verknuepfe($ankunft, $neueAbfahrt);
+        $this->setzeKurs($ankunft, '03');
+
+        // Ohne Stand-Angabe waehlt die Engine einen — der Umlauf traegt dort zwei Fahrten,
+        // nicht drei.
+        $daten = $this->hole('2');
+
+        $this->assertCount(2, $daten['stands'], 'Der Versionswechsel muss zwei Staende ergeben.');
+        $this->assertNotNull($daten['stand']);
+        $this->assertSame(2, $daten['courses'][0]['trip_count']);
+
+        // Je Stand ein anderer Zweig — und nie beide.
+        $gesehen = [];
+
+        foreach ($daten['stands'] as $stand) {
+            $kurs = $this->hole('2', $stand['index'])['courses'][0];
+
+            $this->assertSame(2, $kurs['trip_count'], 'Stand '.$stand['index']);
+
+            $ids = array_column($kurs['trips'], 'id');
+            $this->assertContains($ankunft->id, $ids, 'Die durchgehende Fahrt steht in jedem Stand.');
+
+            $gesehen[] = in_array($alteAbfahrt->id, $ids, true) ? $alteAbfahrt->id : $neueAbfahrt->id;
+        }
+
+        $this->assertSame([$alteAbfahrt->id, $neueAbfahrt->id], $gesehen);
+    }
+
+    /** Ohne Versionswechsel gibt es genau einen Stand — die Ansicht bleibt, was sie war. */
+    public function test_a_single_version_yields_one_stand(): void
+    {
+        $version = $this->version();
+        $a = $this->f->fahrt($version, ['A', 'B'], ['06:00:00', '06:30:00']);
+        $b = $this->f->fahrt($version, ['B', 'A'], ['06:35:00', '07:05:00']);
+
+        $this->verknuepfe($a, $b);
+        $this->setzeKurs($a, '03');
+
+        $daten = $this->hole('1');
+
+        $this->assertCount(1, $daten['stands']);
+        $this->assertSame(2, $daten['courses'][0]['trip_count']);
     }
 
     // ---------------------------------------------------------------- Betriebshof (KURSE §3.2)

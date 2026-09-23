@@ -26,13 +26,18 @@ use App\Services\TripLinkService;
  * ohne einen Nachfolger zu haben; ein Ausrücken `to_trip_id`. Für die Kettenwanderung zählen nur
  * echte Anschlüsse, für die Frage „darf hier noch etwas dran?" auch die Betriebsfahrten. Der
  * Graph hält beides getrennt.
+ *
+ * **Eine Fahrt kann mehrere Nachfolger haben** — seit dem 23.09.2026, wenn sie an verschiedenen
+ * Tagen gelten (KURSE §3). Die Kanten stehen deshalb als Listen und tragen je ihre Tage. Ohne
+ * das überschriebe die zweite Kante die erste, und die Kettenwanderung fände je nach Reihenfolge
+ * der Zeilen eine andere Kette.
  */
 final class TripChainGraph
 {
-    /** @var array<int, int> from_trip_id => to_trip_id, nur echte Anschlüsse */
+    /** @var array<int, array<int, array<int, DayRange>>> from_trip_id => to_trip_id => Tage der Kante */
     private array $successors = [];
 
-    /** @var array<int, int> to_trip_id => from_trip_id */
+    /** @var array<int, array<int, array<int, DayRange>>> to_trip_id => from_trip_id => Tage der Kante */
     private array $predecessors = [];
 
     /** @var array<int, bool> Fahrten, deren `from_trip_id` bereits eine Zeile trägt (Anschluss oder Einrücken) */
@@ -42,8 +47,9 @@ final class TripChainGraph
     private array $incoming = [];
 
     /**
-     * @param  iterable<object|array{from_trip_id: int|null, to_trip_id: int|null}>  $rows
-     *                                                                                      Zeilen aus `trip_links`; `kind` wird nicht gebraucht, es folgt aus den NULL-Spalten.
+     * @param  iterable<object|array{from_trip_id: int|null, to_trip_id: int|null, days?: array<int, DayRange>}>  $rows
+     *                                                                                                                   Zeilen aus `trip_links`; `kind` wird nicht gebraucht, es folgt aus den NULL-Spalten.
+     *                                                                                                                   `days` sind die Tage der Kante — fehlen sie, gilt sie als immer wirksam.
      */
     public static function fromRows(iterable $rows): self
     {
@@ -55,7 +61,7 @@ final class TripChainGraph
             $von = $daten['from_trip_id'] === null ? null : (int) $daten['from_trip_id'];
             $nach = $daten['to_trip_id'] === null ? null : (int) $daten['to_trip_id'];
 
-            $graph->add($von, $nach);
+            $graph->add($von, $nach, $daten['days'] ?? []);
         }
 
         return $graph;
@@ -64,13 +70,18 @@ final class TripChainGraph
     /**
      * Trägt eine geplante Kante nach. Ab jetzt gilt sie für Zyklusprüfung und Belegung, als
      * stünde sie schon in der Datenbank.
+     *
+     * @param  array<int, DayRange>  $tage
      */
-    public function link(int $fromId, int $toId): void
+    public function link(int $fromId, int $toId, array $tage = []): void
     {
-        $this->add($fromId, $toId);
+        $this->add($fromId, $toId, $tage);
     }
 
-    private function add(?int $fromId, ?int $toId): void
+    /**
+     * @param  array<int, DayRange>  $tage
+     */
+    private function add(?int $fromId, ?int $toId, array $tage = []): void
     {
         if ($fromId !== null) {
             $this->outgoing[$fromId] = true;
@@ -81,19 +92,55 @@ final class TripChainGraph
         }
 
         if ($fromId !== null && $toId !== null) {
-            $this->successors[$fromId] = $toId;
-            $this->predecessors[$toId] = $fromId;
+            // Dieselbe Kante zweimal gibt es nicht; träte sie doch auf, gewänne die zuletzt
+            // eingetragene Tagesmenge — der Datenbankstand vor der geplanten Kante.
+            $this->successors[$fromId][$toId] = $tage;
+            $this->predecessors[$toId][$fromId] = $tage;
         }
     }
 
-    public function successorOf(int $tripId): ?int
+    /**
+     * Die Nachfolger dieser Fahrt — mit `$zeitraum` nur die, deren Kante ihn berührt.
+     *
+     * @param  array<int, DayRange>|null  $zeitraum
+     * @return array<int, int>
+     */
+    public function successorsOf(int $tripId, ?array $zeitraum = null): array
     {
-        return $this->successors[$tripId] ?? null;
+        return $this->nachbarn($this->successors[$tripId] ?? [], $zeitraum);
     }
 
-    public function predecessorOf(int $tripId): ?int
+    /**
+     * @param  array<int, DayRange>|null  $zeitraum
+     * @return array<int, int>
+     */
+    public function predecessorsOf(int $tripId, ?array $zeitraum = null): array
     {
-        return $this->predecessors[$tripId] ?? null;
+        return $this->nachbarn($this->predecessors[$tripId] ?? [], $zeitraum);
+    }
+
+    /**
+     * @param  array<int, array<int, DayRange>>  $kanten
+     * @param  array<int, DayRange>|null  $zeitraum
+     * @return array<int, int>
+     */
+    private function nachbarn(array $kanten, ?array $zeitraum): array
+    {
+        if ($zeitraum === null) {
+            return array_keys($kanten);
+        }
+
+        $treffer = [];
+
+        foreach ($kanten as $id => $tage) {
+            // Eine Kante ohne Tagesangabe gilt als immer wirksam — so verhalten sich Graphen,
+            // die ohne Gültigkeiten gebaut wurden, wie bisher.
+            if ($tage === [] || DayRange::overlap($tage, $zeitraum)) {
+                $treffer[] = $id;
+            }
+        }
+
+        return $treffer;
     }
 
     /** Hängt an dieser Fahrt schon eine Entscheidung darüber, was **danach** kommt? */
@@ -109,35 +156,39 @@ final class TripChainGraph
     }
 
     /**
-     * Alle Fahrten der Kette, zu der diese Fahrt gehört — Vorgänger zuerst.
+     * Alle Fahrten, die mit dieser über Anschlüsse zusammenhängen — sie selbst eingeschlossen.
      *
-     * Wie {@see TripLinkService::chainFor()}, nur ohne Datenbank. Das Gesehen-Set
-     * ist auch hier da: Ein Zyklus aus einem Altbestand darf die Abfrage nicht hängen lassen.
+     * **Eine Menge, keine Folge.** Solange jede Fahrt höchstens einen Nachfolger hatte, war die
+     * Kette eine Kette und ließ sich „Vorgänger zuerst" aufzählen. Seit eine Fahrt je Tag einen
+     * anderen Nachfolger haben darf, verzweigt sie sich: Über den Versionswechsel einer
+     * Nachbarlinie hinweg gehören beide Zweige demselben Fahrzeug, aber nie demselben Tag. Wer
+     * eine Reihenfolge braucht, muss einen Zeitraum vorgeben — dann ist sie wieder eindeutig.
      *
-     * @return array<int, int>
+     * @param  array<int, DayRange>|null  $zeitraum  nur Kanten, die ihn berühren
+     * @return array<int, int> aufsteigend nach Fahrt-Id, damit dieselbe Kette denselben Wert liefert
      */
-    public function chainOf(int $tripId): array
+    public function chainOf(int $tripId, ?array $zeitraum = null): array
     {
-        $rueckwaerts = [];
         $gesehen = [$tripId => true];
-        $aktuell = $tripId;
+        $offen = [$tripId];
 
-        while (($vorher = $this->predecessorOf($aktuell)) !== null && ! isset($gesehen[$vorher])) {
-            array_unshift($rueckwaerts, $vorher);
-            $gesehen[$vorher] = true;
-            $aktuell = $vorher;
+        while ($offen !== []) {
+            $aktuell = array_pop($offen);
+
+            foreach ([...$this->successorsOf($aktuell, $zeitraum), ...$this->predecessorsOf($aktuell, $zeitraum)] as $nachbar) {
+                if (isset($gesehen[$nachbar])) {
+                    continue;
+                }
+
+                $gesehen[$nachbar] = true;
+                $offen[] = $nachbar;
+            }
         }
 
-        $vorwaerts = [];
-        $aktuell = $tripId;
+        $ids = array_keys($gesehen);
+        sort($ids);
 
-        while (($danach = $this->successorOf($aktuell)) !== null && ! isset($gesehen[$danach])) {
-            $vorwaerts[] = $danach;
-            $gesehen[$danach] = true;
-            $aktuell = $danach;
-        }
-
-        return [...$rueckwaerts, $tripId, ...$vorwaerts];
+        return $ids;
     }
 
     /**
@@ -145,23 +196,43 @@ final class TripChainGraph
      *
      * Ein Umlauf ist eine Folge, kein Kreis — ein Fahrzeug fährt einen Betriebstag von vorn nach
      * hinten durch. Ohne diese Prüfung wäre die Kette nicht mehr auslesbar.
+     *
+     * **An einem Tag, nicht über alle hinweg.** Verfolgt werden nur Kanten, die die Tage der
+     * neuen berühren. Zwei Kanten, die einander nie begegnen, bilden keinen Ring: Sie gehören zu
+     * verschiedenen Fahrplanständen, und das Fahrzeug fährt an keinem Tag im Kreis.
+     *
+     * In der Praxis ist das eher Absicherung als häufiger Fall: Ein Ring verlangt, dass jedes
+     * aufeinanderfolgende Paar gemeinsame Tage hat, und dann überschneiden sich meist auch
+     * seine Enden. Die Einschränkung kostet nichts und verhindert, dass ein Anschluss an einem
+     * Ring scheitert, den es an keinem Tag gibt.
+     *
+     * @param  array<int, DayRange>  $tage  Tage der neuen Kante; leer heißt „ohne Einschränkung"
      */
-    public function wouldCreateCycle(int $fromId, int $toId): bool
+    public function wouldCreateCycle(int $fromId, int $toId, array $tage = []): bool
     {
         if ($fromId === $toId) {
             return true;
         }
 
-        $aktuell = $toId;
+        $zeitraum = $tage === [] ? null : $tage;
         $gesehen = [$toId => true];
+        $offen = [$toId];
 
-        while (($danach = $this->successorOf($aktuell)) !== null) {
-            if ($danach === $fromId || isset($gesehen[$danach])) {
-                return true;
+        while ($offen !== []) {
+            $aktuell = array_pop($offen);
+
+            foreach ($this->successorsOf($aktuell, $zeitraum) as $danach) {
+                if ($danach === $fromId) {
+                    return true;
+                }
+
+                if (isset($gesehen[$danach])) {
+                    continue;
+                }
+
+                $gesehen[$danach] = true;
+                $offen[] = $danach;
             }
-
-            $gesehen[$danach] = true;
-            $aktuell = $danach;
         }
 
         return false;

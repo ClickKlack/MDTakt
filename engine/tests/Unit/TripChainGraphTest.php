@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use App\Support\DayRange;
 use App\Support\TripChainGraph;
 use PHPUnit\Framework\TestCase;
 
@@ -50,11 +51,56 @@ final class TripChainGraphTest extends TestCase
         ]);
 
         $this->assertTrue($graph->hasOutgoingDecision(1));
-        $this->assertNull($graph->successorOf(1));
+        $this->assertSame([], $graph->successorsOf(1));
         $this->assertSame([1], $graph->chainOf(1));
 
         $this->assertTrue($graph->hasIncomingDecision(2));
-        $this->assertNull($graph->predecessorOf(2));
+        $this->assertSame([], $graph->predecessorsOf(2));
+    }
+
+    /**
+     * Eine Fahrt darf mehrere Nachfolger haben, wenn sie an verschiedenen Tagen gelten
+     * (KURSE §3). Ohne Zeitraum gehören beide zur Kette — es ist dasselbe Fahrzeug. Mit
+     * Zeitraum bleibt der, der dort gilt.
+     */
+    public function test_a_trip_may_have_two_successors_on_different_days(): void
+    {
+        $erste = [DayRange::fromStrings('2026-08-17', '2026-08-21')];
+        $zweite = [DayRange::fromStrings('2026-08-24', '2026-08-28')];
+
+        $graph = $this->graph([
+            ['from_trip_id' => 1, 'to_trip_id' => 2, 'days' => $erste],
+            ['from_trip_id' => 1, 'to_trip_id' => 3, 'days' => $zweite],
+        ]);
+
+        // Beide Kanten stehen nebeneinander — die zweite ueberschreibt die erste nicht.
+        $this->assertSame([2, 3], $graph->successorsOf(1));
+        $this->assertSame([1, 2, 3], $graph->chainOf(1));
+
+        $this->assertSame([2], $graph->successorsOf(1, $erste));
+        $this->assertSame([1, 2], $graph->chainOf(1, $erste));
+        $this->assertSame([1, 3], $graph->chainOf(1, $zweite));
+    }
+
+    /**
+     * Zwei Kanten, die einander nie begegnen, bilden keinen Ring: Sie gehoeren zu
+     * verschiedenen Fahrplanstaenden, und das Fahrzeug faehrt an keinem Tag im Kreis.
+     */
+    public function test_edges_on_disjoint_days_do_not_form_a_ring(): void
+    {
+        $erste = [DayRange::fromStrings('2026-08-17', '2026-08-21')];
+        $zweite = [DayRange::fromStrings('2026-08-24', '2026-08-28')];
+
+        $graph = $this->graph([['from_trip_id' => 2, 'to_trip_id' => 1, 'days' => $erste]]);
+
+        // Ohne Tagesangabe bleibt es beim bisherigen, vorsichtigen Verhalten.
+        $this->assertTrue($graph->wouldCreateCycle(1, 2));
+
+        // An den Tagen der neuen Kante gilt die bestehende nicht — kein Ring.
+        $this->assertFalse($graph->wouldCreateCycle(1, 2, $zweite));
+
+        // An denselben Tagen dagegen schon.
+        $this->assertTrue($graph->wouldCreateCycle(1, 2, $erste));
     }
 
     public function test_a_planned_link_is_visible_to_later_checks(): void

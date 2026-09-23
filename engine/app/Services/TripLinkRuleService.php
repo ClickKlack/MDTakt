@@ -48,6 +48,7 @@ final class TripLinkRuleService
     public function __construct(
         private readonly StopGroupService $groups,
         private readonly TripLinkService $links,
+        private readonly TripLinkValidity $validity,
     ) {}
 
     /**
@@ -156,9 +157,13 @@ final class TripLinkRuleService
             );
         }
 
+        // An den Tagen der **neuen** Kante, nicht über alle hinweg: Zwei Anschlüsse, die
+        // einander nie begegnen, bilden keinen Ring (KURSE §3).
+        $tage = $this->validity->forLink($from->id, $to->id);
+
         $ring = $graph === null
-            ? $this->links->wouldCreateCycle($from->id, $to->id)
-            : $graph->wouldCreateCycle($from->id, $to->id);
+            ? $this->links->wouldCreateCycle($from->id, $to->id, $tage)
+            : $graph->wouldCreateCycle($from->id, $to->id, $tage);
 
         if ($ring) {
             return $this->grund(

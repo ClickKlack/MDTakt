@@ -163,6 +163,47 @@ final class TripLinkTest extends TestCase
     }
 
     /**
+     * **Die Kursnummer gilt für beide Zweige.** Sie ist das Etikett am Fahrzeug, nicht am
+     * einzelnen Fahrplanstand (KURSE §2 K2): Ob der Umlauf vor dem Versionswechsel auf die 13
+     * der alten und danach auf die der neuen Version weiterfährt, ändert nichts daran, dass es
+     * dasselbe Fahrzeug ist.
+     *
+     * Vorher fand `chainFor()` nur einen der beiden Nachfolger — welchen, entschied die
+     * Reihenfolge der Datenbankzeilen. Der andere Zweig blieb ohne Nummer.
+     */
+    public function test_the_course_covers_both_branches_of_a_split_chain(): void
+    {
+        $periode = $this->f->periode();
+
+        $zwei = $this->f->version('2', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($zwei, '2026-08-17', '2026-08-28');
+
+        $alt = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($alt, '2026-08-17', '2026-08-21');
+
+        $neu = $this->f->version('13', FahrplanTyp::MoFrNormal, 2, $periode);
+        $this->f->gueltigkeit($neu, '2026-08-24', '2026-08-28');
+
+        $ankunft = $this->f->fahrt($zwei, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:42:00']);
+        $alteAbfahrt = $this->f->fahrt($alt, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00']);
+        $neueAbfahrt = $this->f->fahrt($neu, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00'], 'sig-neu');
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $ankunft->id, 'to_trip_id' => $alteAbfahrt->id])
+            ->assertCreated();
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $ankunft->id, 'to_trip_id' => $neueAbfahrt->id])
+            ->assertCreated();
+
+        $this->withToken($this->token())
+            ->putJson("/api/v1/admin/consolidated-trips/{$ankunft->id}/course", ['number' => '03'])
+            ->assertOk()
+            ->assertJsonPath('data.trips_assigned', 3);
+
+        foreach ([$ankunft, $alteAbfahrt, $neueAbfahrt] as $fahrt) {
+            $this->assertDatabaseHas('course_trips', ['consolidated_trip_id' => $fahrt->id]);
+        }
+    }
+
+    /**
      * An denselben Tagen bleibt es bei einem Nachfolger — die Fachregel gilt unverändert, nur
      * je Tag statt je Fahrt.
      */

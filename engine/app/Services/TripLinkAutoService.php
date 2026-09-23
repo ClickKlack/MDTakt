@@ -49,6 +49,7 @@ final class TripLinkAutoService
         private readonly TripLinkRuleService $rules,
         private readonly TripLinkService $links,
         private readonly CourseService $courses,
+        private readonly TripLinkValidity $validity,
     ) {}
 
     /**
@@ -228,7 +229,7 @@ final class TripLinkAutoService
             }
 
             $verplant[$partner['id']] = true;
-            $graph->link($fahrt['id'], $partner['id']);
+            $graph->link($fahrt['id'], $partner['id'], $this->validity->forLink($fahrt['id'], $partner['id']));
 
             $wende = $partner['departure_sort'] - $fahrt['arrival_sort'];
 

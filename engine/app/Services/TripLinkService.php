@@ -10,6 +10,7 @@ use App\Http\Requests\TripLinkRequest;
 use App\Models\ConsolidatedTrip;
 use App\Models\Depot;
 use App\Models\TripLink;
+use App\Support\DayRange;
 use App\Support\TripChainGraph;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -27,6 +28,7 @@ final class TripLinkService
     public function __construct(
         private readonly ConsolidatedTripInfoResolver $tripInfo,
         private readonly DepotService $depots,
+        private readonly TripLinkValidity $validity,
     ) {}
 
     /**
@@ -264,35 +266,27 @@ final class TripLinkService
     }
 
     /**
-     * Alle Fahrten der Kette, zu der diese Fahrt gehört — Vorgänger zuerst.
+     * Alle Fahrten, die mit dieser über Anschlüsse zusammenhängen — sie selbst eingeschlossen.
      *
-     * @return array<int, int> `consolidated_trips.id` in Fahrreihenfolge
+     * **Eine Menge, keine Folge.** Solange jede Fahrt höchstens einen Nachfolger hatte, war die
+     * Kette eine Kette. Seit sie je Tag einen anderen haben darf (KURSE §3), verzweigt sie
+     * sich: Über den Versionswechsel einer Nachbarlinie hinweg gehören beide Zweige demselben
+     * Fahrzeug, aber nie demselben Tag.
+     *
+     * Und beide gehören zum selben Kurs — die Nummer ist das Etikett am Fahrzeug, nicht am
+     * einzelnen Fahrplanstand (K2). Wer eine Reihenfolge oder einen Stand braucht, gibt einen
+     * Zeitraum vor.
+     *
+     * Früher wanderte diese Abfrage je Kettensprung einzeln durch die Datenbank und folgte
+     * dabei einem beliebigen der Nachfolger — bei mehreren fand sie je nach Zeilenreihenfolge
+     * eine andere Kette. Jetzt baut sie denselben Graphen auf, den auch die Mengen-Läufe nutzen.
+     *
+     * @param  array<int, DayRange>|null  $zeitraum  nur Anschlüsse, die ihn berühren
+     * @return array<int, int> `consolidated_trips.id`, aufsteigend
      */
-    public function chainFor(ConsolidatedTrip $trip): array
+    public function chainFor(ConsolidatedTrip $trip, ?array $zeitraum = null): array
     {
-        $rueckwaerts = [];
-        $aktuell = $trip->id;
-        $gesehen = [$trip->id => true];
-
-        // Die Unique-Constraints schließen Mehrfachkanten aus, `wouldCreateCycle()` die
-        // Ringe. Das Gesehen-Set ist trotzdem da: Ein Zyklus aus einem Altbestand darf
-        // die Abfrage hängen lassen können.
-        while (($vorher = $this->predecessorOf($aktuell)) !== null && ! isset($gesehen[$vorher])) {
-            array_unshift($rueckwaerts, $vorher);
-            $gesehen[$vorher] = true;
-            $aktuell = $vorher;
-        }
-
-        $vorwaerts = [];
-        $aktuell = $trip->id;
-
-        while (($danach = $this->successorOf($aktuell)) !== null && ! isset($gesehen[$danach])) {
-            $vorwaerts[] = $danach;
-            $gesehen[$danach] = true;
-            $aktuell = $danach;
-        }
-
-        return [...$rueckwaerts, $trip->id, ...$vorwaerts];
+        return $this->graphFor([$trip->id])->chainOf($trip->id, $zeitraum);
     }
 
     /**
@@ -334,6 +328,13 @@ final class TripLinkService
                     }
 
                     $gesehene[$zeile->id] = true;
+                    // Die Tage der Kante: Ohne sie könnte der Graph zwei Anschlüsse derselben
+                    // Fahrt nicht auseinanderhalten, und die Zyklusprüfung wiese einen Ring ab,
+                    // dessen Kanten einander nie begegnen.
+                    $zeile->days = $this->validity->forLink(
+                        $zeile->from_trip_id === null ? null : (int) $zeile->from_trip_id,
+                        $zeile->to_trip_id === null ? null : (int) $zeile->to_trip_id,
+                    );
                     $zeilen[] = $zeile;
 
                     foreach ([$zeile->from_trip_id, $zeile->to_trip_id] as $partner) {
@@ -360,48 +361,8 @@ final class TripLinkService
      * Ein Umlauf ist eine Folge, kein Kreis — ein Fahrzeug fährt einen Betriebstag von vorn
      * nach hinten durch. Ohne diese Prüfung wäre die Kette nicht mehr auslesbar.
      */
-    public function wouldCreateCycle(int $fromId, int $toId): bool
+    public function wouldCreateCycle(int $fromId, int $toId, array $tage = []): bool
     {
-        if ($fromId === $toId) {
-            return true;
-        }
-
-        $aktuell = $toId;
-        $gesehen = [$toId => true];
-
-        while (($danach = $this->successorOf($aktuell)) !== null) {
-            if ($danach === $fromId) {
-                return true;
-            }
-
-            if (isset($gesehen[$danach])) {
-                return true;
-            }
-
-            $gesehen[$danach] = true;
-            $aktuell = $danach;
-        }
-
-        return false;
-    }
-
-    private function successorOf(int $tripId): ?int
-    {
-        $wert = DB::table('trip_links')
-            ->where('from_trip_id', $tripId)
-            ->whereNotNull('to_trip_id')
-            ->value('to_trip_id');
-
-        return $wert === null ? null : (int) $wert;
-    }
-
-    private function predecessorOf(int $tripId): ?int
-    {
-        $wert = DB::table('trip_links')
-            ->where('to_trip_id', $tripId)
-            ->whereNotNull('from_trip_id')
-            ->value('from_trip_id');
-
-        return $wert === null ? null : (int) $wert;
+        return $this->graphFor([$fromId, $toId])->wouldCreateCycle($fromId, $toId, $tage);
     }
 }

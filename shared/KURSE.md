@@ -239,6 +239,23 @@ Versionen laufen darüber hinaus. Am City Carré umfasst der Stand 12.10.–15.1
 von denen drei die ganze Periode über gelten — ihre Vereinigung wäre der ganze Zeitraum und
 träfe jeden Anschluss.
 
+**Die Kette ist dadurch eine Menge geworden, keine Folge.** Solange jede Fahrt höchstens einen
+Nachfolger hatte, ließ sie sich „Vorgänger zuerst" aufzählen. Jetzt verzweigt sie sich am
+Versionswechsel — beide Zweige gehören demselben Fahrzeug, aber nie demselben Tag. `chainFor()`
+liefert deshalb alle zusammenhängenden Fahrten; wer eine Reihenfolge oder einen einzelnen Stand
+braucht, gibt einen Zeitraum vor.
+
+Für den **Kurs** ist die Menge das Richtige: Die Nummer ist das Etikett am Fahrzeug, nicht am
+einzelnen Fahrplanstand (K2). Ob der Umlauf vor dem Wechseltag auf die 13 der alten und danach
+auf die der neuen Version weiterfährt, ändert nichts daran, dass es dasselbe Fahrzeug ist — die
+Nummer gilt für beide Zweige. Vorher fand die Kettenwanderung nur einen der beiden Nachfolger,
+und welchen, entschied die Reihenfolge der Datenbankzeilen; der andere Zweig blieb ohne Nummer.
+
+Auch die **Zyklusprüfung** rechnet je Tag: Zwei Anschlüsse, die einander nie begegnen, können
+das Fahrzeug an keinem Tag im Kreis fahren lassen. Das ist eher Absicherung als häufiger Fall —
+ein Ring verlangt, dass jedes aufeinanderfolgende Paar gemeinsame Tage hat, und dann
+überschneiden sich meist auch seine Enden.
+
 Dieselbe Rechnung trägt die Zahlen: die je Stand, und die in der Auswahlliste. Dort gilt eine
 Fahrt als offen, solange ihre Anschlüsse nicht **alle** ihre Tage abdecken — auch wenn schon
 einer dranhängt. Nach der alten Zählung sähe eine Fahrt, die nach einem Versionswechsel einen

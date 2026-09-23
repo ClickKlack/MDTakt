@@ -228,21 +228,21 @@ Eintagsstände dieser Art sind kein Ausnahmefall, sondern die Folge des offenen 
 „Nachtverkehr folgt eigenem Rhythmus" (ROADMAP): Die Nacht eines Betriebstags folgt nicht seinem
 Fahrplantyp, sondern der Frage, ob der Folgetag ein Ruhetag ist.
 
-**Ein Anschluss kann auf eine Fahrt zeigen, die im gezeigten Stand nicht fährt.** Das entsteht,
-wenn eine **einzelne** Linie mitten in der Periode die Version wechselt: Am City Carré tut das
-die 13, die 1, 2 und 5 nicht. Ein Anschluss 2 → 13, im vorigen Stand gesetzt, hängt danach an
-einer 13er-Fahrt der alten Version — während die Fahrt der neuen Version daneben unentschieden
-steht. Der Anschluss ist dabei nicht falsch: Als er gesetzt wurde, galten beide Versionen
-gleichzeitig (§4 prüft genau das).
+**Je Versionsstand gilt höchstens eine Entscheidung je Fahrt.** Seit eine Fahrt mehrere
+Anschlüsse tragen darf (§3), ist die Anzeige eine Auswahl: Der Editor zeigt den Anschluss, der
+die Tage *dieses* Stands berührt. Gilt hier keiner, erscheint die Fahrt **offen** — und genau
+das ist sie auch, denn an diesen Tagen fehlt ihr Nachfolger.
 
-Das Board zeigt diesen Zustand ausdrücklich an — violette Marke, Nennung der Gegenfahrt, dazu
-„Lösen" —, und über dem Board steht, wie viele es sind. Vorher war die Karte nur gedämpft und
-stumm: eine Entscheidung ohne sichtbaren Partner, ohne Wendezeit, ohne Bedienung. Nebenan stand
-die unentschiedene Fahrt der neuen Version, und der Unterschied war nicht zu erklären.
+Maßgeblich sind dabei die Zeiträume des Stands, **nicht** die Vereinigung der Gültigkeiten
+seiner Versionen: Ein Stand ist der Abschnitt, in dem genau diese Versionsmenge gilt, und seine
+Versionen laufen darüber hinaus. Am City Carré umfasst der Stand 12.10.–15.10. vier Versionen,
+von denen drei die ganze Periode über gelten — ihre Vereinigung wäre der ganze Zeitraum und
+träfe jeden Anschluss.
 
-Der Weg heraus ist die **Übernahme auf die neue Version** (K4), nicht das Lösen von Hand: Sie
-trägt Kursnummer und Anschlüsse auf die Fahrten der neuen Version und meldet, was dabei liegen
-bleibt.
+Dieselbe Rechnung trägt die Zahlen: die je Stand, und die in der Auswahlliste. Dort gilt eine
+Fahrt als offen, solange ihre Anschlüsse nicht **alle** ihre Tage abdecken — auch wenn schon
+einer dranhängt. Nach der alten Zählung sähe eine Fahrt, die nach einem Versionswechsel einen
+zweiten braucht, fertig aus, und die Haltestelle verschwände aus der Arbeitsliste.
 
 #### Der Tauschpunkt — dort entscheidet der Halt, nicht die Zeit
 
@@ -387,8 +387,8 @@ sie ordnet nur zu, was noch keiner Haltestelle angehört.
 
 | Spalte | Typ | Anmerkung |
 |---|---|---|
-| `from_trip_id` | bigint NULL → `consolidated_trips` | **unique** |
-| `to_trip_id` | bigint NULL → `consolidated_trips` | **unique** |
+| `from_trip_id` | bigint NULL → `consolidated_trips` | indiziert; **kein** Unique mehr, siehe unten |
+| `to_trip_id` | bigint NULL → `consolidated_trips` | indiziert; **kein** Unique mehr, siehe unten |
 | `stop_id` | bigint → `consolidated_stops` | wo der Übergang stattfindet |
 | `kind` | varchar(8) | `link` \| `start` \| `end` |
 | `depot_id` | bigint NULL → `depots` | nur bei `start`/`end`, und auch dort **freiwillig** (§3.2) |
@@ -398,10 +398,59 @@ sie ordnet nur zu, was noch keiner Haltestelle angehört.
 - `kind=start` — nur `to_trip_id`: Ausrücken.
 - `kind=end` — nur `from_trip_id`: Einrücken.
 
-Die beiden Unique-Constraints **sind** die Fachregel: Ein Fahrzeug hat höchstens einen Nachfolger
-und höchstens einen Vorgänger. `NULL` gilt in SQL als ungleich zu `NULL` — in PostgreSQL wie in
-SQLite —, beliebig viele Fahrten dürfen also „ohne Vorgänger" sein. `kind` ist aus den NULL-Spalten
-ableitbar und wird trotzdem gespeichert: Es macht Abfragen und Absicht lesbar.
+`kind` ist aus den NULL-Spalten ableitbar und wird trotzdem gespeichert: Es macht Abfragen und
+Absicht lesbar.
+
+#### Die Fachregel gilt je Tag, nicht je Fahrt
+
+**Entschieden 23.09.2026.** Bis dahin trugen `from_trip_id` und `to_trip_id` je einen
+Unique-Constraint: Ein Fahrzeug hat höchstens einen Nachfolger und höchstens einen Vorgänger.
+Das stimmt **an einem Tag** — aber eine Fahrt lebt über viele Tage, und die fallen in
+verschiedene Versionsstände.
+
+Der Fall, an dem es aufbrach: Am City Carré wechselt die 13 mitten in der Periode die Version,
+die 1, 2 und 5 nicht.
+
+```
+Fahrt 27886   Linie 2 v1   gültig 21.09. – 15.10.   kommt 04:42 an
+  └ verknüpft mit 13 v1 (gültig 21.09. – 09.10.)
+
+→ an den Tagen 12.10. – 15.10. hat sie keinen Nachfolger
+→ real fährt dasselbe Fahrzeug weiter, auf die 13 der neuen Version
+→ die stand offen daneben und ließ sich nicht verknüpfen
+```
+
+Die Constraints sind deshalb gefallen. An ihre Stelle tritt eine Überschneidungsprüfung
+({@see TripLinkValidity}): **Zwei Anschlüsse an derselben Fahrt sind erlaubt, solange sie sich
+an keinem Tag berühren.** Die Regel gilt unverändert, nur je Tag.
+
+Die Gültigkeit eines Anschlusses ist der **Schnitt** der Intervalle beider Linien-Versionen —
+das Fahrzeug kann nur weiterfahren, wenn beide Fahrten an diesem Tag stattfinden. Bei einer
+Betriebsfahrt (`start`/`end`) sind es die Tage der einen beteiligten Fahrt; sie belegt ihre
+Seite genauso, denn das Fahrzeug fährt nicht zugleich in den Hof und weiter.
+
+**Gerechnet wird in Betriebstagen.** `line_version_intervals` steht bereits darin: Eine
+N1-Fahrt um 01:45 läuft kalendarisch am Samstag, ihr Intervall nennt den Freitag, weil die
+Betriebstag-Grenze der Nachtlinien bei 12:00 liegt (FAHRPLANPERIODEN §10). Für einen Anschluss
+vom Tag- aufs Nachtnetz ist das wesentlich: Beide Seiten tragen denselben Betriebstag, und nur
+deshalb ist ihr Schnitt aussagekräftig. Kalendarisch gerechnet läge jeder solche Anschluss um
+einen Tag daneben.
+
+**Gerechnet wird auf den Tagen, an denen der Fahrplantyp gilt — nicht auf der Spanne.**
+`line_version_intervals` trägt Zeiträume: Eine `mo_fr`-Version vom 21.09. bis 15.10. schließt
+vier Wochenenden ein, an denen sie nicht gilt. Ohne diesen Schnitt meldete die Deckungsrechnung
+ausgerechnet dort eine Lücke, wo die Pflege vollständig ist — grenzen zwei Versionen einer
+Nachbarlinie am Freitag und am Montag aneinander, sähe der Samstag dazwischen aus wie ein Tag
+ohne Nachfolger. Dieselbe Beschneidung wie beim Versionsstand, und aus demselben Grund.
+
+**Warum die Datenbank das nicht selbst erzwingt:** Die Gültigkeit hängt an
+`line_version_intervals`, und die ändern sich mit jedem Import. Ein Ausschluss-Constraint
+darüber bräche beim nächsten Feed.
+
+Am Bestand gemessen (875 Anschlüsse): 8 ließen die endende Fahrt an manchen Tagen ohne
+Nachfolger, 4 die beginnende ohne Vorgänger. Zwei Haltestellen betroffen — aber **83**
+Linie/Typ/Perioden-Kombinationen haben mehr als eine Version, und genau dort entsteht der Fall,
+sobald zwei benachbarte Linien zu verschiedenen Zeitpunkten wechseln.
 
 ### 3.2 Der Betriebshof
 

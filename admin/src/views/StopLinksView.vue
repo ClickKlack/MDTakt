@@ -93,45 +93,6 @@ const verborgen = computed(() => {
   return imFilter.length - gefiltert.value.length
 })
 
-/**
- * Anschluesse, deren Gegenfahrt in diesem Versionsstand nicht faehrt.
- *
- * Entsteht beim Versionswechsel einer einzelnen Linie: Am City Carre wechselt die 13 mitten in
- * der Periode, die 1, 2 und 5 nicht. Ein Anschluss 2 → 13 aus dem vorigen Stand zeigt danach
- * auf eine Fahrt, die hier nicht mehr faehrt, waehrend die Fahrt der neuen Version daneben
- * unentschieden steht. Ohne diese Zeile muesste man den Fall in 297 Zeilen suchen.
- */
-const anschluesseAndererVersion = computed(() => {
-  if (board.value === null) {
-    return 0
-  }
-
-  const endeIds = new Set(board.value.ending.map((f) => f.id))
-  const startIds = new Set(board.value.starting.map((f) => f.id))
-  let n = 0
-
-  for (const [liste, gegenueber] of [
-    [board.value.ending, startIds],
-    [board.value.starting, endeIds],
-  ] as const) {
-    for (const trip of liste) {
-      if (trip.decision?.kind !== 'link') {
-        continue
-      }
-      if (modeFilter.value !== null && trip.mode !== modeFilter.value) {
-        continue
-      }
-      const partner = trip.decision.partner
-
-      if (partner === null || !gegenueber.has(partner.id)) {
-        n++
-      }
-    }
-  }
-
-  return n
-})
-
 /** Offene Fahrten eines Versionsstands im gewaehlten Verkehrsmittel. */
 function offeneImStand(stand: { open: { total: number } & Partial<Record<'tram' | 'bus', number>> }): number {
   return modeFilter.value === null ? stand.open.total : (stand.open[modeFilter.value] ?? 0)
@@ -794,19 +755,6 @@ watch(gewaehlterStand, (neu, alt) => {
               </span>
             </p>
           </div>
-
-          <p
-            v-if="anschluesseAndererVersion > 0"
-            class="mt-2 rounded-md bg-violet-50 px-4 py-2 text-sm text-violet-900"
-          >
-            {{ anschluesseAndererVersion }}
-            {{ anschluesseAndererVersion === 1 ? 'Anschluss zeigt' : 'Anschlüsse zeigen' }} auf Fahrten einer
-            Fahrplan-Version, die in diesem Versionsstand nicht gilt — sie sind im Board violett markiert. Das
-            passiert, wenn eine einzelne Linie mitten in der Periode die Version wechselt: Der Anschluss bleibt an
-            der alten Fahrt hängen, während die Fahrt der neuen Version unentschieden daneben steht. Unter
-            <RouterLink to="/versions" class="underline underline-offset-2">Versionen</RouterLink> lässt sich die
-            Pflege auf die neue Version übernehmen.
-          </p>
 
           <!-- Der Widerspruch, den die Auswahlliste sonst unerklaert liesse: Sie zaehlt ueber
                die ganze Periode, das Board ueber den gewaehlten Stand. -->

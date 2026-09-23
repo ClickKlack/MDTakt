@@ -277,6 +277,63 @@ final class StopGroupTest extends TestCase
         $this->assertSame(0, $nachher['open']['tram']);
     }
 
+    /**
+     * **Ein Wochenende ist keine Lücke.** Grenzen zwei Versionen einer Nachbarlinie am Freitag
+     * und am Montag aneinander, ist die Fahrt dazwischen vollständig gepflegt — auch wenn
+     * zwischen den beiden Anschlüssen zwei Kalendertage liegen.
+     *
+     * Die Deckungsrechnung muss deshalb auf die Tage schauen, an denen der Fahrplantyp gilt,
+     * nicht auf die Spanne. Sonst bliebe eine fertig gepflegte Haltestelle für immer in der
+     * Arbeitsliste stehen.
+     */
+    public function test_a_weekend_between_two_versions_is_not_counted_as_open(): void
+    {
+        $f = new ConsolidatedFixtures;
+        $periode = $f->periode();
+
+        // Linie 2 laeuft durchgehend, die 13 wechselt ueber das Wochenende die Version.
+        $zwei = $f->version('2', FahrplanTyp::MoFrNormal, 1, $periode);
+        $f->gueltigkeit($zwei, '2026-08-17', '2026-08-28');
+
+        $alt = $f->version('13', FahrplanTyp::MoFrNormal, 1, $periode);
+        $f->gueltigkeit($alt, '2026-08-17', '2026-08-21');   // Mo bis Fr
+
+        $neu = $f->version('13', FahrplanTyp::MoFrNormal, 2, $periode);
+        $f->gueltigkeit($neu, '2026-08-24', '2026-08-28');   // Mo bis Fr der Folgewoche
+
+        $ankunft = $f->fahrt($zwei, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:42:00']);
+        $alteAbfahrt = $f->fahrt($alt, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00']);
+        $neueAbfahrt = $f->fahrt($neu, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00'], 'sig-neu');
+
+        $offen = function () use ($periode): int {
+            $daten = $this->withToken($this->token())
+                ->getJson(sprintf('/api/v1/admin/stop-groups?only_termini=1&period=%d&day_type=mo_fr', $periode->id))
+                ->json('data');
+
+            return collect($daten)->firstWhere('name', 'Sudenburg')['open']['tram'];
+        };
+
+        $verknuepfe = function (int $zielId) use ($ankunft): void {
+            $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+                'kind' => 'link',
+                'from_trip_id' => $ankunft->id,
+                'to_trip_id' => $zielId,
+            ])->assertCreated();
+        };
+
+        $verknuepfe($alteAbfahrt->id);
+
+        // Nach dem ersten Anschluss fehlt der Ankunft die zweite Woche, und der neuen Abfahrt
+        // fehlt ihr Vorgaenger — beides echte Arbeit.
+        $this->assertSame(2, $offen(), 'Die zweite Woche ist noch ungepflegt.');
+
+        $verknuepfe($neueAbfahrt->id);
+
+        // Jetzt ist jeder Mo-Fr-Tag gedeckt. Das Wochenende dazwischen ist **keine** Luecke —
+        // an ihm gilt dieser Fahrplan gar nicht.
+        $this->assertSame(0, $offen(), 'Das Wochenende darf keine Luecke sein.');
+    }
+
     /** Ohne Periode und Fahrplantyp bleibt das Verzeichnis wie bisher — beides gehört zusammen. */
     public function test_without_period_and_day_type_the_workload_is_absent(): void
     {

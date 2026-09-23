@@ -12,8 +12,8 @@ use App\Http\Resources\TripLinkResource;
 use App\Models\TripLink;
 use App\Services\CourseService;
 use App\Services\TripLinkService;
+use App\Services\TripLinkValidity;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -25,6 +25,7 @@ final class TripLinkController extends Controller
     public function __construct(
         private readonly TripLinkService $links,
         private readonly CourseService $courses,
+        private readonly TripLinkValidity $validity,
     ) {}
 
     /** POST /api/v1/admin/trip-links */
@@ -34,16 +35,19 @@ final class TripLinkController extends Controller
         $von = $request->fromTrip();
         $nach = $request->toTrip();
 
-        // Belegt heißt belegt: Die Unique-Constraints würden das ohnehin abweisen, aber mit
-        // einem Datenbankfehler statt mit einer Meldung, die sagt, was schon entschieden ist.
-        $belegt = $this->existingDecision($von?->id, $nach?->id);
+        // Belegt heißt belegt — aber **je Tag**, nicht je Fahrt. Eine Fahrt darf mehrere
+        // Anschlüsse tragen, solange sie an verschiedenen Tagen gelten: Wechselt eine
+        // Nachbarlinie mitten in der Periode die Version, braucht dieselbe Fahrt ab dem
+        // Wechseltag einen anderen Nachfolger (KURSE §2 K7).
+        $belegt = $this->validity->conflictFor($von?->id, $nach?->id);
 
         if ($belegt !== null) {
             return response()->json([
                 'error' => [
                     'code' => Response::HTTP_CONFLICT,
                     'message' => sprintf(
-                        'An einer der beiden Fahrten hängt bereits eine Entscheidung (%s). Erst lösen, dann neu setzen.',
+                        'An einer der beiden Fahrten hängt an denselben Tagen bereits eine Entscheidung (%s). '
+                        .'Erst lösen, dann neu setzen.',
                         TripLinkKind::from($belegt->kind)->label(),
                     ),
                 ],
@@ -105,24 +109,5 @@ final class TripLinkController extends Controller
         $this->links->remove($tripLink);
 
         return response()->json(null, Response::HTTP_NO_CONTENT);
-    }
-
-    private function existingDecision(?int $fromId, ?int $toId): ?object
-    {
-        $query = DB::table('trip_links');
-
-        if ($fromId !== null && $toId !== null) {
-            $query->where(function ($q) use ($fromId, $toId): void {
-                $q->where('from_trip_id', $fromId)->orWhere('to_trip_id', $toId);
-            });
-        } elseif ($fromId !== null) {
-            $query->where('from_trip_id', $fromId);
-        } elseif ($toId !== null) {
-            $query->where('to_trip_id', $toId);
-        } else {
-            return null;
-        }
-
-        return $query->first();
     }
 }

@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Enums\FahrplanTyp;
 use App\Enums\RouteType;
 use App\Models\StopGroup;
+use App\Support\DayRange;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -24,6 +25,7 @@ final class StopGroupDirectoryService
     public function __construct(
         private readonly ConsolidatedStopNameResolver $stopNames,
         private readonly StopGroupService $groups,
+        private readonly TripLinkValidity $validity,
     ) {}
 
     /**
@@ -139,26 +141,25 @@ final class StopGroupDirectoryService
             $zeilen = DB::table('consolidated_trips as ct')
                 ->join('line_versions as lv', 'lv.id', '=', 'ct.line_version_id')
                 ->join('stop_group_members as m', 'm.consolidated_stop_id', '=', 'ct.'.$spalte)
-                ->leftJoin('trip_links as tl', 'tl.'.$fremd, '=', 'ct.id')
                 ->where('lv.period_id', $periodId)
                 ->where('lv.day_type', $dayType->value)
-                ->groupBy('m.stop_group_id', 'ct.route_type')
-                ->select([
-                    'm.stop_group_id',
-                    'ct.route_type',
-                    DB::raw('count(*) as gesamt'),
-                    DB::raw('count(case when tl.id is null then 1 end) as offen'),
-                ])
+                ->select(['m.stop_group_id', 'ct.id', 'ct.route_type', 'ct.line_version_id'])
                 ->get();
+
+            $kanten = $this->linksBySide($zeilen->pluck('id')->all(), $fremd);
 
             foreach ($zeilen as $zeile) {
                 $mittel = RouteType::modeFor((int) $zeile->route_type);
                 $id = (int) $zeile->stop_group_id;
 
-                $roh[$id][$mittel] = ($roh[$id][$mittel] ?? 0) + (int) $zeile->offen;
                 // Auch ein Verkehrsmittel ohne offene Fahrt gehört in die Liste — sonst
                 // verschwände eine fertig gepflegte Haltestelle aus der Auswahl.
                 $roh[$id]['__mittel'][$mittel] = true;
+                $roh[$id][$mittel] ??= 0;
+
+                if ($this->stillOpen((int) $zeile->id, (int) $zeile->line_version_id, $kanten)) {
+                    $roh[$id][$mittel]++;
+                }
             }
         }
 
@@ -176,6 +177,60 @@ final class StopGroupDirectoryService
             }
 
             $ergebnis[$id] = ['modes' => $mittel, 'open' => $offen];
+        }
+
+        return $ergebnis;
+    }
+
+    /**
+     * Ist an dieser Seite der Fahrt noch etwas zu tun?
+     *
+     * **Nicht** schlicht „hängt eine Zeile dran". Seit eine Fahrt mehrere Anschlüsse tragen
+     * darf, deckt ein einzelner womöglich nur einen Teil ihrer Tage ab: Wechselt eine
+     * Nachbarlinie mitten in der Periode die Version, braucht dieselbe Fahrt ab dem Wechseltag
+     * einen zweiten. Nach der alten Zählung sähe sie fertig aus, und die Haltestelle
+     * verschwände aus der Arbeitsliste — genau die Lücke, die diese Liste schließen soll.
+     *
+     * @param  array<int, array<int, array{0: int|null, 1: int|null}>>  $kanten
+     */
+    private function stillOpen(int $tripId, int $versionId, array $kanten): bool
+    {
+        $offen = $this->validity->forVersion($versionId);
+
+        foreach ($kanten[$tripId] ?? [] as $kante) {
+            $offen = DayRange::subtract($offen, $this->validity->forLink($kante[0], $kante[1]));
+
+            if ($offen === []) {
+                return false;
+            }
+        }
+
+        return $offen !== [];
+    }
+
+    /**
+     * Die Zeilen je Fahrt, gesammelt über eine Seite (`from_trip_id` oder `to_trip_id`).
+     *
+     * @param  array<int, mixed>  $tripIds
+     * @return array<int, array<int, array{0: int|null, 1: int|null}>>
+     */
+    private function linksBySide(array $tripIds, string $spalte): array
+    {
+        $ids = array_values(array_unique(array_map(static fn ($id): int => (int) $id, $tripIds)));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $ergebnis = [];
+
+        foreach (array_chunk($ids, 5000) as $teil) {
+            foreach (DB::table('trip_links')->whereIn($spalte, $teil)->get(['from_trip_id', 'to_trip_id', $spalte]) as $zeile) {
+                $ergebnis[(int) $zeile->{$spalte}][] = [
+                    $zeile->from_trip_id === null ? null : (int) $zeile->from_trip_id,
+                    $zeile->to_trip_id === null ? null : (int) $zeile->to_trip_id,
+                ];
+            }
         }
 
         return $ergebnis;

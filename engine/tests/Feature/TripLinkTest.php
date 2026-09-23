@@ -129,6 +129,92 @@ final class TripLinkTest extends TestCase
         $this->assertSame($fahrt->last_stop_id, $daten['stop_id']);
     }
 
+    // ------------------------------------------- Mehrere Anschluesse je Fahrt (KURSE §2 K7)
+
+    /**
+     * Zwei Anschlüsse an derselben Fahrt sind erlaubt, solange sie an **verschiedenen Tagen**
+     * gelten. Bis zum 23.09.2026 verhinderte das ein Unique-Constraint — und damit den Fall,
+     * dass eine Nachbarlinie mitten in der Periode die Version wechselt.
+     */
+    public function test_a_trip_may_have_two_successors_on_different_days(): void
+    {
+        $periode = $this->f->periode();
+
+        $zwei = $this->f->version('2', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($zwei, '2026-08-17', '2026-08-28');
+
+        $alt = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($alt, '2026-08-17', '2026-08-21');
+
+        $neu = $this->f->version('13', FahrplanTyp::MoFrNormal, 2, $periode);
+        $this->f->gueltigkeit($neu, '2026-08-24', '2026-08-28');
+
+        $ankunft = $this->f->fahrt($zwei, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:42:00']);
+        $alteAbfahrt = $this->f->fahrt($alt, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00']);
+        $neueAbfahrt = $this->f->fahrt($neu, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00'], 'sig-neu');
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $ankunft->id, 'to_trip_id' => $alteAbfahrt->id])
+            ->assertCreated();
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $ankunft->id, 'to_trip_id' => $neueAbfahrt->id])
+            ->assertCreated();
+
+        $this->assertDatabaseCount('trip_links', 2);
+    }
+
+    /**
+     * An denselben Tagen bleibt es bei einem Nachfolger — die Fachregel gilt unverändert, nur
+     * je Tag statt je Fahrt.
+     */
+    public function test_a_second_successor_on_the_same_days_is_rejected(): void
+    {
+        $periode = $this->f->periode();
+
+        $zwei = $this->f->version('2', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($zwei, '2026-08-17', '2026-08-28');
+
+        $dreizehn = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($dreizehn, '2026-08-17', '2026-08-28');
+
+        $ankunft = $this->f->fahrt($zwei, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:42:00']);
+        $eine = $this->f->fahrt($dreizehn, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00']);
+        $andere = $this->f->fahrt($dreizehn, ['Sudenburg', 'Herrenkrug'], ['06:50:00', '07:26:00'], 'sig-zwei');
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $ankunft->id, 'to_trip_id' => $eine->id])
+            ->assertCreated();
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $ankunft->id, 'to_trip_id' => $andere->id])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 409);
+
+        $this->assertDatabaseCount('trip_links', 1);
+    }
+
+    /**
+     * Auch die Einrück-Marke belegt die Nachfolger-Seite: Das Fahrzeug fährt in den Betriebshof
+     * und nicht zugleich weiter. An anderen Tagen darf daneben trotzdem ein Anschluss stehen.
+     */
+    public function test_a_terminal_mark_blocks_only_its_own_days(): void
+    {
+        $periode = $this->f->periode();
+
+        $zwei = $this->f->version('2', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($zwei, '2026-08-17', '2026-08-28');
+
+        $dreizehn = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($dreizehn, '2026-08-17', '2026-08-21');
+
+        $ankunft = $this->f->fahrt($zwei, ['Kannenstieg', 'Sudenburg'], ['06:00:00', '06:42:00']);
+        $abfahrt = $this->f->fahrt($dreizehn, ['Sudenburg', 'Herrenkrug'], ['06:44:00', '07:20:00']);
+
+        $this->anlegen(['kind' => 'link', 'from_trip_id' => $ankunft->id, 'to_trip_id' => $abfahrt->id])
+            ->assertCreated();
+
+        // Die Marke gilt an **allen** Tagen der 2er-Fahrt und ueberschneidet den Anschluss.
+        $this->anlegen(['kind' => 'end', 'from_trip_id' => $ankunft->id])
+            ->assertStatus(409);
+    }
+
     // ---------------------------------------------------------------- Betriebshof (KURSE §3.2)
 
     /**

@@ -31,6 +31,7 @@ final class StopLinkBoardService
         private readonly ConsolidatedTripInfoResolver $tripInfo,
         private readonly StopGroupService $groups,
         private readonly FahrplanTypClassifier $classifier,
+        private readonly TripLinkValidity $validity,
     ) {}
 
     /** @var array<string, FahrplanTyp> Datum => Typ, damit der Klassifizierer nicht je Tag erneut abfragt */
@@ -53,7 +54,9 @@ final class StopLinkBoardService
         $endend = $this->trips($stopIds, $aktiveVersionen, 'last_stop_id');
         $beginnend = $this->trips($stopIds, $aktiveVersionen, 'first_stop_id');
 
-        $this->attachDecisions($endend, $beginnend);
+        // Die Entscheidungen **dieses Stands**: Eine Fahrt kann mehrere Anschlüsse tragen, und
+        // in einem Stand gilt höchstens einer (KURSE §2 K7).
+        $this->attachDecisions($endend, $beginnend, $stand === null ? [] : $stand['ranges']);
 
         $offen = count(array_filter([...$endend, ...$beginnend], static fn (array $f): bool => $f['decision'] === null));
 
@@ -188,18 +191,45 @@ final class StopLinkBoardService
             ...array_map(static fn (array $st): array => $st['line_version_ids'], $staende),
         )));
 
-        $offen = $versionIds === [] || $stopIds === []
-            ? []
-            : $this->openPerVersion($stopIds, $versionIds);
+        if ($versionIds === [] || $stopIds === []) {
+            foreach ($staende as &$leer) {
+                $leer['open'] = ['total' => 0];
+            }
+            unset($leer);
+
+            return;
+        }
+
+        [$fahrten, $kanten] = $this->tripsAndLinks($stopIds, $versionIds);
 
         foreach ($staende as &$stand) {
+            $aktiv = array_flip($stand['line_version_ids']);
+            $zeitraum = $this->validity->forRanges($stand['ranges']);
             $summe = ['total' => 0];
 
-            foreach ($stand['line_version_ids'] as $id) {
-                foreach ($offen[$id] ?? [] as $mittel => $anzahl) {
-                    $summe[$mittel] = ($summe[$mittel] ?? 0) + $anzahl;
-                    $summe['total'] += $anzahl;
+            foreach ($fahrten as $fahrt) {
+                if (! isset($aktiv[$fahrt['version_id']])) {
+                    continue;
                 }
+
+                // Offen heisst: an dieser Seite gilt in diesem Stand keine Entscheidung. Ein
+                // Anschluss, der nur in einem anderen Stand traegt, zaehlt hier nicht.
+                $entschieden = false;
+
+                foreach ($kanten[$fahrt['seite']][$fahrt['id']] ?? [] as $kante) {
+                    if ($this->validity->appliesIn($kante[0], $kante[1], $zeitraum)) {
+                        $entschieden = true;
+                        break;
+                    }
+                }
+
+                if ($entschieden) {
+                    continue;
+                }
+
+                $mittel = $fahrt['mode'];
+                $summe[$mittel] = ($summe[$mittel] ?? 0) + 1;
+                $summe['total']++;
             }
 
             $stand['open'] = $summe;
@@ -208,35 +238,60 @@ final class StopLinkBoardService
     }
 
     /**
-     * Offene Fahrten je Linien-Version und Verkehrsmittel.
+     * Die Fahrten an diesen Halten samt der Zeilen, die an ihnen haengen.
+     *
+     * Eine Fahrt steht zweimal darin, wenn sie hier endet **und** beginnt (Wendeschleife) —
+     * genau wie im Board, das sie in beiden Spalten fuehrt.
      *
      * @param  array<int, int>  $stopIds
      * @param  array<int, int>  $versionIds
-     * @return array<int, array<string, int>>
+     * @return array{0: array<int, array<string, mixed>>, 1: array<string, array<int, array<int, array{0: int|null, 1: int|null}>>>}
      */
-    private function openPerVersion(array $stopIds, array $versionIds): array
+    private function tripsAndLinks(array $stopIds, array $versionIds): array
     {
-        $ergebnis = [];
+        $fahrten = [];
+        $ids = [];
 
-        foreach (['last_stop_id' => 'from_trip_id', 'first_stop_id' => 'to_trip_id'] as $spalte => $fremd) {
-            $zeilen = DB::table('consolidated_trips as ct')
-                ->leftJoin('trip_links as tl', 'tl.'.$fremd, '=', 'ct.id')
-                ->whereIn('ct.line_version_id', $versionIds)
-                ->whereIn('ct.'.$spalte, $stopIds)
-                ->whereNull('tl.id')
-                ->groupBy('ct.line_version_id', 'ct.route_type')
-                ->select('ct.line_version_id', 'ct.route_type', DB::raw('count(*) as offen'))
-                ->get();
+        foreach (['last_stop_id' => 'from', 'first_stop_id' => 'to'] as $spalte => $seite) {
+            $zeilen = DB::table('consolidated_trips')
+                ->whereIn('line_version_id', $versionIds)
+                ->whereIn($spalte, $stopIds)
+                ->get(['id', 'line_version_id', 'route_type']);
 
             foreach ($zeilen as $zeile) {
-                $mittel = RouteType::modeFor((int) $zeile->route_type);
-                $id = (int) $zeile->line_version_id;
-
-                $ergebnis[$id][$mittel] = ($ergebnis[$id][$mittel] ?? 0) + (int) $zeile->offen;
+                $fahrten[] = [
+                    'id' => (int) $zeile->id,
+                    'version_id' => (int) $zeile->line_version_id,
+                    'mode' => RouteType::modeFor((int) $zeile->route_type),
+                    'seite' => $seite,
+                ];
+                $ids[(int) $zeile->id] = true;
             }
         }
 
-        return $ergebnis;
+        $kanten = ['from' => [], 'to' => []];
+
+        if ($ids !== []) {
+            $zeilen = DB::table('trip_links')
+                ->where(function ($q) use ($ids): void {
+                    $q->whereIn('from_trip_id', array_keys($ids))->orWhereIn('to_trip_id', array_keys($ids));
+                })
+                ->get(['from_trip_id', 'to_trip_id']);
+
+            foreach ($zeilen as $zeile) {
+                $von = $zeile->from_trip_id === null ? null : (int) $zeile->from_trip_id;
+                $nach = $zeile->to_trip_id === null ? null : (int) $zeile->to_trip_id;
+
+                if ($von !== null) {
+                    $kanten['from'][$von][] = [$von, $nach];
+                }
+                if ($nach !== null) {
+                    $kanten['to'][$nach][] = [$von, $nach];
+                }
+            }
+        }
+
+        return [$fahrten, $kanten];
     }
 
     /**
@@ -477,10 +532,17 @@ final class StopLinkBoardService
      * Hängt jeder Fahrt ihre Entscheidung an — für eine endende Fahrt, was **danach** kommt,
      * für eine beginnende, was **davor** war.
      *
+     * **Nur die Entscheidungen, die in diesem Versionsstand gelten.** Seit eine Fahrt mehrere
+     * Anschlüsse tragen darf, ist das eine Auswahl: Wechselt eine Nachbarlinie mitten in der
+     * Periode die Version, hat dieselbe Fahrt vor und nach dem Wechseltag verschiedene
+     * Nachfolger. Ein Anschluss, der hier an keinem Tag gilt, wird weggelassen — die Fahrt
+     * erscheint in diesem Stand also offen, und genau das ist sie auch.
+     *
      * @param  array<int, array<string, mixed>>  $endend
      * @param  array<int, array<string, mixed>>  $beginnend
+     * @param  array<int, array{valid_from: string, valid_to: string}>  $ranges  Zeiträume des Stands
      */
-    private function attachDecisions(array &$endend, array &$beginnend): void
+    private function attachDecisions(array &$endend, array &$beginnend, array $ranges): void
     {
         $endendeIds = array_column($endend, 'id');
         $beginnendeIds = array_column($beginnend, 'id');
@@ -524,6 +586,22 @@ final class StopLinkBoardService
             ->all();
 
         $partner = $this->tripInfo->forIds($partnerIds);
+
+        // Der Zeitraum dieses Stands. Ein Anschluss gilt hier, wenn er ihn an mindestens einem
+        // Tag berührt — gerechnet in Betriebstagen, wie die Intervalle selbst.
+        $zeitraum = $this->validity->forRanges($ranges);
+
+        $gilt = fn (object $link): bool => $this->validity->appliesIn(
+            $link->from_trip_id === null ? null : (int) $link->from_trip_id,
+            $link->to_trip_id === null ? null : (int) $link->to_trip_id,
+            $zeitraum,
+        );
+
+        $links = $links->filter($gilt);
+
+        if ($links->isEmpty()) {
+            return;
+        }
 
         $nachFrom = $links->whereNotNull('from_trip_id')->keyBy('from_trip_id');
         $nachTo = $links->whereNotNull('to_trip_id')->keyBy('to_trip_id');

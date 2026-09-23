@@ -1506,6 +1506,12 @@ components:
         Die an einer Fahrt getroffene Entscheidung. `null` bedeutet **noch nicht gepflegt** —
         das ist ausdrücklich etwas anderes als `start`/`end`, die eine bewusst offen gelassene
         Kette bezeichnen (Aus- bzw. Einrücken, Betriebsfahrt).
+
+
+        **Je Versionsstand hoechstens eine.** Eine Fahrt darf mehrere Anschluesse tragen, wenn
+        sie an verschiedenen Tagen gelten (KURSE §3) — gezeigt wird der, der die Tage des
+        gewaehlten Stands beruehrt. Gilt hier keiner, steht `null`: Die Fahrt ist an diesen
+        Tagen wirklich offen, auch wenn sie in einem anderen Stand einen Anschluss hat.
       properties:
         id: { type: integer, description: 'ID der `trip_links`-Zeile, zum Lösen.' }
         kind:
@@ -3648,7 +3654,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Eine der beiden Fahrten trägt bereits eine Entscheidung
+          description: >
+            Eine der beiden Fahrten traegt **an denselben Tagen** bereits eine Entscheidung.
+            Geprueft wird je Betriebstag, nicht je Fahrt: Zwei Anschluesse an derselben Fahrt
+            sind erlaubt, solange sie sich an keinem Tag beruehren (KURSE §3)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

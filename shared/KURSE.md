@@ -279,6 +279,12 @@ verschwand ein beim Schreiben übersprungener Eintrag stillschweigend, und `link
 zählte ihn mit. In der Vorschau nennt die Zahl jetzt das Vorhaben, nach dem Anwenden die
 Tatsachen.
 
+Die **Nummernfolge** (K8) arbeitet über dieselbe Kette und erfasst damit beide Zweige. Am
+Realbestand nachgemessen: Ein `clear` an der 2er-Fahrt vom City Carré nennt drei Fahrten —
+sie selbst und beide 13er-Versionen — und führt die beiden Zweige als „außerhalb der
+Markierung". Vor Stufe 2a hätte es einen der beiden übersehen und die Nummer dort
+zurückgelassen.
+
 Auch die **Zyklusprüfung** rechnet je Tag: Zwei Anschlüsse, die einander nie begegnen, können
 das Fahrzeug an keinem Tag im Kreis fahren lassen. Das ist eher Absicherung als häufiger Fall —
 ein Ring verlangt, dass jedes aufeinanderfolgende Paar gemeinsame Tage hat, und dann

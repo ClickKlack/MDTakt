@@ -554,4 +554,64 @@ final class CourseSequenceTest extends TestCase
         $this->assertSame(0, $zweiter['summary']['removed']);
         $this->assertSame('no_course', $zweiter['skipped'][0]['reason_code']);
     }
+
+    /**
+     * **Eine verzweigte Kette wird ganz erfasst.**
+     *
+     * Seit eine Fahrt je Tag einen anderen Nachfolger haben darf (KURSE §3), verzweigt sich ein
+     * Umlauf am Versionswechsel einer Nachbarlinie. Die Nummernfolge arbeitet über die Kette,
+     * also muss sie beide Zweige sehen: Ein `clear`, das nur einen erwischt, ließe die Nummer
+     * an der anderen Fahrt zurück — ein Rest, den niemand mehr sucht.
+     *
+     * Bis Stufe 2a hielt der Kettengraph je Fahrt genau einen Nachfolger, und welcher der
+     * beiden überlebte, entschied die Reihenfolge der Datenbankzeilen.
+     */
+    public function test_a_branched_chain_is_covered_completely(): void
+    {
+        $periode = $this->f->periode();
+
+        $sechs = $this->f->version('6', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($sechs, '2026-08-17', '2026-08-28');
+
+        $alt = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $periode);
+        $this->f->gueltigkeit($alt, '2026-08-17', '2026-08-21');
+
+        $neu = $this->f->version('13', FahrplanTyp::MoFrNormal, 2, $periode);
+        $this->f->gueltigkeit($neu, '2026-08-24', '2026-08-28');
+
+        $hin = $this->hin($sechs, '06:00:00', '06:30:00');
+        $alteAnschluss = $this->f->fahrt($alt, ['Sudenburg', 'Herrenkrug'], ['06:35:00', '07:10:00']);
+        $neueAnschluss = $this->f->fahrt($neu, ['Sudenburg', 'Herrenkrug'], ['06:35:00', '07:10:00'], 'sig-13-neu');
+
+        $this->verknuepfe($hin, $alteAnschluss);
+        $this->verknuepfe($hin, $neueAnschluss);
+
+        $kurs = $this->kursAn($hin, '07');
+        CourseTrip::query()->create(['course_id' => $kurs->id, 'consolidated_trip_id' => $alteAnschluss->id]);
+        CourseTrip::query()->create(['course_id' => $kurs->id, 'consolidated_trip_id' => $neueAnschluss->id]);
+
+        $daten = $this->vorschau($sechs, $this->rumpf($hin, $hin, ['action' => 'clear']));
+
+        $this->assertCount(1, $daten['removals']);
+
+        $eintrag = $daten['removals'][0];
+
+        // Beide Zweige gehoeren zur Kette — und beide liegen ausserhalb der markierten Spalte.
+        $this->assertSame(3, $eintrag['chain_trip_count']);
+        $this->assertEqualsCanonicalizing(
+            [$hin->id, $alteAnschluss->id, $neueAnschluss->id],
+            $eintrag['chain_trip_ids'],
+        );
+        $this->assertEqualsCanonicalizing(
+            [$alteAnschluss->id, $neueAnschluss->id],
+            array_column($eintrag['outside_range'], 'id'),
+        );
+
+        // Und das Anwenden laesst keine Fahrt mit der Nummer zurueck.
+        $this->anwenden($sechs, $this->rumpf($hin, $hin, ['action' => 'clear']));
+
+        foreach ([$hin, $alteAnschluss, $neueAnschluss] as $fahrt) {
+            $this->assertDatabaseMissing('course_trips', ['consolidated_trip_id' => $fahrt->id]);
+        }
+    }
 }

@@ -202,14 +202,15 @@ export interface CourseGridColumn {
   cells: (CourseGridCell | null)[]
 }
 
-export interface CourseGrid {
-  line: string
-  /** Derselbe Versionsstand wie in der Kettenansicht — der Umschalter wechselt nur die Form. */
-  stands?: StopLinkStand[]
-  stand?: StopLinkStand | null
-  period: { id: number; label: string; status: 'current' | 'frozen' }
-  day_type: FahrplanTyp
-  day_type_label: string
+/**
+ * Eine Tabelle — die Umläufe **eines Laufwegs** auf gemeinsamer Achse.
+ *
+ * Fast jede Linie hat genau eine. Die 1 hat zwei: Kannenstieg–Listemannstraße und
+ * Sudenburg–City Carré teilen keinen Halt, also auch keinen Taktpunkt.
+ */
+export interface CourseGridSection {
+  /** Die Endstellen dieses Laufwegs, nach Häufigkeit — die ersten beiden benennen die Tabelle. */
+  termini: string[]
   rows: CourseGridRow[]
   /**
    * Eine Spalte je Umlauf, in Kursreihenfolge — aber gegeneinander **um ganze Umläufe
@@ -219,6 +220,18 @@ export interface CourseGrid {
   courses: CourseGridColumn[]
   /** Die Umläufe laufen stark auseinander — die Tabelle liest sich dann lückenhaft. */
   alignment_warning: boolean
+}
+
+export interface CourseGrid {
+  line: string
+  /** Derselbe Versionsstand wie in der Kettenansicht — der Umschalter wechselt nur die Form. */
+  stands?: StopLinkStand[]
+  stand?: StopLinkStand | null
+  period: { id: number; label: string; status: 'current' | 'frozen' }
+  day_type: FahrplanTyp
+  day_type_label: string
+  /** Eine Tabelle je Laufweg; leer, solange kein Umlauf vergeben ist. */
+  sections: CourseGridSection[]
   unassigned: CourseChainTrip[]
   summary: { courses: number; assigned_trips: number; unassigned_trips: number; breaks: number }
 }

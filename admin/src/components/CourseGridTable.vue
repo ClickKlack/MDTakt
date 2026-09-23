@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CourseGrid, CourseGridCell, CourseGridColumn } from '../services/courses'
+import type { CourseGridCell, CourseGridColumn, CourseGridSection } from '../services/courses'
 import type { Line } from '../services/lines'
 import { formatClock } from '../utils/timezone'
 import LineBadge from './LineBadge.vue'
 
 const props = defineProps<{
-  grid: CourseGrid
+  /** Eine Tabelle — die Umläufe eines Laufwegs. Eine Linie mit zwei Laufwegen zeigt zwei. */
+  grid: CourseGridSection
   /** Liniensignete brauchen Farbe und Verkehrsmittel — beides kommt aus dem Linienverzeichnis. */
   lines: Record<string, Line>
+  /** Überschrift über der Tabelle — nur gesetzt, wenn die Linie mehrere Laufwege hat. */
+  title?: string
+  /** Die Zeichen-Legende (│ und ·) — bei mehreren Tabellen nur unter der letzten. */
+  legend?: boolean
 }>()
 
 /** Fällt das Verzeichnis aus, trägt das Signet wenigstens die richtige Form. */
@@ -198,6 +203,8 @@ const spaltenbreite = computed(() => `${props.grid.courses.length * 4 + 16}rem`)
 
 <template>
   <div class="mt-4">
+    <h3 v-if="title" class="mx-auto mb-2 max-w-6xl text-sm font-semibold text-slate-800">{{ title }}</h3>
+
     <p
       v-if="grid.alignment_warning"
       class="mx-auto mb-3 max-w-6xl rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900"
@@ -285,12 +292,7 @@ const spaltenbreite = computed(() => `${props.grid.courses.length * 4 + 16}rem`)
       </table>
     </div>
 
-    <p v-if="grid.rows.length === 0" class="mx-auto max-w-6xl rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900">
-      Für diese Linie ist noch kein Umlauf vergeben. Die Ketten entstehen unter „Anschlüsse“, die Kursnummern dort
-      oder in der Fahrplan-Ansicht.
-    </p>
-
-    <p v-else class="mx-auto mt-2 max-w-6xl text-xs text-slate-500">
+    <p v-if="legend !== false" class="mx-auto mt-2 max-w-6xl text-xs text-slate-500">
       <span class="font-medium text-slate-400">│</span> heißt: Das Fahrzeug gehört zu diesem Umlauf, fährt diese
       Haltestelle aber nicht an — es hält gerade, oder die Zeile gehört zum Weg eines anderen Kurses aus dem
       Betriebshof.

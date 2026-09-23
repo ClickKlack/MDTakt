@@ -825,7 +825,7 @@ components:
       properties:
         data:
           type: object
-          required: [line, day_type, rows, courses, alignment_warning, unassigned, summary]
+          required: [line, day_type, sections, unassigned, summary]
           properties:
             line: { type: string }
             period:
@@ -836,127 +836,165 @@ components:
                 status: { type: string, enum: [current, frozen] }
             day_type: { $ref: '#/components/schemas/FahrplanTyp' }
             day_type_label: { type: string }
-            rows:
+            sections:
               type: array
               description: >
-                Die gemeinsame Zeilenachse. Sie folgt der **Kette**, nicht der Linie: Ein Umlauf
-                faehrt hin und zurueck, seine Halte wiederholen sich deshalb
-                (`A, B, C, C, B, A, A, B, C …`). Gespiegelt wird nichts — jede Zeit laeuft von
-                oben nach unten, so wie das Fahrzeug faehrt.
+                Eine Tabelle je **Laufweg** — bei fast jeder Linie genau eine. Leer, wenn noch
+                kein Umlauf vergeben ist.
 
 
-                Eine Zeile ist eine **Position** in der Achse, keine Halt-Identitaet: Derselbe
-                `stop_id` kommt mehrfach vor, unterschieden ueber `repeat_index`. Die zweite
-                Beruehrung ist die naechste Runde, keine Doppelung.
+                **Warum mehrere.** Die Linie 1 ist zwei Linien unter einem Namen:
+                Kannenstieg–Listemannstrasse als reine 1 und Sudenburg–City Carre mitten in der
+                Verknuepfung mit 13, 2 und 5. Die beiden teilen keine Haltestelle, es gibt also
+                keinen gemeinsamen Taktpunkt — in einer Tabelle lagen beide Laufwege
+                unverschoben uebereinander. Jede Tabelle hat deshalb ihre eigene Achse.
+
+
+                **Getrennt wird ueber Endstellen.** Zwei Umlaeufe gehoeren zusammen, wenn ihre
+                Fahrten der gewaehlten Linie eine Endstelle teilen, auch ueber Dritte hinweg.
+                Kreuzen sich zwei Laufwege nur an einem Zwischenhalt, bleiben sie getrennt; ein
+                Kurzlaeufer oder Ast teilt immer eine Endstelle und bleibt in derselben Tabelle.
+                Das Hof-Ende einer als Ausruecken bzw. Einruecken markierten Fahrt zaehlt nicht —
+                sonst verbaende ein gemeinsamer Hof, was im Takt nichts miteinander zu tun hat.
+                Nur dieses eine Ende faellt weg: Ist der Hof zugleich regulaere Endstelle (die 2
+                in Westerhuesen), zaehlt er ueber die uebrigen Fahrten weiter. Bliebe einem Umlauf
+                ohne Hof-Enden gar keine Endstelle, zaehlen sie doch.
+                Endstellen anderer Linien desselben Umlaufs zaehlen ebenfalls nicht.
+
+
+                Reihenfolge: nach dem ersten Kurs der Tabelle.
               items:
                 type: object
-                required: [position, stop_id, stop_name, repeat_index]
+                required: [termini, rows, courses, alignment_warning]
                 properties:
-                  position: { type: integer, description: Nullbasierter Zeilenindex. }
-                  stop_id: { type: integer, description: '`consolidated_stops.id`' }
-                  stop_name: { type: string }
-                  repeat_index: { type: integer, description: Die wievielte Beruehrung dieses Halts, ab 0. }
-            courses:
-              type: array
-              description: >
-                Eine Spalte je Umlauf, in Reihenfolge der Kursnummer. Die Spalten sind
-                gegeneinander **um ganze Umlaeufe verschoben**, damit eine Taktzeile quer gelesen
-                aufsteigt.
-
-
-                **Warum verschoben und nicht umsortiert.** Jeder Umlauf beginnt zu einer anderen
-                Zeit. Setzt man alle bei ihrer ersten Fahrt an, steht in einer Zeile 06:35 neben
-                05:27 neben 05:37 — die Zeile springt, und die Tabelle ist als Fahrplan unlesbar.
-                Kurs 2 erreicht denselben Halt eine Runde spaeter um 06:45; rutscht seine Spalte
-                um einen ganzen Umlauf, steht 06:45 neben den 06:35 von Kurs 1, und die Zeile
-                liest sich als das, was sie ist: der Takt an dieser Haltestelle.
-
-
-                **Gemessen wird der Takt erst, wenn alle Fahrzeuge draussen sind.** Auf der 10
-                rueckt Kurs 1 um 04:09 aus und Kurs 2 erst um 06:48; ein Anker auf der ersten
-                Runde der ersten Spalte laege an einem Morgen, an dem die halbe Flotte noch im
-                Hof steht, und der frueheste Umlauf landete am tiefsten.
-
-
-                **Nur um ganze Umlaeufe.** Ein halber legte die Hinfahrt auf die Zeilen der
-                Rueckfahrt. Die Achse entsteht deshalb blockweise — ein Block je Runde, und in
-                einem Block stehen die gleichrangigen Runden aller Umlaeufe. Der Ausrueck-Vorlauf
-                jedes Fahrzeugs bekommt dort eigene Zeilen; nichts geht verloren, und keine
-                Uhrzeit landet auf einem fremden Halt.
-
-
-                **Folge:** Am Ausrueck-Rand bleiben die Zeilen ungeordnet — dort hat jedes
-                Fahrzeug sein eigenes Muster. Im Takt steigen sie auf: Am Realbestand 2.874 von
-                2.895 voll belegten Zeilen des Netzes. Die uebrigen gehoeren zu Linien, deren
-                Umlaeufe verschieden lang sind; dort traefe es keine Verschiebung.
-              items:
-                type: object
-                required: [id, number, lines, trip_count, cells]
-                properties:
-                  id: { type: integer }
-                  number: { type: string, example: '03' }
-                  lines:
-                    type: array
-                    description: Die Linien, die dieser Umlauf beruehrt — mehr als eine ist der Normalfall.
-                    items: { type: string }
-                  trip_count: { type: integer }
-                  breaks: { type: integer, description: Stellen, an denen die Kette reisst. }
-                  duplicate: { type: boolean }
-                  first_departure: { type: string, nullable: true }
-                  last_arrival: { type: string, nullable: true }
-                  cells:
+                  termini:
                     type: array
                     description: >
-                      Positionsgleich zu `rows`. `null` heisst: Dieser Umlauf beruehrt diese
-                      Zeile nicht — etwa, weil er eine Runde weniger faehrt. Er laesst seine
-                      Spalte dann leer, statt die Zeilen der anderen zu verschieben.
+                      Die Endstellen dieses Laufwegs, nach Haeufigkeit absteigend — die ersten
+                      beiden benennen die Tabelle („Kannenstieg – Listemannstrasse").
+                    items: { type: string }
+                    example: [Kannenstieg, Listemannstraße]
+                  rows:
+                    type: array
+                    description: >
+                      Die gemeinsame Zeilenachse. Sie folgt der **Kette**, nicht der Linie: Ein Umlauf
+                      faehrt hin und zurueck, seine Halte wiederholen sich deshalb
+                      (`A, B, C, C, B, A, A, B, C …`). Gespiegelt wird nichts — jede Zeit laeuft von
+                      oben nach unten, so wie das Fahrzeug faehrt.
+
+
+                      Eine Zeile ist eine **Position** in der Achse, keine Halt-Identitaet: Derselbe
+                      `stop_id` kommt mehrfach vor, unterschieden ueber `repeat_index`. Die zweite
+                      Beruehrung ist die naechste Runde, keine Doppelung.
                     items:
                       type: object
-                      nullable: true
-                      required: [time, kind, starts_trip, line]
+                      required: [position, stop_id, stop_name, repeat_index]
                       properties:
-                        time:
-                          type: string
-                          nullable: true
-                          example: '25:10:00'
-                          description: GTFS-Wallclock; Werte jenseits 24:00 sind gueltig und gewollt.
-                        kind:
-                          type: string
-                          enum: [departure, arrival]
+                        position: { type: integer, description: Nullbasierter Zeilenindex. }
+                        stop_id: { type: integer, description: '`consolidated_stops.id`' }
+                        stop_name: { type: string }
+                        repeat_index: { type: integer, description: Die wievielte Beruehrung dieses Halts, ab 0. }
+                  courses:
+                    type: array
+                    description: >
+                      Eine Spalte je Umlauf, in Reihenfolge der Kursnummer. Die Spalten sind
+                      gegeneinander **um ganze Umlaeufe verschoben**, damit eine Taktzeile quer gelesen
+                      aufsteigt.
+
+
+                      **Warum verschoben und nicht umsortiert.** Jeder Umlauf beginnt zu einer anderen
+                      Zeit. Setzt man alle bei ihrer ersten Fahrt an, steht in einer Zeile 06:35 neben
+                      05:27 neben 05:37 — die Zeile springt, und die Tabelle ist als Fahrplan unlesbar.
+                      Kurs 2 erreicht denselben Halt eine Runde spaeter um 06:45; rutscht seine Spalte
+                      um einen ganzen Umlauf, steht 06:45 neben den 06:35 von Kurs 1, und die Zeile
+                      liest sich als das, was sie ist: der Takt an dieser Haltestelle.
+
+
+                      **Gemessen wird der Takt erst, wenn alle Fahrzeuge draussen sind.** Auf der 10
+                      rueckt Kurs 1 um 04:09 aus und Kurs 2 erst um 06:48; ein Anker auf der ersten
+                      Runde der ersten Spalte laege an einem Morgen, an dem die halbe Flotte noch im
+                      Hof steht, und der frueheste Umlauf landete am tiefsten.
+
+
+                      **Nur um ganze Umlaeufe.** Ein halber legte die Hinfahrt auf die Zeilen der
+                      Rueckfahrt. Die Achse entsteht deshalb blockweise — ein Block je Runde, und in
+                      einem Block stehen die gleichrangigen Runden aller Umlaeufe. Der Ausrueck-Vorlauf
+                      jedes Fahrzeugs bekommt dort eigene Zeilen; nichts geht verloren, und keine
+                      Uhrzeit landet auf einem fremden Halt.
+
+
+                      **Folge:** Am Ausrueck-Rand bleiben die Zeilen ungeordnet — dort hat jedes
+                      Fahrzeug sein eigenes Muster. Im Takt steigen sie auf: Am Realbestand 2.874 von
+                      2.895 voll belegten Zeilen des Netzes. Die uebrigen gehoeren zu Linien, deren
+                      Umlaeufe verschieden lang sind; dort traefe es keine Verschiebung.
+                    items:
+                      type: object
+                      required: [id, number, lines, trip_count, cells]
+                      properties:
+                        id: { type: integer }
+                        number: { type: string, example: '03' }
+                        lines:
+                          type: array
+                          description: Die Linien, die dieser Umlauf beruehrt — mehr als eine ist der Normalfall.
+                          items: { type: string }
+                        trip_count: { type: integer }
+                        breaks: { type: integer, description: Stellen, an denen die Kette reisst. }
+                        duplicate: { type: boolean }
+                        first_departure: { type: string, nullable: true }
+                        last_arrival: { type: string, nullable: true }
+                        cells:
+                          type: array
                           description: >
-                            In der Zelle steht die **Abfahrt** — ausser am letzten Halt einer
-                            Fahrt, dort die Ankunft. So liest sich eine Spalte wie ein Fahrplan,
-                            und die Wende ist als Paar „Ankunft / Abfahrt derselben Haltestelle"
-                            in zwei aufeinanderfolgenden Zeilen zu sehen.
-                        starts_trip:
-                          type: boolean
-                          description: >
-                            Hier **beginnt** eine Fahrt — der erste Halt ihrer Sequenz.
+                            Positionsgleich zu `rows`. `null` heisst: Dieser Umlauf beruehrt diese
+                            Zeile nicht — etwa, weil er eine Runde weniger faehrt. Er laesst seine
+                            Spalte dann leer, statt die Zeilen der anderen zu verschieben.
+                          items:
+                            type: object
+                            nullable: true
+                            required: [time, kind, starts_trip, line]
+                            properties:
+                              time:
+                                type: string
+                                nullable: true
+                                example: '25:10:00'
+                                description: GTFS-Wallclock; Werte jenseits 24:00 sind gueltig und gewollt.
+                              kind:
+                                type: string
+                                enum: [departure, arrival]
+                                description: >
+                                  In der Zelle steht die **Abfahrt** — ausser am letzten Halt einer
+                                  Fahrt, dort die Ankunft. So liest sich eine Spalte wie ein Fahrplan,
+                                  und die Wende ist als Paar „Ankunft / Abfahrt derselben Haltestelle"
+                                  in zwei aufeinanderfolgenden Zeilen zu sehen.
+                              starts_trip:
+                                type: boolean
+                                description: >
+                                  Hier **beginnt** eine Fahrt — der erste Halt ihrer Sequenz.
 
 
-                            Zusammen mit `kind: arrival` markiert das die Endstelle: Die eine
-                            Zeile traegt die Ankunft, mit der eine Fahrt endet, die naechste die
-                            Abfahrt, mit der die folgende beginnt. `kind` allein unterschiede
-                            das nicht — eine Abfahrt am Zwischenhalt sieht genauso aus. Die
-                            Oberflaeche hebt beide Zeiten hervor und zieht dazwischen die
-                            Trennlinie.
-                        line:
-                          type: string
-                          description: >
-                            Die Linie **dieser Fahrt**, nicht des Umlaufs. Ein Umlauf laeuft ueber
-                            Linien hinweg; wo der Wert umspringt, hat das Fahrzeug gewechselt —
-                            die Stelle, die farbig zu unterlegen ist.
-            alignment_warning:
-              type: boolean
-              description: >
-                Die gemeinsame Achse ist deutlich laenger als die laengste Einzelkette — die
-                Umlaeufe dieser Linie laufen also stark auseinander. Die Tabelle zeigt dann
-                korrekte Zeiten, liest sich aber lueckenhaft.
+                                  Zusammen mit `kind: arrival` markiert das die Endstelle: Die eine
+                                  Zeile traegt die Ankunft, mit der eine Fahrt endet, die naechste die
+                                  Abfahrt, mit der die folgende beginnt. `kind` allein unterschiede
+                                  das nicht — eine Abfahrt am Zwischenhalt sieht genauso aus. Die
+                                  Oberflaeche hebt beide Zeiten hervor und zieht dazwischen die
+                                  Trennlinie.
+                              line:
+                                type: string
+                                description: >
+                                  Die Linie **dieser Fahrt**, nicht des Umlaufs. Ein Umlauf laeuft ueber
+                                  Linien hinweg; wo der Wert umspringt, hat das Fahrzeug gewechselt —
+                                  die Stelle, die farbig zu unterlegen ist.
+                  alignment_warning:
+                    type: boolean
+                    description: >
+                      Die gemeinsame Achse ist deutlich laenger als die laengste Einzelkette — die
+                      Umlaeufe dieser Linie laufen also stark auseinander. Die Tabelle zeigt dann
+                      korrekte Zeiten, liest sich aber lueckenhaft.
 
 
-                Die Ausrichtung ist eine Heuristik ({@see StopSequenceAligner}), aber eine mit
-                Zusicherung: Ein Fehlgriff aeussert sich in ueberfluessigen Zeilen, **nie** in
-                einer Uhrzeit an der falschen Stelle.
+                      Die Ausrichtung ist eine Heuristik ({@see StopSequenceAligner}), aber eine mit
+                      Zusicherung: Ein Fehlgriff aeussert sich in ueberfluessigen Zeilen, **nie** in
+                      einer Uhrzeit an der falschen Stelle.
             unassigned:
               type: array
               description: Wie in der Kettenansicht — Fahrten dieser Linie ohne Umlauf.
@@ -2737,6 +2775,11 @@ paths:
         Umleitungen auf eine gemeinsame Zeilenachse bringt. Ihre Zusicherung traegt auch hier:
         Ein Fehlgriff der Heuristik aeussert sich in ueberfluessigen Zeilen, nie in einer Uhrzeit
         an der falschen Stelle. `alignment_warning` meldet, wenn die Achse dabei stark auflaeuft.
+
+
+        **Eine Tabelle je Laufweg (`sections`).** Faehrt eine Linie zwei getrennte Laufwege
+        (die 1: Kannenstieg–Listemannstrasse und Sudenburg–City Carre), bekommt jeder seine
+        eigene Achse; sonst faende sich kein gemeinsamer Taktpunkt.
       tags: [Admin]
       security: [{ AdminToken: [] }]
       parameters:

@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Enums\FahrplanTyp;
 use App\Models\SchedulePeriod;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Die Umläufe einer Linie als **klassische Tabelle**: Halte als Zeilen, ein Kurs je Spalte.
@@ -25,6 +26,11 @@ use App\Models\SchedulePeriod;
  * Kurzläufer und Umleitungen auf eine gemeinsame Achse bringt. Seine Zusicherung trägt auch
  * hier: Ein Fehlgriff der Heuristik äußert sich in überflüssigen Zeilen, **nie** in einer
  * Uhrzeit an der falschen Stelle.
+ *
+ * **Eine Tabelle je Laufweg.** Fährt eine Linie zwei getrennte Laufwege (die 1:
+ * Kannenstieg–Listemannstraße und Sudenburg–City Carré), gibt es keinen gemeinsamen
+ * Taktpunkt. Die Umläufe werden deshalb vorher nach gemeinsamen Endstellen gruppiert
+ * ({@see self::partition()}), und jede Gruppe bekommt ihre eigene Achse.
  *
  * **In der Zelle steht die Abfahrt** — außer am letzten Halt einer Fahrt, dort die Ankunft. So
  * liest sich eine Spalte wie ein Fahrplan, und die Wende ist als Paar „Ankunft / Abfahrt
@@ -51,10 +57,46 @@ final class CourseGridService
     {
         $uebersicht = $this->overview->forLine($line, $period, $typ, withStops: true, standIndex: $standIndex);
 
-        [$varianten, $spalten, $namen] = $this->collect($uebersicht['courses']);
+        $abschnitte = [];
+
+        foreach ($this->partition($uebersicht['courses'], $line) as $gruppe) {
+            $abschnitt = $this->section($gruppe['courses'], $gruppe['termini']);
+
+            if ($abschnitt !== null) {
+                $abschnitte[] = $abschnitt;
+            }
+        }
+
+        if (count($abschnitte) > 1) {
+            Log::debug('Course grid split by route', [
+                'line' => $line,
+                'period_id' => $period->id,
+                'day_type' => $typ->value,
+                'sections' => array_map(static fn (array $a): array => [
+                    'termini' => $a['termini'],
+                    'courses' => array_column($a['courses'], 'number'),
+                ], $abschnitte),
+            ]);
+        }
+
+        return $this->antwort($uebersicht, $abschnitte);
+    }
+
+    /**
+     * Eine Tabelle: gemeinsame Achse für eine Gruppe von Umläufen, die sich messen lassen.
+     *
+     * `null`, wenn keiner der Umläufe eine geladene Haltefolge trägt.
+     *
+     * @param  array<int, array<string, mixed>>  $kurse
+     * @param  array<int, string>  $termini
+     * @return array<string, mixed>|null
+     */
+    private function section(array $kurse, array $termini): ?array
+    {
+        [$varianten, $spalten, $namen] = $this->collect($kurse);
 
         if ($varianten === []) {
-            return $this->antwort($uebersicht, [], [], false);
+            return null;
         }
 
         // Die Haltestelle, an der sich die Umlaeufe messen lassen, und die Laenge einer Runde.
@@ -69,7 +111,170 @@ final class CourseGridService
         }
         unset($spalte);
 
-        return $this->antwort($uebersicht, $this->rows($achse, $namen), $spalten, $warnung);
+        return [
+            'termini' => $termini,
+            'rows' => $this->rows($achse, $namen),
+            'courses' => $spalten,
+            'alignment_warning' => $warnung,
+        ];
+    }
+
+    /**
+     * Zerlegt die Umläufe einer Linie nach **Laufweg** — eine Gruppe je Tabelle.
+     *
+     * Die Linie 1 ist zwei Linien unter einem Namen: Kannenstieg–Listemannstraße als reine 1,
+     * und Sudenburg–City Carré mitten in der Verknüpfung mit 13, 2 und 5. Die beiden teilen
+     * keine einzige Haltestelle. In einer Tabelle fand sich deshalb kein gemeinsamer Taktpunkt,
+     * und beide Laufwege lagen unverschoben übereinander.
+     *
+     * **Verbunden sind zwei Umläufe, wenn ihre Fahrten der gewählten Linie eine Endstelle
+     * teilen** — auch über Dritte hinweg. Endstellen statt aller Halte: Zwei getrennte
+     * Laufwege dürfen sich in der Innenstadt kreuzen, ohne zusammenzufallen. Ein Kurzläufer
+     * oder ein Ast teilt dagegen immer eine Endstelle mit dem Hauptweg und bleibt in derselben
+     * Tabelle. Ein Umlauf, der beide Laufwege fährt, verbindet sie — dann ist es richtig eine.
+     *
+     * **Das Hof-Ende einer Ausrück- oder Einrückfahrt zählt nicht als Endstelle.** Rücken beide
+     * Laufwege aus demselben Hof aus, verbände die Ausrückfahrt sonst, was im Takt nichts
+     * miteinander zu tun hat. Erkannt wird das an der Marke der Fahrt (`terminal_out` /
+     * `terminal_in`), nicht an der Haltestelle: Am Hof fahren auch Linien regulär vorbei.
+     *
+     * @param  array<int, array<string, mixed>>  $kurse
+     * @return array<int, array{courses: array<int, array<string, mixed>>, termini: array<int, string>}>
+     */
+    private function partition(array $kurse, string $line): array
+    {
+        if ($kurse === []) {
+            return [];
+        }
+
+        // Union-Find über die Umläufe: je Endstelle der erste Umlauf, der sie anfährt.
+        $eltern = array_keys($kurse);
+        $wurzel = static function (int $i) use (&$eltern): int {
+            while ($eltern[$i] !== $i) {
+                $eltern[$i] = $eltern[$eltern[$i]];
+                $i = $eltern[$i];
+            }
+
+            return $i;
+        };
+
+        $erster = [];
+        $haeufigkeit = [];
+        $namen = [];
+
+        foreach ($kurse as $i => $kurs) {
+            $eigene = $this->termini($kurs, $line, $namen);
+
+            foreach ($eigene as $stopId => $anzahl) {
+                $haeufigkeit[$i][$stopId] = ($haeufigkeit[$i][$stopId] ?? 0) + $anzahl;
+
+                if (! isset($erster[$stopId])) {
+                    $erster[$stopId] = $i;
+
+                    continue;
+                }
+
+                $a = $wurzel($i);
+                $b = $wurzel($erster[$stopId]);
+
+                if ($a !== $b) {
+                    // Die kleinere Wurzel gewinnt — so bleibt die Gruppe beim frühesten Kurs.
+                    $eltern[max($a, $b)] = min($a, $b);
+                }
+            }
+        }
+
+        $gruppen = [];
+
+        // In Kursreihenfolge: Die Gruppe mit dem ersten Kurs kommt zuerst.
+        foreach ($kurse as $i => $kurs) {
+            $w = $wurzel($i);
+            $gruppen[$w]['courses'][] = $kurs;
+
+            foreach ($haeufigkeit[$i] ?? [] as $stopId => $anzahl) {
+                $gruppen[$w]['counts'][$stopId] = ($gruppen[$w]['counts'][$stopId] ?? 0) + $anzahl;
+            }
+        }
+
+        return array_values(array_map(static function (array $g) use ($namen): array {
+            $zaehler = $g['counts'] ?? [];
+            arsort($zaehler);
+
+            return [
+                'courses' => $g['courses'],
+                'termini' => array_values(array_map(
+                    static fn (int $stopId): string => $namen[$stopId] ?? '—',
+                    array_keys($zaehler),
+                )),
+            ];
+        }, $gruppen));
+    }
+
+    /**
+     * Die Endstellen eines Umlaufs auf der gewählten Linie, mit ihrer Häufigkeit.
+     *
+     * Nur Fahrten der gewählten Linie: In der Verknüpfung fährt derselbe Umlauf auch als 13, 2
+     * und 5 — deren Endstellen sagen nichts darüber, wo die 1 fährt. Hat ein Umlauf keine
+     * einzige Fahrt dieser Linie (er erscheint über einen Anschluss), zählen ersatzweise alle.
+     *
+     * Ist der Umlauf als ausrückend markiert, fällt der erste Halt seiner ersten Fahrt weg —
+     * dort kommt das Fahrzeug aus dem Hof, nicht von einer Endstelle. Ebenso der letzte Halt der
+     * letzten Fahrt bei einer Einrück-Marke. Das andere Ende dieser Fahrten zählt weiter —
+     * auf der 2 ist Westerhüsen Hof und reguläre Endstelle zugleich und bleibt über die übrigen
+     * Fahrten im Spiel.
+     *
+     * Bleibt danach nichts übrig, zählen die Hof-Enden doch: Ein Verstärker aus einer einzigen
+     * Fahrt, als Aus- und Einrücken markiert, stünde sonst ohne Endstelle da und bekäme eine
+     * eigene Tabelle mit einer Spalte.
+     *
+     * @param  array<string, mixed>  $kurs
+     * @param  array<int, string>  $namen  wird um die Namen der gefundenen Endstellen ergänzt
+     * @param  bool  $mitHof  Marken übergehen — der Rückfallweg, wenn ohne Hof-Enden nichts bleibt
+     * @return array<int, int> stop_id => Anzahl
+     */
+    private function termini(array $kurs, string $line, array &$namen, bool $mitHof = false): array
+    {
+        $fahrten = $kurs['trips'];
+        $letzte = count($fahrten) - 1;
+        $aus = ! $mitHof && (bool) ($kurs['terminal_out']['marked'] ?? false);
+        $ein = ! $mitHof && (bool) ($kurs['terminal_in']['marked'] ?? false);
+
+        $nurLinie = array_filter($fahrten, static fn (array $f): bool => $f['line'] === $line);
+        $gezaehlt = $nurLinie === [] ? $fahrten : $nurLinie;
+
+        $ergebnis = [];
+
+        // Die Schlüssel bleiben die Positionen im ganzen Umlauf — nur so ist die erste und
+        // letzte Fahrt auch dann erkennbar, wenn sie auf einer anderen Linie fährt.
+        foreach ($gezaehlt as $position => $fahrt) {
+            $halte = $fahrt['stops'] ?? [];
+
+            if ($halte === []) {
+                continue;
+            }
+
+            $enden = [];
+
+            if (! ($aus && $position === 0)) {
+                $enden[] = $halte[0];
+            }
+
+            if (! ($ein && $position === $letzte)) {
+                $enden[] = $halte[count($halte) - 1];
+            }
+
+            foreach ($enden as $halt) {
+                $stopId = (int) $halt['stop_id'];
+                $ergebnis[$stopId] = ($ergebnis[$stopId] ?? 0) + 1;
+                $namen[$stopId] = $halt['stop_name'];
+            }
+        }
+
+        if ($ergebnis === [] && ! $mitHof && ($aus || $ein)) {
+            return $this->termini($kurs, $line, $namen, mitHof: true);
+        }
+
+        return $ergebnis;
     }
 
     /**
@@ -418,11 +623,10 @@ final class CourseGridService
 
     /**
      * @param  array<string, mixed>  $uebersicht
-     * @param  array<int, array<string, mixed>>  $zeilen
-     * @param  array<int, array<string, mixed>>  $spalten
+     * @param  array<int, array<string, mixed>>  $abschnitte
      * @return array<string, mixed>
      */
-    private function antwort(array $uebersicht, array $zeilen, array $spalten, bool $warnung): array
+    private function antwort(array $uebersicht, array $abschnitte): array
     {
         return [
             'line' => $uebersicht['line'],
@@ -433,9 +637,8 @@ final class CourseGridService
             // Darstellung wechseln, nicht den Ausschnitt.
             'stands' => $uebersicht['stands'],
             'stand' => $uebersicht['stand'],
-            'rows' => $zeilen,
-            'courses' => $spalten,
-            'alignment_warning' => $warnung,
+            // Eine Tabelle je Laufweg — bei fast jeder Linie genau eine.
+            'sections' => $abschnitte,
             // Dieselben Kennzahlen und dieselbe Liste wie die Kettenansicht: Der Umschalter
             // soll den Pflegestand nicht verändern, nur die Darstellung.
             'unassigned' => $uebersicht['unassigned'],

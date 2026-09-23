@@ -10,6 +10,7 @@ import {
   type CourseChain,
   type CourseChainTrip,
   type CourseGrid,
+  type CourseGridSection,
   type CourseTerminal,
   type LineCourseOverview,
 } from '../services/courses'
@@ -46,6 +47,14 @@ const nurUnvollstaendige = ref(false)
 const ansicht = ref<'kette' | 'tabelle'>('kette')
 
 const grid = ref<CourseGrid | null>(null)
+
+/**
+ * Der Name einer Tabelle, wenn die Linie mehrere Laufwege fährt: die beiden häufigsten
+ * Endstellen, etwa „Kannenstieg – Listemannstraße".
+ */
+function abschnittsTitel(abschnitt: CourseGridSection): string {
+  return abschnitt.termini.length > 0 ? abschnitt.termini.slice(0, 2).join(' – ') : 'Laufweg ohne Endstelle'
+}
 
 const loading = ref(true)
 const loadingKurse = ref(false)
@@ -410,7 +419,29 @@ watch(gewaehlterStand, (neu, alt) => {
           <!-- Tabelle: alle Umläufe nebeneinander -->
           <template v-if="ansicht === 'tabelle'">
             <p v-if="grid === null" class="mt-6 text-sm text-slate-500">Tabelle wird geladen …</p>
-            <CourseGridTable v-else :grid="grid" :lines="linienVerzeichnis" />
+            <p
+              v-else-if="grid.sections.length === 0"
+              class="mx-auto mt-4 max-w-6xl rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900"
+            >
+              Für diese Linie ist noch kein Umlauf vergeben. Die Ketten entstehen unter „Anschlüsse“, die Kursnummern
+              dort oder in der Fahrplan-Ansicht.
+            </p>
+            <template v-else>
+              <!-- Mehrere Laufwege ohne gemeinsamen Halt (die 1): je einer eine eigene Tabelle. -->
+              <p v-if="grid.sections.length > 1" class="mt-4 max-w-3xl text-xs text-slate-500">
+                Diese Linie fährt {{ grid.sections.length }} getrennte Laufwege — ohne gemeinsame Endstelle gibt es
+                keinen gemeinsamen Takt. Jeder bekommt deshalb seine eigene Tabelle.
+              </p>
+              <CourseGridTable
+                v-for="(abschnitt, i) in grid.sections"
+                :key="abschnitt.courses[0]?.id ?? i"
+                :grid="abschnitt"
+                :lines="linienVerzeichnis"
+                :title="grid.sections.length > 1 ? abschnittsTitel(abschnitt) : undefined"
+                :legend="i === grid.sections.length - 1"
+                :class="i > 0 ? 'mt-10' : ''"
+              />
+            </template>
           </template>
 
           <!-- Kette: je Umlauf ein Abschnitt untereinander -->

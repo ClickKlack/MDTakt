@@ -63,6 +63,14 @@ final class CourseGridTest extends TestCase
         ])->assertCreated();
     }
 
+    private function markiereAusruecken(ConsolidatedTrip $trip): void
+    {
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'start',
+            'to_trip_id' => $trip->id,
+        ])->assertCreated();
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -72,6 +80,19 @@ final class CourseGridTest extends TestCase
             ->getJson("/api/v1/admin/lines/{$linie}/course-grid?period={$this->periode->id}&day_type=mo_fr")
             ->assertOk()
             ->json('data');
+    }
+
+    /**
+     * Die einzige Tabelle der Linie — für alle Fälle mit nur einem Laufweg.
+     *
+     * @return array<string, mixed>
+     */
+    private function tabelle(string $linie = '1'): array
+    {
+        $abschnitte = $this->hole($linie)['sections'];
+        $this->assertCount(1, $abschnitte, 'Ein Laufweg ergibt genau eine Tabelle.');
+
+        return $abschnitte[0];
     }
 
     /**
@@ -104,11 +125,7 @@ final class CourseGridTest extends TestCase
     {
         $this->version();
 
-        $daten = $this->hole();
-
-        $this->assertSame([], $daten['rows']);
-        $this->assertSame([], $daten['courses']);
-        $this->assertFalse($daten['alignment_warning']);
+        $this->assertSame([], $this->hole()['sections']);
     }
 
     public function test_stops_become_rows_and_a_course_becomes_a_column(): void
@@ -117,7 +134,7 @@ final class CourseGridTest extends TestCase
         $a = $this->f->fahrt($version, ['A', 'B', 'C'], ['06:00:00', '06:15:00', '06:30:00']);
         $this->setzeKurs($a, '03');
 
-        $daten = $this->hole();
+        $daten = $this->tabelle();
 
         $this->assertSame(['A', 'B', 'C'], array_column($daten['rows'], 'stop_name'));
         $this->assertCount(1, $daten['courses']);
@@ -136,7 +153,7 @@ final class CourseGridTest extends TestCase
         $a->stopTimes()->where('stop_sequence', 2)->update(['departure_time' => '06:32:00']);
         $this->setzeKurs($a, '03');
 
-        $zellen = $this->hole()['courses'][0]['cells'];
+        $zellen = $this->tabelle()['courses'][0]['cells'];
 
         $this->assertSame('departure', $zellen[0]['kind']);
         $this->assertSame('06:00:00', $zellen[0]['time']);
@@ -160,7 +177,7 @@ final class CourseGridTest extends TestCase
         $this->verknuepfe($hin, $rueck);
         $this->setzeKurs($hin, '01');
 
-        $zellen = $this->hole()['courses'][0]['cells'];
+        $zellen = $this->tabelle()['courses'][0]['cells'];
 
         $this->assertSame(
             [true, false, false, true, false, false],
@@ -186,7 +203,7 @@ final class CourseGridTest extends TestCase
         $this->setzeKurs($a, '01');
         $this->setzeKurs($b, '02');
 
-        $daten = $this->hole();
+        $daten = $this->tabelle();
 
         $this->assertCount(3, $daten['rows'], 'Der gemeinsame Laufweg ergibt drei Zeilen, nicht sechs.');
         $this->assertSame(['01', '02'], array_column($daten['courses'], 'number'));
@@ -209,7 +226,7 @@ final class CourseGridTest extends TestCase
         $this->verknuepfe($hin, $rueck);
         $this->setzeKurs($hin, '01');
 
-        $daten = $this->hole();
+        $daten = $this->tabelle();
 
         $this->assertSame(['A', 'B', 'B', 'A'], array_column($daten['rows'], 'stop_name'));
         $this->assertSame(['06:00:00', '06:30:00', '06:35:00', '07:05:00'], $this->zeiten($daten['courses'][0]));
@@ -253,7 +270,7 @@ final class CourseGridTest extends TestCase
             $this->setzeKurs($vorher, $nummer);
         }
 
-        $daten = $this->hole();
+        $daten = $this->tabelle();
 
         $this->assertSame(['01', '02'], array_column($daten['courses'], 'number'), 'Die Spalten bleiben in Kursreihenfolge.');
 
@@ -330,7 +347,7 @@ final class CourseGridTest extends TestCase
             $this->setzeKurs($vorher, $nummer);
         }
 
-        $daten = $this->hole();
+        $daten = $this->tabelle();
 
         $erste = [];
 
@@ -385,7 +402,7 @@ final class CourseGridTest extends TestCase
         $kurz = $this->f->fahrt($version, ['A', 'B'], ['06:10:00', '06:40:00']);
         $this->setzeKurs($kurz, '02');
 
-        $daten = $this->hole();
+        $daten = $this->tabelle();
 
         $this->assertSame(['06:00:00', '06:30:00', '06:35:00', '07:05:00'], $this->zeiten($daten['courses'][0]));
         $this->assertSame(['06:10:00', '06:40:00', null, null], $this->zeiten($daten['courses'][1]));
@@ -406,7 +423,7 @@ final class CourseGridTest extends TestCase
         $this->verknuepfe($a, $b);
         $this->setzeKurs($a, '01');
 
-        $spalte = $this->hole('1')['courses'][0];
+        $spalte = $this->tabelle('1')['courses'][0];
 
         $this->assertSame(['1', '13'], $spalte['lines']);
         $this->assertSame(['1', '1', '13', '13'], array_map(static fn (?array $z): ?string => $z['line'] ?? null, $spalte['cells']));
@@ -422,7 +439,174 @@ final class CourseGridTest extends TestCase
         $a = $this->f->fahrt($version, ['A', 'B'], ['23:50:00', '00:19:00']);
         $this->setzeKurs($a, '01');
 
-        $this->assertSame(['23:50:00', '00:19:00'], $this->zeiten($this->hole('N1')['courses'][0]));
+        $this->assertSame(['23:50:00', '00:19:00'], $this->zeiten($this->tabelle('N1')['courses'][0]));
+    }
+
+    /**
+     * Der Fall der Linie 1: zwei Laufwege ohne gemeinsamen Halt unter einer Liniennummer. Sie
+     * bekommen je eine eigene Tabelle — sonst fände sich kein Taktpunkt, und beide lägen
+     * unverschoben übereinander.
+     */
+    public function test_two_separate_routes_become_two_tables(): void
+    {
+        $version = $this->version();
+
+        $nord = $this->f->fahrt($version, ['Kannenstieg', 'Zoo'], ['06:00:00', '06:20:00']);
+        $sued = $this->f->fahrt($version, ['Sudenburg', 'City Carré'], ['06:05:00', '06:25:00']);
+
+        $this->setzeKurs($sued, '02');
+        $this->setzeKurs($nord, '31');
+
+        $abschnitte = $this->hole()['sections'];
+
+        $this->assertCount(2, $abschnitte);
+        // In Kursreihenfolge: Die Tabelle mit dem ersten Kurs kommt zuerst.
+        $this->assertSame(['02'], array_column($abschnitte[0]['courses'], 'number'));
+        $this->assertSame(['31'], array_column($abschnitte[1]['courses'], 'number'));
+
+        // Jede Tabelle trägt nur ihre eigenen Halte.
+        $this->assertSame(['Sudenburg', 'City Carré'], array_column($abschnitte[0]['rows'], 'stop_name'));
+        $this->assertSame(['Kannenstieg', 'Zoo'], array_column($abschnitte[1]['rows'], 'stop_name'));
+        $this->assertEqualsCanonicalizing(['Sudenburg', 'City Carré'], $abschnitte[0]['termini']);
+    }
+
+    /**
+     * Ein Kurzläufer endet mitten auf dem Weg, teilt aber eine Endstelle mit dem Hauptweg — er
+     * gehört in dieselbe Tabelle. Gekreuzte Zwischenhalte allein verbinden dagegen nichts.
+     */
+    public function test_a_short_working_stays_in_the_same_table(): void
+    {
+        $version = $this->version();
+
+        $lang = $this->f->fahrt($version, ['A', 'B', 'C'], ['06:00:00', '06:10:00', '06:20:00']);
+        $kurz = $this->f->fahrt($version, ['A', 'B'], ['06:05:00', '06:15:00']);
+
+        $this->setzeKurs($lang, '01');
+        $this->setzeKurs($kurz, '02');
+
+        $this->assertSame(['01', '02'], array_column($this->tabelle()['courses'], 'number'));
+    }
+
+    public function test_crossing_at_an_intermediate_stop_does_not_join_two_routes(): void
+    {
+        $version = $this->version();
+
+        $a = $this->f->fahrt($version, ['A', 'Mitte', 'B'], ['06:00:00', '06:10:00', '06:20:00']);
+        $b = $this->f->fahrt($version, ['C', 'Mitte', 'D'], ['06:05:00', '06:15:00', '06:25:00']);
+
+        $this->setzeKurs($a, '01');
+        $this->setzeKurs($b, '02');
+
+        $this->assertCount(2, $this->hole()['sections']);
+    }
+
+    /**
+     * Rücken beide Laufwege aus demselben Hof aus, verbindet die Ausrückfahrt sie nicht: Das
+     * Hof-Ende einer als Ausrücken markierten Fahrt ist keine Endstelle des Takts.
+     */
+    public function test_a_shared_depot_does_not_join_two_routes(): void
+    {
+        $version = $this->version();
+
+        $ausNord = $this->f->fahrt($version, ['Betriebshof', 'Kannenstieg'], ['05:40:00', '05:55:00']);
+        $nord = $this->f->fahrt($version, ['Kannenstieg', 'Zoo'], ['06:00:00', '06:20:00']);
+        $ausSued = $this->f->fahrt($version, ['Betriebshof', 'Sudenburg'], ['05:45:00', '06:00:00']);
+        $sued = $this->f->fahrt($version, ['Sudenburg', 'City Carré'], ['06:05:00', '06:25:00']);
+
+        $this->verknuepfe($ausNord, $nord);
+        $this->verknuepfe($ausSued, $sued);
+        $this->setzeKurs($ausNord, '31');
+        $this->setzeKurs($ausSued, '02');
+
+        $this->markiereAusruecken($ausNord);
+        $this->markiereAusruecken($ausSued);
+
+        $abschnitte = $this->hole()['sections'];
+
+        $this->assertCount(2, $abschnitte);
+        $this->assertNotContains('Betriebshof', $abschnitte[0]['termini']);
+    }
+
+    /**
+     * Der Fall der 2: Westerhüsen ist Hof **und** reguläre Endstelle. Ein Verstärker aus einer
+     * einzigen Fahrt, als Aus- und Einrücken markiert, hätte ohne Hof-Enden gar keine Endstelle
+     * mehr — er gehört trotzdem in die Tabelle der Linie, nicht in eine eigene.
+     */
+    public function test_a_single_trip_marked_on_both_ends_still_joins_its_line(): void
+    {
+        $version = $this->version('2');
+
+        $regel = $this->f->fahrt($version, ['Westerhüsen', 'City Carré'], ['06:00:00', '06:30:00']);
+        $verstaerker = $this->f->fahrt($version, ['Westerhüsen', 'City Carré'], ['07:00:00', '07:30:00']);
+
+        $this->setzeKurs($regel, '01');
+        $this->setzeKurs($verstaerker, '02');
+
+        $this->markiereAusruecken($verstaerker);
+        $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'end',
+            'from_trip_id' => $verstaerker->id,
+        ])->assertCreated();
+
+        $this->assertSame(['01', '02'], array_column($this->tabelle('2')['courses'], 'number'));
+    }
+
+    /**
+     * Die Marke entscheidet, nicht die Haltestelle: Ohne Ausrück-Marke ist der gemeinsame Halt
+     * eine gewöhnliche Endstelle — am Hof fahren auch Linien regulär vorbei.
+     */
+    public function test_an_unmarked_shared_terminus_joins_two_routes(): void
+    {
+        $version = $this->version();
+
+        $ausNord = $this->f->fahrt($version, ['Betriebshof', 'Kannenstieg'], ['05:40:00', '05:55:00']);
+        $ausSued = $this->f->fahrt($version, ['Betriebshof', 'Sudenburg'], ['05:45:00', '06:00:00']);
+
+        $this->setzeKurs($ausNord, '31');
+        $this->setzeKurs($ausSued, '02');
+
+        $this->assertSame(['02', '31'], array_column($this->tabelle()['courses'], 'number'));
+    }
+
+    /**
+     * Fährt ein Umlauf beide Laufwege, gehören sie für diese Linie zusammen — dann bleibt es
+     * richtig bei einer Tabelle.
+     */
+    public function test_a_course_serving_both_routes_joins_them(): void
+    {
+        $version = $this->version();
+
+        $nord = $this->f->fahrt($version, ['Kannenstieg', 'Zoo'], ['06:00:00', '06:20:00']);
+        $sued = $this->f->fahrt($version, ['Sudenburg', 'City Carré'], ['07:05:00', '07:25:00']);
+        $nurSued = $this->f->fahrt($version, ['Sudenburg', 'City Carré'], ['06:05:00', '06:25:00']);
+
+        // Ohne Anschluss dazwischen — die Überfahrt ist eine Betriebsfahrt ohne GTFS-Eintrag.
+        $this->setzeKurs($nord, '01');
+        $this->setzeKurs($sued, '01');
+        $this->setzeKurs($nurSued, '02');
+
+        $this->assertSame(['01', '02'], array_column($this->tabelle()['courses'], 'number'));
+    }
+
+    /**
+     * In der Verknüpfung fährt derselbe Umlauf auch als andere Linie. Deren Endstellen verbinden
+     * nichts: Es zählt nur, wo die gewählte Linie fährt.
+     */
+    public function test_only_termini_of_the_selected_line_join_courses(): void
+    {
+        $eins = $this->version('1');
+        $dreizehn = $this->version('13');
+
+        $nord = $this->f->fahrt($eins, ['Kannenstieg', 'Zoo'], ['06:00:00', '06:20:00']);
+        $sued = $this->f->fahrt($eins, ['Sudenburg', 'City Carré'], ['06:05:00', '06:25:00']);
+        // Die 13 endet zufällig am Zoo — für die Tabelle der 1 ohne Belang.
+        $weiter = $this->f->fahrt($dreizehn, ['City Carré', 'Zoo'], ['06:30:00', '06:50:00']);
+
+        $this->verknuepfe($sued, $weiter);
+        $this->setzeKurs($nord, '31');
+        $this->setzeKurs($sued, '02');
+
+        $this->assertCount(2, $this->hole('1')['sections']);
     }
 
     public function test_summary_and_unassigned_match_the_chain_view(): void

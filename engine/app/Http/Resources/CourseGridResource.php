@@ -8,7 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * Die Umläufe einer Linie als Tabelle: Halte als Zeilen, ein Kurs je Spalte.
+ * Die Umläufe einer Linie als Tabelle: Halte als Zeilen, ein Kurs je Spalte — eine Tabelle je
+ * Laufweg (`sections`).
  *
  * Listet die Schlüssel explizit auf, statt das Service-Ergebnis durchzureichen: So steht der
  * Vertrag an einer Stelle und verschiebt sich nicht still, wenn der Service ein Feld ergänzt.
@@ -29,10 +30,7 @@ final class CourseGridResource extends JsonResource
             'day_type_label' => $this->resource['day_type_label'],
             'stands' => $this->resource['stands'],
             'stand' => $this->resource['stand'],
-            'rows' => $this->resource['rows'],
-            'courses' => $this->resource['courses'],
-
-            'alignment_warning' => $this->resource['alignment_warning'],
+            'sections' => $this->resource['sections'],
             'unassigned' => $this->resource['unassigned'],
             'summary' => $this->resource['summary'],
         ];

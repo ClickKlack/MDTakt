@@ -25,94 +25,104 @@ headers {
 
 assert {
   res.status: eq 200
-  res.body.data.rows: isArray
-  res.body.data.courses: isArray
+  res.body.data.sections: isArray
   res.body.data.unassigned: isArray
 }
 
 script:post-response {
-  const d = res.body.data;
-
-  // Jede Spalte muss genau so viele Zellen haben wie es Zeilen gibt — sonst zeigte die
-  // Tabelle eine Uhrzeit auf der falschen Zeile, und das ist der einzige Fehler, den diese
-  // Ansicht nicht machen darf.
-  for (const kurs of d.courses) {
-    if (kurs.cells.length !== d.rows.length) {
-      throw new Error("Kurs " + kurs.number + ": " + kurs.cells.length + " Zellen zu " + d.rows.length + " Zeilen");
-    }
-  }
-
-  // Die Zeilen sind fortlaufend nummeriert.
-  d.rows.forEach((zeile, i) => {
-    if (zeile.position !== i) {
-      throw new Error("Zeile " + i + " traegt position " + zeile.position);
-    }
-  });
-
-  // repeat_index zaehlt die Beruehrungen desselben Halts. Die zweite Beruehrung ist die
-  // naechste Runde, keine Doppelung - wer das verwechselt, wirft Zeilen zusammen.
-  const gesehen = {};
-  for (const zeile of d.rows) {
-    const erwartet = gesehen[zeile.stop_id] === undefined ? 0 : gesehen[zeile.stop_id] + 1;
-    if (zeile.repeat_index !== erwartet) {
-      throw new Error("Halt " + zeile.stop_name + ": repeat_index " + zeile.repeat_index + " statt " + erwartet);
-    }
-    gesehen[zeile.stop_id] = erwartet;
-  }
-
-  // Je Spalte muss die Zeit entlang der Zeilen aufsteigen - eine Spalte ist der Tag eines
-  // Fahrzeugs, und der laeuft vorwaerts. Verglichen wird ueber Sekunden, nie lexikalisch:
-  // GTFS erlaubt "7:00:00" neben "07:00:00", und als String ist "7:00:00" > "23:50:00".
+  // Verglichen wird ueber Sekunden, nie lexikalisch: GTFS erlaubt "7:00:00" neben
+  // "07:00:00", und als String ist "7:00:00" > "23:50:00".
   const sekunden = (t) => {
     const m = /^(\d{1,3}):(\d{2}):(\d{2})$/.exec(t);
     return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
   };
 
-  // Und quer gelesen muss eine Taktzeile ebenfalls aufsteigen - dafuer sind die Spalten um
-  // ganze Umlaeufe gegeneinander verschoben. Geprueft werden nur voll belegte Zeilen: Am
-  // Ausrueck-Rand faehrt nicht jedes Fahrzeug, und dort darf die Reihenfolge springen.
-  //
-  // Nicht auf 100 % bestehen: Sind die Umlaeufe einer Linie verschieden lang, traefe es keine
-  // Verschiebung. Kippt aber die Mehrheit, stimmt die Ausrichtung nicht mehr.
-  let voll = 0;
-  let auf = 0;
-
-  for (const zeile of d.rows) {
-    const zellen = d.courses.map((k) => k.cells[zeile.position]);
-    if (d.courses.length < 2 || zellen.some((z) => z === null)) {
-      continue;
-    }
-    voll++;
-    const werte = zellen.map((z) => sekunden(z.time));
-    if (werte.every((w, i) => i === 0 || w === null || werte[i - 1] === null || werte[i - 1] <= w)) {
-      auf++;
+  // Eine Tabelle je Laufweg. Zwei Tabellen teilen sich keinen Kurs - sonst stuende dasselbe
+  // Fahrzeug zweimal da.
+  const kurseGesehen = {};
+  for (const abschnitt of res.body.data.sections) {
+    for (const kurs of abschnitt.courses) {
+      if (kurseGesehen[kurs.id]) {
+        throw new Error("Kurs " + kurs.number + " steht in mehr als einer Tabelle");
+      }
+      kurseGesehen[kurs.id] = true;
     }
   }
 
-  if (voll > 0 && auf * 2 < voll) {
-    throw new Error("Nur " + auf + " von " + voll + " voll belegten Zeilen steigen quer gelesen auf");
-  }
-
-  // Die letzte belegte Zelle einer Spalte ist das Ende der Kette - dort steht eine Ankunft.
-  // Die erste beginnt eine Fahrt.
-  for (const kurs of d.courses) {
-    const belegt = kurs.cells.filter((z) => z !== null);
-    if (belegt.length === 0) {
-      continue;
-    }
-    if (belegt[belegt.length - 1].kind !== "arrival") {
-      throw new Error("Kurs " + kurs.number + ": letzte Zelle ist keine Ankunft");
-    }
-    if (belegt[0].starts_trip !== true) {
-      throw new Error("Kurs " + kurs.number + ": erste Zelle beginnt keine Fahrt");
+  for (const d of res.body.data.sections) {
+    // Jede Spalte muss genau so viele Zellen haben wie es Zeilen gibt — sonst zeigte die
+    // Tabelle eine Uhrzeit auf der falschen Zeile, und das ist der einzige Fehler, den diese
+    // Ansicht nicht machen darf.
+    for (const kurs of d.courses) {
+      if (kurs.cells.length !== d.rows.length) {
+        throw new Error("Kurs " + kurs.number + ": " + kurs.cells.length + " Zellen zu " + d.rows.length + " Zeilen");
+      }
     }
 
-    // An der Endstelle folgt auf eine Ankunft der Beginn der naechsten Fahrt - das Paar, das
-    // die Oberflaeche hervorhebt und zwischen dem die Trennlinie sitzt. Ausnahme: das Ende
-    // der Kette, danach kommt nichts mehr.
-    for (let i = 0; i < belegt.length - 1; i++) {
-      if (belegt[i].kind === "arrival" && belegt[i + 1].starts_trip !== true) {
-        throw new Error("Kurs " + kurs.number + ": nach einer Ankunft beginnt keine Fahrt");
+    // Die Zeilen sind fortlaufend nummeriert.
+    d.rows.forEach((zeile, i) => {
+      if (zeile.position !== i) {
+        throw new Error("Zeile " + i + " traegt position " + zeile.position);
+      }
+    });
+
+    // repeat_index zaehlt die Beruehrungen desselben Halts. Die zweite Beruehrung ist die
+    // naechste Runde, keine Doppelung - wer das verwechselt, wirft Zeilen zusammen.
+    const gesehen = {};
+    for (const zeile of d.rows) {
+      const erwartet = gesehen[zeile.stop_id] === undefined ? 0 : gesehen[zeile.stop_id] + 1;
+      if (zeile.repeat_index !== erwartet) {
+        throw new Error("Halt " + zeile.stop_name + ": repeat_index " + zeile.repeat_index + " statt " + erwartet);
+      }
+      gesehen[zeile.stop_id] = erwartet;
+    }
+
+    // Und quer gelesen muss eine Taktzeile ebenfalls aufsteigen - dafuer sind die Spalten um
+    // ganze Umlaeufe gegeneinander verschoben. Geprueft werden nur voll belegte Zeilen: Am
+    // Ausrueck-Rand faehrt nicht jedes Fahrzeug, und dort darf die Reihenfolge springen.
+    //
+    // Nicht auf 100 % bestehen: Sind die Umlaeufe einer Linie verschieden lang, traefe es keine
+    // Verschiebung. Kippt aber die Mehrheit, stimmt die Ausrichtung nicht mehr.
+    let voll = 0;
+    let auf = 0;
+
+    for (const zeile of d.rows) {
+      const zellen = d.courses.map((k) => k.cells[zeile.position]);
+      if (d.courses.length < 2 || zellen.some((z) => z === null)) {
+        continue;
+      }
+      voll++;
+      const werte = zellen.map((z) => sekunden(z.time));
+      if (werte.every((w, i) => i === 0 || w === null || werte[i - 1] === null || werte[i - 1] <= w)) {
+        auf++;
+      }
+    }
+
+    if (voll > 0 && auf * 2 < voll) {
+      throw new Error("Nur " + auf + " von " + voll + " voll belegten Zeilen steigen quer gelesen auf");
+    }
+
+    // Die letzte belegte Zelle einer Spalte ist das Ende der Kette - dort steht eine Ankunft.
+    // Die erste beginnt eine Fahrt.
+    for (const kurs of d.courses) {
+      const belegt = kurs.cells.filter((z) => z !== null);
+      if (belegt.length === 0) {
+        continue;
+      }
+      if (belegt[belegt.length - 1].kind !== "arrival") {
+        throw new Error("Kurs " + kurs.number + ": letzte Zelle ist keine Ankunft");
+      }
+      if (belegt[0].starts_trip !== true) {
+        throw new Error("Kurs " + kurs.number + ": erste Zelle beginnt keine Fahrt");
+      }
+
+      // An der Endstelle folgt auf eine Ankunft der Beginn der naechsten Fahrt - das Paar, das
+      // die Oberflaeche hervorhebt und zwischen dem die Trennlinie sitzt. Ausnahme: das Ende
+      // der Kette, danach kommt nichts mehr.
+      for (let i = 0; i < belegt.length - 1; i++) {
+        if (belegt[i].kind === "arrival" && belegt[i + 1].starts_trip !== true) {
+          throw new Error("Kurs " + kurs.number + ": nach einer Ankunft beginnt keine Fahrt");
+        }
       }
     }
   }
@@ -136,34 +146,39 @@ docs {
       "line": "6",
       "period": { "id": 1, "label": "21.09.2026", "status": "current" },
       "day_type": "mo_fr", "day_type_label": "Mo-Fr",
-      "rows": [
-        { "position": 0, "stop_id": 512, "stop_name": "Herrenkrug",  "repeat_index": 0 },
-        { "position": 1, "stop_id": 388, "stop_name": "Alter Markt", "repeat_index": 0 },
-        { "position": 2, "stop_id": 391, "stop_name": "Sudenburg",   "repeat_index": 0 },
-        { "position": 3, "stop_id": 391, "stop_name": "Sudenburg",   "repeat_index": 1 },
-        { "position": 4, "stop_id": 388, "stop_name": "Alter Markt", "repeat_index": 1 }
+      "sections": [
+        {
+          "termini": ["Herrenkrug", "Sudenburg"],
+          "rows": [
+            { "position": 0, "stop_id": 512, "stop_name": "Herrenkrug",  "repeat_index": 0 },
+            { "position": 1, "stop_id": 388, "stop_name": "Alter Markt", "repeat_index": 0 },
+            { "position": 2, "stop_id": 391, "stop_name": "Sudenburg",   "repeat_index": 0 },
+            { "position": 3, "stop_id": 391, "stop_name": "Sudenburg",   "repeat_index": 1 },
+            { "position": 4, "stop_id": 388, "stop_name": "Alter Markt", "repeat_index": 1 }
+          ],
+          "courses": [
+            { "id": 4, "number": "01", "lines": ["6"], "trip_count": 21, "breaks": 0, "duplicate": false,
+              "first_departure": "05:24:00", "last_arrival": "23:41:00",
+              "cells": [
+                { "time": "06:06:00", "kind": "departure", "starts_trip": true,  "line": "6" },
+                { "time": "06:20:00", "kind": "departure", "starts_trip": false, "line": "6" },
+                { "time": "06:35:00", "kind": "arrival",   "starts_trip": false, "line": "6" },
+                { "time": "06:41:00", "kind": "departure", "starts_trip": true,  "line": "6" },
+                { "time": "06:55:00", "kind": "departure", "starts_trip": false, "line": "6" }
+              ] },
+            { "id": 5, "number": "02", "lines": ["6"], "trip_count": 21, "breaks": 0, "duplicate": false,
+              "first_departure": "05:34:00", "last_arrival": "23:51:00",
+              "cells": [
+                { "time": "06:16:00", "kind": "departure", "starts_trip": true,  "line": "6" },
+                { "time": "06:30:00", "kind": "departure", "starts_trip": false, "line": "6" },
+                { "time": "06:45:00", "kind": "arrival",   "starts_trip": false, "line": "6" },
+                null,
+                null
+              ] }
+          ],
+          "alignment_warning": false
+        }
       ],
-      "courses": [
-        { "id": 4, "number": "01", "lines": ["6"], "trip_count": 21, "breaks": 0, "duplicate": false,
-          "first_departure": "05:24:00", "last_arrival": "23:41:00",
-          "cells": [
-            { "time": "06:06:00", "kind": "departure", "starts_trip": true,  "line": "6" },
-            { "time": "06:20:00", "kind": "departure", "starts_trip": false, "line": "6" },
-            { "time": "06:35:00", "kind": "arrival",   "starts_trip": false, "line": "6" },
-            { "time": "06:41:00", "kind": "departure", "starts_trip": true,  "line": "6" },
-            { "time": "06:55:00", "kind": "departure", "starts_trip": false, "line": "6" }
-          ] },
-        { "id": 5, "number": "02", "lines": ["6"], "trip_count": 21, "breaks": 0, "duplicate": false,
-          "first_departure": "05:34:00", "last_arrival": "23:51:00",
-          "cells": [
-            { "time": "06:16:00", "kind": "departure", "starts_trip": true,  "line": "6" },
-            { "time": "06:30:00", "kind": "departure", "starts_trip": false, "line": "6" },
-            { "time": "06:45:00", "kind": "arrival",   "starts_trip": false, "line": "6" },
-            null,
-            null
-          ] }
-      ],
-      "alignment_warning": false,
       "unassigned": [],
       "summary": { "courses": 16, "assigned_trips": 394, "unassigned_trips": 0, "breaks": 0 }
     }
@@ -228,6 +243,14 @@ docs {
   sich dann lueckenhaft. Die Ausrichtung ist eine Heuristik, aber eine mit Zusicherung — ein
   Fehlgriff aeussert sich in ueberfluessigen Zeilen, **nie** in einer Uhrzeit an der falschen
   Stelle.
+
+  **Eine Tabelle je Laufweg (`sections`).** Fast jede Linie hat genau eine. Die 1 hat zwei:
+  Kannenstieg–Listemannstrasse als reine 1 und Sudenburg–City Carre in der Verknuepfung mit
+  13, 2 und 5 - ohne gemeinsamen Halt, also ohne gemeinsamen Taktpunkt. Zwei Umlaeufe
+  gehoeren in dieselbe Tabelle, wenn ihre Fahrten der gewaehlten Linie eine Endstelle teilen
+  (auch ueber Dritte). Das Hof-Ende einer als Ausruecken/Einruecken markierten Fahrt zaehlt
+  dabei nicht, ebenso wenig Endstellen anderer Linien desselben Umlaufs. `termini` nennt die
+  Endstellen nach Haeufigkeit; die ersten beiden benennen die Tabelle.
 
   **Die Antwort wiegt.** Am Realbestand sind es fuer Linie 6 (Mo-Fr, 16 Umlaeufe, 394 Fahrten)
   rund 8.500 Zellen. Deshalb ein eigener Endpunkt: Wer nur die Ketten braucht, nimmt `/courses`.

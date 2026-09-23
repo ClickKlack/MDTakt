@@ -257,7 +257,49 @@ final class CourseCarryoverTest extends TestCase
      * Kopieren geht nicht — die Gegenfahrt hängt noch an der alten Fahrt, und ein Fahrzeug hat
      * höchstens einen Vorgänger. Gemeldet statt still übergangen.
      */
-    public function test_a_link_to_another_line_is_reported_as_blocked(): void
+    /**
+     * **Ein Anschluss auf eine fremde Linie geht jetzt mit** — wenn die beiden Versionen an
+     * verschiedenen Tagen gelten.
+     *
+     * Die Gegenfahrt bleibt, wo sie ist, und bekommt einen **zweiten** Anschluss auf die Fahrt
+     * der neuen Version: Vor dem Wechseltag fährt das Fahrzeug auf die alte weiter, danach auf
+     * die neue. Bis zum 23.09.2026 stand dem ein Unique-Constraint im Weg, und dieser Fall
+     * landete unter „blockiert" mit der Bitte, ihn von Hand zu setzen (KURSE §3).
+     */
+    public function test_a_link_to_another_line_is_carried_when_the_days_differ(): void
+    {
+        $alt = $this->f->version('1', FahrplanTyp::MoFrNormal, 1, $this->periode);
+        $this->f->gueltigkeit($alt, '2026-08-17', '2026-08-21');
+
+        $neu = $this->f->version('1', FahrplanTyp::MoFrNormal, 2, $this->periode);
+        $this->f->gueltigkeit($neu, '2026-08-24', '2026-08-28');
+
+        // Die 13 laeuft durchgehend — sie ist die Gegenfahrt, die stehen bleibt.
+        $andere = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $this->periode);
+        $this->f->gueltigkeit($andere, '2026-08-17', '2026-08-28');
+
+        $alteFahrt = $this->f->fahrt($alt, ['Kannenstieg', 'Sudenburg'], ['06:14:00', '06:48:00'], 'sig-gleich');
+        $neueFahrt = $this->f->fahrt($neu, ['Kannenstieg', 'Sudenburg'], ['06:14:00', '06:48:00'], 'sig-gleich');
+        $fremdeFahrt = $this->f->fahrt($andere, ['Sudenburg', 'Westerhüsen'], ['06:52:00', '07:24:00'], 'sig-13');
+
+        $this->verknuepfe($alteFahrt, $fremdeFahrt);
+
+        $daten = $this->uebernimm($alt, $neu)->assertOk()->json('data');
+
+        $this->assertSame(1, $daten['summary']['links_carried']);
+        $this->assertSame(0, $daten['summary']['blocked']);
+
+        // Beide Anschlüsse stehen nebeneinander, jeder für seine Tage.
+        $this->assertDatabaseHas('trip_links', ['from_trip_id' => $alteFahrt->id, 'to_trip_id' => $fremdeFahrt->id]);
+        $this->assertDatabaseHas('trip_links', ['from_trip_id' => $neueFahrt->id, 'to_trip_id' => $fremdeFahrt->id]);
+    }
+
+    /**
+     * Gelten beide Versionen an denselben Tagen, bleibt der bestehende Anschluss stehen: An
+     * einem Tag hat das Fahrzeug genau einen Vorgänger. Der Fall wird gemeldet, nicht
+     * stillschweigend übergangen.
+     */
+    public function test_a_carried_link_on_the_same_days_is_reported(): void
     {
         $alt = $this->version('1', 1);
         $neu = $this->version('1', 2);
@@ -273,9 +315,9 @@ final class CourseCarryoverTest extends TestCase
 
         $this->assertSame(0, $daten['summary']['links_carried']);
         $this->assertSame(1, $daten['summary']['blocked']);
-        $this->assertStringContainsString('außerhalb dieser Version', $daten['blocked'][0]['reason']);
+        $this->assertStringContainsString('denselben Tagen', $daten['blocked'][0]['reason']);
 
-        // Der alte Anschluss bleibt unangetastet — er gilt fuer die Tage der alten Version weiter.
+        // Der alte Anschluss bleibt unangetastet.
         $this->assertDatabaseHas('trip_links', [
             'from_trip_id' => $alteFahrt->id,
             'to_trip_id' => $fremdeFahrt->id,

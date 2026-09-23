@@ -41,6 +41,7 @@ final class CourseCarryoverService
     public function __construct(
         private readonly LineVersionDiffService $diff,
         private readonly ConsolidatedTripInfoResolver $tripInfo,
+        private readonly TripLinkValidity $validity,
     ) {}
 
     /**
@@ -104,7 +105,13 @@ final class CourseCarryoverService
 
         if ($anwenden) {
             $this->writeCourses($kursPlan);
-            $this->writeLinks($linkPlan);
+
+            // Was beim Schreiben liegen bleibt, gehört zu demselben „blockiert" wie das, was
+            // schon die Planung aussortiert — sonst verschwände es stillschweigend. Und der
+            // Plan schrumpft auf das Geschriebene: In der Vorschau zählt `links_carried` das
+            // Vorhaben, nach dem Anwenden die Tatsachen.
+            [$linkPlan, $uebersprungen] = $this->writeLinks($linkPlan);
+            $blockiert = [...$blockiert, ...$uebersprungen];
         }
 
         return [
@@ -120,6 +127,8 @@ final class CourseCarryoverService
                 'course_numbers' => count($kursZaehler),
                 'links_carried' => count(array_filter($linkPlan, static fn (array $l): bool => $l['kind'] === TripLinkKind::Link->value)),
                 'terminals_carried' => count(array_filter($linkPlan, static fn (array $l): bool => $l['kind'] !== TripLinkKind::Link->value)),
+                // In der Vorschau die Zahl der geplanten, nach dem Schreiben die der
+                // tatsaechlich uebersprungenen — beides steht unter `blocked`.
                 'blocked' => count($blockiert),
                 'lost' => count($verloren),
             ],
@@ -181,25 +190,15 @@ final class CourseCarryoverService
                 continue;
             }
 
-            // Ein Anschluss, dessen Gegenfahrt außerhalb dieser Version liegt: Die Gegenfahrt
-            // hängt bereits an der alten Fahrt, und ein Fahrzeug hat höchstens einen Vorgänger.
-            if ($vonNeu === null || $nachNeu === null) {
-                $aussen = $vonNeu === null ? $von : $nach;
-
-                $blockiert[] = [
-                    'trip' => $this->describeTrip($vonNeu ?? $nachNeu),
-                    'partner' => $this->describeTrip($aussen),
-                    'reason' => 'Der Anschlusspartner liegt außerhalb dieser Version und hängt noch an der alten Fahrt. '
-                        .'Nach dem Wechsel von Hand neu setzen.',
-                ];
-
-                continue;
-            }
-
+            // **Eine Seite außerhalb dieser Version ist kein Hindernis mehr.** Sie bleibt, wo
+            // sie ist, und bekommt einen zweiten Anschluss auf die Fahrt der neuen Version:
+            // Das Fahrzeug fährt vor dem Wechseltag auf die alte weiter, danach auf die neue,
+            // und beides zugleich gilt an keinem Tag (KURSE §3). Bis zum 23.09.2026 stand dem
+            // ein Unique-Constraint im Weg, und dieser Fall landete unter „blockiert".
             $plan[] = [
                 'kind' => TripLinkKind::Link->value,
-                'from_trip_id' => $vonNeu,
-                'to_trip_id' => $nachNeu,
+                'from_trip_id' => $vonNeu ?? $von,
+                'to_trip_id' => $nachNeu ?? $nach,
                 'stop_id' => $link->stop_id,
                 // Ein Anschluss führt zu keinem Hof.
                 'depot_id' => null,
@@ -224,30 +223,41 @@ final class CourseCarryoverService
     }
 
     /**
+     * Schreibt die Entscheidungen und meldet, welche liegen geblieben sind.
+     *
      * @param  array<int, array<string, mixed>>  $plan
+     * @return array{0: array<int, array<string, mixed>>, 1: array<int, array<string, mixed>>} geschrieben, übersprungen
      */
-    private function writeLinks(array $plan): void
+    private function writeLinks(array $plan): array
     {
-        foreach ($plan as $eintrag) {
-            // Trägt eine der beiden Fahrten schon eine Entscheidung, gewinnt die bestehende:
-            // Sie wurde nach dem Wechsel gesetzt und ist damit die jüngere Aussage.
-            $belegt = TripLink::query()
-                ->where(function ($q) use ($eintrag): void {
-                    if ($eintrag['from_trip_id'] !== null) {
-                        $q->orWhere('from_trip_id', $eintrag['from_trip_id']);
-                    }
-                    if ($eintrag['to_trip_id'] !== null) {
-                        $q->orWhere('to_trip_id', $eintrag['to_trip_id']);
-                    }
-                })
-                ->exists();
+        $geschrieben = [];
+        $uebersprungen = [];
 
-            if ($belegt) {
+        foreach ($plan as $eintrag) {
+            // Belegt heißt belegt — aber **je Tag**, nicht je Fahrt: Eine Fahrt darf mehrere
+            // Anschlüsse tragen, solange sie an verschiedenen Tagen gelten (KURSE §3). Trägt
+            // eine der beiden an denselben Tagen schon eine Entscheidung, gewinnt die
+            // bestehende: Sie wurde nach dem Wechsel gesetzt und ist die jüngere Aussage.
+            $belegt = $this->validity->conflictFor($eintrag['from_trip_id'], $eintrag['to_trip_id']);
+
+            if ($belegt !== null) {
+                $uebersprungen[] = [
+                    'trip' => $this->describeTrip($eintrag['from_trip_id'] ?? $eintrag['to_trip_id']),
+                    'partner' => $this->describeTrip(
+                        $belegt->from_trip_id === null ? $belegt->to_trip_id : (int) $belegt->from_trip_id,
+                    ),
+                    'reason' => 'An dieser Fahrt hängt an denselben Tagen bereits eine Entscheidung. '
+                        .'Sie wurde nach dem Wechsel gesetzt und bleibt stehen.',
+                ];
+
                 continue;
             }
 
             TripLink::query()->create($eintrag);
+            $geschrieben[] = $eintrag;
         }
+
+        return [$geschrieben, $uebersprungen];
     }
 
     /**

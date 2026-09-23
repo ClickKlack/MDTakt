@@ -266,6 +266,19 @@ Umlauf die der beteiligten Fahrten.
 Die **Linien** eines Umlaufs bleiben dabei die des ganzen Umlaufs, nicht die des Stands: Sonst
 verschwände er aus einer Linie, nur weil er sie in diesem Stand nicht berührt.
 
+**Die Übernahme (K4) trägt den Fall jetzt mit.** Ein Anschluss auf eine Fahrt außerhalb der
+gewechselten Version landete bisher unter „blockiert" — die Gegenfahrt hing an der alten Fahrt,
+und ein Fahrzeug hatte höchstens einen Vorgänger. Das gilt nicht mehr: Die Gegenfahrt bleibt,
+wo sie ist, und bekommt einen **zweiten** Anschluss auf die Fahrt der neuen Version. Vor dem
+Wechseltag fährt das Fahrzeug auf die alte weiter, danach auf die neue, und beides zugleich gilt
+an keinem Tag.
+
+Gelten beide Versionen dagegen an denselben Tagen, bleibt der bestehende Anschluss stehen: Er
+wurde nach dem Wechsel gesetzt und ist die jüngere Aussage. Gemeldet wird das trotzdem — vorher
+verschwand ein beim Schreiben übersprungener Eintrag stillschweigend, und `links_carried`
+zählte ihn mit. In der Vorschau nennt die Zahl jetzt das Vorhaben, nach dem Anwenden die
+Tatsachen.
+
 Auch die **Zyklusprüfung** rechnet je Tag: Zwei Anschlüsse, die einander nie begegnen, können
 das Fahrzeug an keinem Tag im Kreis fahren lassen. Das ist eher Absicherung als häufiger Fall —
 ein Ring verlangt, dass jedes aufeinanderfolgende Paar gemeinsame Tage hat, und dann

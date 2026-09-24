@@ -272,6 +272,9 @@ final class CourseGridTest extends TestCase
 
         $daten = $this->tabelle();
 
+        // Ein Takt an einer Haltestelle — die bewährte Ausrichtung, nicht das Fahrtmuster.
+        $this->assertSame('stop', $daten['alignment']);
+
         $this->assertSame(['01', '02'], array_column($daten['courses'], 'number'), 'Die Spalten bleiben in Kursreihenfolge.');
 
         // Die Achse ist um eine Runde gewachsen: niemand wird abgeschnitten.
@@ -607,6 +610,219 @@ final class CourseGridTest extends TestCase
         $this->setzeKurs($sued, '02');
 
         $this->assertCount(2, $this->hole('1')['sections']);
+    }
+
+    /**
+     * Die Laufwege der Verknüpfung 5 → 1 → 13 → 2 → 2 → 13 → 1 → 5, verkürzt auf wenige Halte.
+     * Die Hbf-Varianten der 1 laufen über eigene Halte und treffen den Hauptweg erst am
+     * Kölner Platz.
+     *
+     * @var array<string, array{0: string, 1: array<int, string>}>
+     */
+    private const RING = [
+        '5ab' => ['5', ['Klinikum', 'Am Stern', 'Hasselbachplatz', 'City Carré']],
+        '5auf' => ['5', ['City Carré', 'Hasselbachplatz', 'Am Stern', 'Klinikum']],
+        '1ab' => ['1', ['City Carré', 'Kölner Platz', 'Westring', 'Sudenburg']],
+        '1auf' => ['1', ['Sudenburg', 'Westring', 'Kölner Platz', 'City Carré']],
+        '1hbfab' => ['1', ['Hbf', 'Verkehrsbetriebe', 'Kölner Platz', 'Westring', 'Sudenburg']],
+        '1hbfauf' => ['1', ['Sudenburg', 'Westring', 'Kölner Platz', 'Verkehrsbetriebe', 'Hbf']],
+        '13ab' => ['13', ['Sudenburg', 'Südring', 'Leiterstraße', 'City Carré']],
+        '13auf' => ['13', ['City Carré', 'Leiterstraße', 'Südring', 'Sudenburg']],
+        '2ab' => ['2', ['City Carré', 'Buckau', 'Westerhüsen']],
+        '2auf' => ['2', ['Westerhüsen', 'Buckau', 'City Carré']],
+    ];
+
+    /**
+     * Die Kurse 2–21 der Linie 1, Periode 2, Mo–Fr, wie sie am 24.09.2026 in Produktion
+     * standen: je Fahrt Laufweg, Abfahrt, Ankunft. Die Ketten sind Bruchstücke — Kurs 3 hat zwei
+     * Fahrten, Kurs 16 fährt nur Hbf → Sudenburg, Kurs 2 hat eine Lücke von 08:47 bis 17:01.
+     *
+     * @var array<string, array<int, array{0: string, 1: string, 2: string}>>
+     */
+    private const RING_KURSE = [
+        '02' => [['2auf', '07:01', '07:31'], ['13auf', '07:31', '07:48'], ['1auf', '07:55', '08:13'], ['5auf', '08:13', '08:47'],
+            ['5ab', '17:01', '17:35'], ['1ab', '17:35', '17:52'], ['13ab', '18:02', '18:18'], ['2ab', '18:18', '18:47']],
+        '03' => [['1auf', '08:15', '08:33'], ['5auf', '08:33', '09:07']],
+        '04' => [['2auf', '07:41', '08:11'], ['13auf', '08:11', '08:28'], ['1auf', '08:35', '08:53'], ['5auf', '08:53', '09:27']],
+        '05' => [['5ab', '10:01', '10:35'], ['1ab', '10:35', '10:52'], ['13ab', '11:02', '11:18'], ['2ab', '11:18', '11:47'],
+            ['5ab', '18:02', '18:36'], ['1ab', '18:38', '18:55']],
+        '06' => [['5ab', '10:21', '10:55'], ['1ab', '10:55', '11:12'], ['13ab', '11:22', '11:38'], ['2ab', '11:38', '12:07']],
+        '07' => [['5ab', '06:41', '07:15'], ['1ab', '07:15', '07:32'], ['13ab', '07:42', '07:58'], ['2ab', '07:58', '08:27']],
+        '08' => [['5ab', '07:01', '07:35'], ['1ab', '07:35', '07:52'], ['13ab', '08:02', '08:18'], ['2ab', '08:18', '08:47'],
+            ['2auf', '09:01', '09:31'], ['13auf', '09:31', '09:48'], ['1auf', '09:55', '10:13'], ['5auf', '10:13', '10:47'],
+            ['2auf', '17:01', '17:31'], ['13auf', '17:31', '17:48'], ['1auf', '17:55', '18:13'], ['5auf', '18:13', '18:47']],
+        '09' => [['5ab', '07:21', '07:55'], ['1ab', '07:55', '08:12'], ['13ab', '08:22', '08:38'], ['2ab', '08:38', '09:07'],
+            ['1auf', '18:18', '18:36'], ['5auf', '18:38', '19:12']],
+        '10' => [['2auf', '09:41', '10:11'], ['13auf', '10:11', '10:28'], ['1auf', '10:35', '10:53'], ['5auf', '10:53', '11:27']],
+        '14' => [['1hbfab', '09:46', '10:02'], ['13ab', '10:12', '10:28'], ['2ab', '10:28', '10:57'],
+            ['1hbfab', '17:46', '18:02'], ['13ab', '18:12', '18:28'], ['2ab', '18:28', '18:57']],
+        '16' => [['1hbfab', '07:46', '08:02'], ['1hbfab', '18:26', '18:42']],
+        '17' => [['1hbfab', '08:06', '08:22'], ['13ab', '08:32', '08:48'], ['2ab', '08:48', '09:17']],
+        '18' => [['2auf', '07:11', '07:41'], ['13auf', '07:41', '07:58'], ['1hbfauf', '08:05', '08:25'],
+            ['2auf', '09:51', '10:21'], ['13auf', '10:21', '10:38'], ['1hbfauf', '10:45', '11:05']],
+        '19' => [['2auf', '07:31', '08:01'], ['13auf', '08:01', '08:18'], ['1hbfauf', '08:25', '08:45'],
+            ['2auf', '10:11', '10:41'], ['13auf', '10:41', '10:58'], ['1hbfauf', '11:05', '11:25'],
+            ['2auf', '18:13', '18:43'], ['13auf', '18:45', '19:02']],
+        '21' => [['2auf', '10:01', '10:31'], ['13auf', '10:31', '10:48'], ['1auf', '10:55', '11:13'], ['5auf', '11:13', '11:47'],
+            ['2auf', '18:01', '18:31'], ['13auf', '18:31', '18:48']],
+    ];
+
+    /**
+     * Legt die Verknüpfung der 1 an: Fahrten mit gleichmäßig verteilten Zwischenzeiten,
+     * Anschlüsse bis eine Stunde Wende, längere Pausen als Bruch in der Kette.
+     */
+    private function baueRing(): void
+    {
+        $versionen = [];
+
+        foreach (self::RING_KURSE as $nummer => $fahrten) {
+            $vorher = null;
+
+            foreach ($fahrten as [$weg, $ab, $an]) {
+                [$linie, $halte] = self::RING[$weg];
+                $versionen[$linie] ??= $this->version($linie);
+
+                $fahrt = $this->f->fahrt($versionen[$linie], $halte, $this->verteile($ab, $an, count($halte)));
+
+                if ($vorher !== null && $this->minuten($ab) - $this->minuten($vorher[1]) <= 60) {
+                    $this->verknuepfe($vorher[0], $fahrt);
+                } else {
+                    $this->setzeKurs($fahrt, (string) $nummer);
+                }
+
+                $vorher = [$fahrt, $an];
+            }
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function verteile(string $ab, string $an, int $anzahl): array
+    {
+        $von = $this->minuten($ab);
+        $bis = $this->minuten($an);
+
+        return array_map(
+            static fn (int $i): string => sprintf('%02d:%02d:00', intdiv((int) round($von + ($bis - $von) * $i / ($anzahl - 1)), 60), (int) round($von + ($bis - $von) * $i / ($anzahl - 1)) % 60),
+            range(0, $anzahl - 1),
+        );
+    }
+
+    private function minuten(string $zeit): int
+    {
+        [$h, $m] = array_map('intval', explode(':', $zeit));
+
+        return $h * 60 + $m;
+    }
+
+    /**
+     * Der Kern der Verknüpfung: In einer Zeile steht **dieselbe Stelle der Runde** — nie die 1
+     * des einen Kurses neben der 13 des anderen. Und die Runde beginnt mit der gewählten Linie.
+     */
+    public function test_a_linked_ring_lines_up_the_same_trip_side_by_side(): void
+    {
+        $this->baueRing();
+
+        $tabelle = $this->tabelle('1');
+
+        $this->assertCount(15, $tabelle['courses']);
+        $this->assertSame('pattern', $tabelle['alignment']);
+
+        // Die Runde beginnt mit dem häufigsten Laufweg der 1: Sudenburg → City Carré. Das
+        // Gerüst steht auch dort, wo in der ersten Runde noch kein Fahrzeug fährt.
+        $this->assertSame(
+            ['Sudenburg', 'Westring', 'Kölner Platz', 'City Carré'],
+            array_column(array_slice($tabelle['rows'], 0, 4), 'stop_name'),
+        );
+
+        foreach ($tabelle['rows'] as $zeile) {
+            $linien = array_unique(array_filter(array_map(
+                static fn (array $k): ?string => $k['cells'][$zeile['position']]['line'] ?? null,
+                $tabelle['courses'],
+            )));
+
+            $this->assertLessThanOrEqual(1, count($linien), sprintf(
+                'Zeile %d (%s) mischt die Linien %s.',
+                $zeile['position'],
+                $zeile['stop_name'],
+                implode(', ', $linien),
+            ));
+        }
+    }
+
+    /**
+     * Eine Spalte läuft von oben nach unten — auch über die Lücke einer gerissenen Kette.
+     *
+     * Quer gelesen steht in einer Zeile dieselbe Stelle des Rings in **derselben Runde**: Alle
+     * Zeiten liegen innerhalb einer Runde (rund vier Stunden). Aufsteigend sind sie nicht — die
+     * Kursnummern folgen im Ring nicht der Fahrtfolge.
+     */
+    public function test_a_linked_ring_reads_down_and_keeps_a_row_within_one_round(): void
+    {
+        $this->baueRing();
+
+        $tabelle = $this->tabelle('1');
+
+        foreach ($tabelle['courses'] as $spalte) {
+            $zeiten = array_values(array_filter($this->zeiten($spalte)));
+            $sortiert = $zeiten;
+            sort($sortiert);
+
+            $this->assertSame($sortiert, $zeiten, "Kurs {$spalte['number']} läuft nicht vorwärts.");
+        }
+
+        foreach ($tabelle['rows'] as $zeile) {
+            $minuten = array_map(
+                fn (string $t): int => $this->minuten($t),
+                array_values(array_filter(array_map(
+                    static fn (array $k): ?string => $k['cells'][$zeile['position']]['time'] ?? null,
+                    $tabelle['courses'],
+                ))),
+            );
+
+            if (count($minuten) < 2) {
+                continue;
+            }
+
+            $this->assertLessThan(4 * 60, max($minuten) - min($minuten), sprintf(
+                'Zeile %d (%s) reicht über mehr als eine Runde.',
+                $zeile['position'],
+                $zeile['stop_name'],
+            ));
+        }
+    }
+
+    /**
+     * Die Hbf-Variante der 1 steht an derselben Stelle der Runde wie die 1 ab City Carré und
+     * bekommt dort ihre eigenen Zeilen — der gemeinsame Rest läuft auf denselben.
+     */
+    public function test_a_variant_of_the_ring_shares_the_common_rows(): void
+    {
+        $this->baueRing();
+
+        $tabelle = $this->tabelle('1');
+        $spalte = static fn (string $nummer): array => array_values(array_filter(
+            $tabelle['courses'],
+            static fn (array $k): bool => $k['number'] === $nummer,
+        ))[0];
+
+        // Kurs 16 fährt nur Hbf → Sudenburg. Seine Zeilen am Kölner Platz sind dieselben, auf
+        // denen die übrigen Kurse aus City Carré kommen.
+        $koelner = array_values(array_filter(
+            $tabelle['rows'],
+            static fn (array $z): bool => $z['stop_name'] === 'Kölner Platz'
+                && ($spalte('16')['cells'][$z['position']] ?? null) !== null,
+        ));
+
+        $this->assertNotEmpty($koelner);
+
+        $geteilt = array_filter($koelner, static fn (array $z): bool => count(array_filter(
+            $tabelle['courses'],
+            static fn (array $k): bool => $k['number'] !== '16' && $k['cells'][$z['position']] !== null,
+        )) > 0);
+
+        $this->assertNotEmpty($geteilt, 'Die Hbf-Variante liegt auf eigenen Zeilen statt auf dem gemeinsamen Weg.');
     }
 
     public function test_summary_and_unassigned_match_the_chain_view(): void

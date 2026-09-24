@@ -205,6 +205,18 @@ const spaltenbreite = computed(() => `${props.grid.courses.length * 4 + 16}rem`)
   <div class="mt-4">
     <h3 v-if="title" class="mx-auto mb-2 max-w-6xl text-sm font-semibold text-slate-800">{{ title }}</h3>
 
+    <!-- Feste Runden statt verschobener Spalten: Der Erklärtext über der Tabelle gilt hier
+         nur halb, deshalb ein eigener Hinweis. -->
+    <p
+      v-if="grid.alignment === 'pattern'"
+      class="mx-auto mb-3 max-w-6xl rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-900"
+    >
+      <strong>Die Umläufe fahren eine Runde über mehrere Linien.</strong>
+      Jeder Block ist eine Runde des Tages und beginnt mit einer Fahrt der gewählten Linie; jede Zeile ist dieselbe
+      Stelle der Runde. Quer gelesen stehen die Fahrzeuge in Kursreihenfolge, nicht in
+      Fahrtfolge; Lücken in einer Kette bleiben als ganze Runden stehen.
+    </p>
+
     <p
       v-if="grid.alignment_warning"
       class="mx-auto mb-3 max-w-6xl rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900"

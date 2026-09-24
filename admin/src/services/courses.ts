@@ -211,6 +211,14 @@ export interface CourseGridColumn {
 export interface CourseGridSection {
   /** Die Endstellen dieses Laufwegs, nach Häufigkeit — die ersten beiden benennen die Tabelle. */
   termini: string[]
+  /**
+   * Wie die Achse entstand — und damit, was eine Zeile quer gelesen bedeutet.
+   * `stop`: Takt an einer Haltestelle, die Spalten sind um ganze Umläufe verschoben und eine
+   * Zeile steigt quer auf. `pattern`: feste Runden aus dem Fahrtmuster (die Verknüpfung der 1) —
+   * eine Zeile ist dieselbe Stelle der Runde in derselben Runde, quer aber nicht aufsteigend.
+   * `none`: unverschoben.
+   */
+  alignment: 'stop' | 'pattern' | 'none'
   rows: CourseGridRow[]
   /**
    * Eine Spalte je Umlauf, in Kursreihenfolge — aber gegeneinander **um ganze Umläufe

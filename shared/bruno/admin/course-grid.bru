@@ -86,7 +86,9 @@ script:post-response {
     let voll = 0;
     let auf = 0;
 
-    for (const zeile of d.rows) {
+    // Nur bei verschobenen Spalten - bei festen Runden aus dem Fahrtmuster stehen die
+    // Fahrzeuge quer in Kursreihenfolge, nicht in Fahrtfolge.
+    for (const zeile of d.alignment === "stop" ? d.rows : []) {
       const zellen = d.courses.map((k) => k.cells[zeile.position]);
       if (d.courses.length < 2 || zellen.some((z) => z === null)) {
         continue;
@@ -149,6 +151,7 @@ docs {
       "sections": [
         {
           "termini": ["Herrenkrug", "Sudenburg"],
+          "alignment": "stop",
           "rows": [
             { "position": 0, "stop_id": 512, "stop_name": "Herrenkrug",  "repeat_index": 0 },
             { "position": 1, "stop_id": 388, "stop_name": "Alter Markt", "repeat_index": 0 },
@@ -251,6 +254,14 @@ docs {
   (auch ueber Dritte). Das Hof-Ende einer als Ausruecken/Einruecken markierten Fahrt zaehlt
   dabei nicht, ebenso wenig Endstellen anderer Linien desselben Umlaufs. `termini` nennt die
   Endstellen nach Haeufigkeit; die ersten beiden benennen die Tabelle.
+
+  **`alignment` sagt, was eine Zeile quer bedeutet.** `stop`: Takt an einer Haltestelle, an der
+  jedes Fahrzeug immer in dieselbe Richtung abfaehrt - die Spalten sind verschoben, die Zeile
+  steigt auf. `pattern`: die Verknuepfung der 1 (5 → 1 → 13 → 2 → 2 → 13 → 1 → 5). Dort
+  faehrt ein Fahrzeug am City Carre je Runde viermal in vier Richtungen ab; die Runde entsteht
+  deshalb aus dem Fahrtmuster und beginnt mit der gewaehlten Linie. Jeder Block ist eine feste
+  Runde des Tages, jede Zeile dieselbe Stelle - quer aber in Kursreihenfolge, nicht
+  aufsteigend. `none`: unverschoben.
 
   **Die Antwort wiegt.** Am Realbestand sind es fuer Linie 6 (Mo-Fr, 16 Umlaeufe, 394 Fahrten)
   rund 8.500 Zellen. Deshalb ein eigener Endpunkt: Wer nur die Ketten braucht, nimmt `/courses`.

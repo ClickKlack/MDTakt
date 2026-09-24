@@ -865,7 +865,7 @@ components:
                 Reihenfolge: nach dem ersten Kurs der Tabelle.
               items:
                 type: object
-                required: [termini, rows, courses, alignment_warning]
+                required: [termini, alignment, rows, courses, alignment_warning]
                 properties:
                   termini:
                     type: array
@@ -874,6 +874,30 @@ components:
                       beiden benennen die Tabelle („Kannenstieg – Listemannstrasse").
                     items: { type: string }
                     example: [Kannenstieg, Listemannstraße]
+                  alignment:
+                    type: string
+                    enum: [stop, pattern, none]
+                    description: >
+                      Wie die Achse entstand — und was eine Zeile quer gelesen bedeutet.
+
+
+                      `stop`: Takt an einer Haltestelle, an der jedes Fahrzeug mehrfach und immer
+                      in dieselbe Richtung (Linie + naechster Halt) abfaehrt. Die Spalten sind um
+                      ganze Umlaeufe verschoben, eine Zeile steigt quer auf.
+
+
+                      `pattern`: Gibt es keinen solchen Halt — in der Verknuepfung 5 → 1 → 13 → 2
+                      faehrt ein Fahrzeug am City Carre je Runde viermal in vier Richtungen ab,
+                      und Ketten aus Bruchstuecken haben gar keinen gemeinsamen —, entsteht die
+                      Runde aus dem Fahrtmuster (Linie, erster und letzter Halt) und den
+                      Anschluessen. Sie beginnt mit dem haeufigsten Muster der gewaehlten Linie.
+                      Jeder Block ist eine feste Runde des Tages, jede Zeile dieselbe Stelle der
+                      Runde; eingeordnet wird ueber die Uhrzeit, Luecken bleiben ganze Runden.
+                      Quer gelesen steigt eine Zeile **nicht** auf: Die Kursnummern folgen im
+                      Ring nicht der Fahrtfolge.
+
+
+                      `none`: unverschoben — eine einzelne Spalte, oder keine Runde bildbar.
                   rows:
                     type: array
                     description: >

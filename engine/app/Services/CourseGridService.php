@@ -48,6 +48,7 @@ final class CourseGridService
         private readonly CourseOverviewService $overview,
         private readonly StopSequenceAligner $aligner,
         private readonly OperatingDayResolver $operatingDay,
+        private readonly CourseRoundLayout $rounds,
     ) {}
 
     /**
@@ -60,7 +61,7 @@ final class CourseGridService
         $abschnitte = [];
 
         foreach ($this->partition($uebersicht['courses'], $line) as $gruppe) {
-            $abschnitt = $this->section($gruppe['courses'], $gruppe['termini']);
+            $abschnitt = $this->section($gruppe['courses'], $gruppe['termini'], $line);
 
             if ($abschnitt !== null) {
                 $abschnitte[] = $abschnitt;
@@ -87,12 +88,24 @@ final class CourseGridService
      *
      * `null`, wenn keiner der Umläufe eine geladene Haltefolge trägt.
      *
+     * **Zwei Wege zur Achse.** Gibt es eine Haltestelle, an der jeder Umlauf mehrfach und immer
+     * in dieselbe Richtung abfährt, werden die Runden dort abgezählt — der bewährte Weg für
+     * gewöhnliche Linien. Fehlt sie, entsteht die Runde aus dem Fahrtmuster
+     * ({@see CourseRoundLayout}): in der Verknüpfung der 1, und solange Ketten Bruchstücke sind.
+     *
      * @param  array<int, array<string, mixed>>  $kurse
      * @param  array<int, string>  $termini
      * @return array<string, mixed>|null
      */
-    private function section(array $kurse, array $termini): ?array
+    private function section(array $kurse, array $termini, string $line): ?array
     {
+        // Umläufe ohne geladene Haltefolge fallen vorab weg — beide Wege zählen danach
+        // dieselben Spalten.
+        $kurse = array_values(array_filter(
+            $kurse,
+            static fn (array $k): bool => array_filter($k['trips'], static fn (array $f): bool => ($f['stops'] ?? []) !== []) !== [],
+        ));
+
         [$varianten, $spalten, $namen] = $this->collect($kurse);
 
         if ($varianten === []) {
@@ -102,9 +115,15 @@ final class CourseGridService
         // Die Haltestelle, an der sich die Umlaeufe messen lassen, und die Laenge einer Runde.
         $takt = $this->anchor($varianten, $spalten);
 
-        [$achse, $zuordnung, $warnung] = $takt === null
-            ? $this->alignWhole($varianten)
-            : $this->alignByRound($varianten, $spalten, $takt);
+        // Eine einzelne Spalte hat niemanden, neben dem sie stehen müsste: Sie bleibt ihre
+        // eigene Kette, ohne Gerüst.
+        $muster = $takt === null && count($varianten) >= 2 ? $this->rounds->layout($kurse, $line) : null;
+
+        [$ausrichtung, [$achse, $zuordnung, $warnung]] = match (true) {
+            $takt !== null => ['stop', $this->alignByRound($varianten, $spalten, $takt)],
+            $muster !== null => ['pattern', $muster],
+            default => ['none', $this->alignWhole($varianten)],
+        };
 
         foreach ($spalten as $i => &$spalte) {
             $spalte['cells'] = $this->place($spalte['cells'], $zuordnung[$i] ?? [], count($achse));
@@ -113,6 +132,10 @@ final class CourseGridService
 
         return [
             'termini' => $termini,
+            // Wie die Achse entstand — davon hängt ab, was eine Zeile quer gelesen bedeutet:
+            // `stop` Takt an einer Haltestelle (aufsteigend), `pattern` feste Runden aus dem
+            // Fahrtmuster (dieselbe Stelle, dieselbe Runde), `none` unverschoben.
+            'alignment' => $ausrichtung,
             'rows' => $this->rows($achse, $namen),
             'courses' => $spalten,
             'alignment_warning' => $warnung,
@@ -404,6 +427,26 @@ final class CourseGridService
         }
 
         $minimum = array_filter($minimum, static fn (int $n): bool => $n >= 2);
+
+        // Nur ein Halt, an dem jedes Fahrzeug **in dieselbe Richtung** abfährt: dieselbe Linie,
+        // derselbe nächste Halt. Am City Carré fährt ein Umlauf der Verknüpfung je Runde als 1,
+        // 13, 2 und 5 ab — dort abgezählt, stünde die 1 des einen Kurses neben der 13 des
+        // anderen.
+        $richtungen = [];
+
+        foreach ($varianten as $i => $variante) {
+            foreach ($variante['stops'] as $position => $stopId) {
+                if (isset($minimum[$stopId]) && ($spalten[$i]['cells'][$position]['kind'] ?? null) === 'departure') {
+                    $richtungen[$stopId][$spalten[$i]['cells'][$position]['line'].'>'.($variante['stops'][$position + 1] ?? '')] = true;
+                }
+            }
+        }
+
+        $minimum = array_filter(
+            $minimum,
+            static fn (int $n, int $stopId): bool => count($richtungen[$stopId] ?? []) === 1,
+            ARRAY_FILTER_USE_BOTH,
+        );
 
         if ($minimum === []) {
             return null;

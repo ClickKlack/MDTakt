@@ -2,11 +2,14 @@
 import { onMounted } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { refreshSightingCounts, sightingCounts } from '../services/sightings'
 
 const auth = useAuthStore()
 const router = useRouter()
 
 onMounted(async () => {
+  void refreshSightingCounts()
+
   // Nach Reload liegt evtl. nur der Token vor — Admin-Daten nachladen.
   if (!auth.admin) {
     try {
@@ -42,6 +45,20 @@ async function logout(): Promise<void> {
             active-class="bg-slate-100 font-medium text-slate-900"
           >
             Fahrplan
+          </RouterLink>
+          <RouterLink
+            to="/sichtungen"
+            class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100"
+            active-class="bg-slate-100 font-medium text-slate-900"
+          >
+            Sichtungen
+            <span
+              v-if="sightingCounts && sightingCounts.open > 0"
+              class="rounded-full bg-red-600 px-1.5 text-xs font-semibold leading-5 text-white"
+              :title="`${sightingCounts.open} offen · ${sightingCounts.waiting} warten auf den Fahrplan`"
+            >
+              {{ sightingCounts.open }}
+            </span>
           </RouterLink>
           <RouterLink
             to="/haltestellen"

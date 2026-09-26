@@ -1,0 +1,35 @@
+meta {
+  name: Ablehnen (Admin)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/sightings/reject
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  { "ids": [{{sightingId}}], "note": "Betriebsfahrt" }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.rejected: eq 1
+}
+
+docs {
+  # Ablehnen
+
+  Ändert keine Kursdaten. Beispiel-Response: `{ "data": { "rejected": 1 } }`
+}

@@ -290,6 +290,76 @@ components:
               properties:
                 max_recording_id: { type: integer, nullable: true }
                 max_observed_at: { type: string, format: date-time, nullable: true }
+    SightingReviewItem:
+      type: object
+      properties:
+        id: { type: integer }
+        mdkt_recording_id: { type: integer }
+        line: { type: string }
+        course_number: { type: string }
+        display: { type: string, example: '9/13' }
+        hafas_stop_id: { type: string }
+        stop_name: { type: string, nullable: true }
+        service_date: { type: string, format: date }
+        observed_at: { type: string, format: date-time }
+        departure_planned: { type: string, format: date-time }
+        departure_actual: { type: string, format: date-time, nullable: true }
+        route_fingerprint: { type: string }
+        match: { $ref: '#/components/schemas/SightingMatch' }
+        match_attempts: { type: integer, description: 'Importe ohne Treffer' }
+        status: { $ref: '#/components/schemas/SightingStatus' }
+        status_label: { type: string }
+        decided_at: { type: string, format: date-time, nullable: true }
+        decision_note: { type: string, nullable: true }
+        trip:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            line: { type: string }
+            line_version_id: { type: integer }
+            version_no: { type: integer }
+            day_type: { $ref: '#/components/schemas/FahrplanTyp' }
+            period_id: { type: integer, nullable: true }
+            start_stop: { type: string, nullable: true }
+            end_stop: { type: string, nullable: true }
+            departure_time: { type: string, nullable: true, description: 'GTFS-Lokalzeit' }
+            arrival_time: { type: string, nullable: true }
+        local_course:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            number: { type: string }
+            display: { type: string }
+        comparison:
+          type: string
+          enum: [same, differs, none, no_trip]
+          description: 'Live berechnet: same = Kurs hängt schon an der Fahrt, differs = anderer Kurs, none = Fahrt ohne Kurs'
+        chain_trip_count: { type: integer, nullable: true, description: 'Kettenlänge, auf die ein Annehmen den Kurs setzt (nur offene Sichtungen mit Fahrt)' }
+    SightingReviewListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/SightingReviewItem' }
+        meta:
+          type: object
+          properties:
+            current_page: { type: integer }
+            last_page: { type: integer }
+            per_page: { type: integer }
+            total: { type: integer }
+    SightingDecisionRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: integer }
+        note: { type: string, nullable: true, maxLength: 255, description: 'Nur beim Ablehnen ausgewertet' }
     GtfsImportRunResponse:
       type: object
       description: "Zusammenfassung eines Laufs (Start/Chunk/Abschluss)"
@@ -4683,6 +4753,144 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '429':
           description: Rate-Limit überschritten (120 Requests/Minute je IP)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/sightings:
+    get:
+      operationId: listSightings
+      summary: Prüfliste der Sichtungen aus MDKursTracker
+      description: >-
+        Ohne Filter die Warteschlange (state=open: offen und entscheidbar; „wartet auf Fahrplan" nur
+        über state=waiting). Der Vergleich mit dem lokalen Kurs wird bei jeder Abfrage berechnet.
+      tags: [Admin]
+      security:
+        - AdminToken: []
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [open, waiting, confirmed, accepted, rejected, all], default: open } }
+        - { name: line, in: query, schema: { type: string } }
+        - { name: date_from, in: query, schema: { type: string, format: date }, description: 'Betriebstag ab' }
+        - { name: date_to, in: query, schema: { type: string, format: date } }
+        - { name: differs_only, in: query, schema: { type: boolean }, description: 'Nur Sichtungen, deren Fahrt einen anderen Kurs trägt' }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Seite der Prüfliste
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SightingReviewListResponse' }
+        '401':
+          description: Nicht angemeldet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Ungültiger Filter
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/sightings/counts:
+    get:
+      operationId: countSightings
+      summary: Zahl offener und wartender Sichtungen (Navigation)
+      tags: [Admin]
+      security:
+        - AdminToken: []
+      responses:
+        '200':
+          description: Zahlen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      open: { type: integer }
+                      waiting: { type: integer }
+        '401':
+          description: Nicht angemeldet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/sightings/accept:
+    post:
+      operationId: acceptSightings
+      summary: Sichtungen annehmen — setzt den Kurs an die ganze Kette
+      description: >-
+        Setzt die gesichtete Kursnummer an die ganze Kette der zugeordneten Fahrt (wie die Kurs-Eingabe im
+        Fahrplan). Trägt die Kette einen anderen Kurs, wird sie umnummeriert. Weitere offene Sichtungen der
+        Kette mit derselben Nummer werden danach automatisch bestätigt. Nur offene Sichtungen mit Fahrt;
+        verschiedene Nummern für dieselbe Fahrt werden abgewiesen.
+      tags: [Admin]
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SightingDecisionRequest' }
+      responses:
+        '200':
+          description: Angenommen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      accepted: { type: integer }
+                      trips_assigned: { type: integer, description: 'Fahrten, die den Kurs bekamen' }
+                      confirmed_others: { type: integer }
+        '401':
+          description: Nicht angemeldet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Nicht annehmbar (schon entschieden, ohne Fahrt, widersprüchliche Nummern, unbekannte ID)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/sightings/reject:
+    post:
+      operationId: rejectSightings
+      summary: Sichtungen ablehnen
+      tags: [Admin]
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SightingDecisionRequest' }
+      responses:
+        '200':
+          description: Abgelehnt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      rejected: { type: integer }
+        '401':
+          description: Nicht angemeldet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Schon entschieden oder unbekannte ID
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

@@ -14,6 +14,7 @@ import StopLinksView from '../views/StopLinksView.vue'
 import StopGroupsView from '../views/StopGroupsView.vue'
 import CoursesView from '../views/CoursesView.vue'
 import DepotsView from '../views/DepotsView.vue'
+import SightingsView from '../views/SightingsView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -26,6 +27,8 @@ export const router = createRouter({
     { path: '/versions', name: 'versions', component: ScheduleVersionsView },
     // Erste Route mit Query-Auswahl: Ein Fahrplan soll verlinkbar sein.
     { path: '/fahrplan', name: 'timetable', component: TimetableView },
+    // Prüfliste der Sichtungen aus MDKursTracker; Filter in der Query, damit sie verlinkbar bleibt.
+    { path: '/sichtungen', name: 'sightings', component: SightingsView },
     { path: '/versions/diff', name: 'versions-diff', component: ScheduleDiffView },
     // Umlauf-Pflege: Haltestelle, Periode, Fahrplantyp und Versionsstand in der Query,
     // damit ein Pflegestand verlinkbar bleibt.

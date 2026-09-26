@@ -19,6 +19,7 @@ use App\Http\Controllers\Admin\LineVersionDiffController;
 use App\Http\Controllers\Admin\PeriodChangeOfferController;
 use App\Http\Controllers\Admin\SchedulePeriodController;
 use App\Http\Controllers\Admin\SchoolHolidayController;
+use App\Http\Controllers\Admin\SightingController as AdminSightingController;
 use App\Http\Controllers\Admin\StopGroupController;
 use App\Http\Controllers\Admin\StopLinkController;
 use App\Http\Controllers\Admin\TimetableController;
@@ -103,6 +104,12 @@ Route::prefix('v1')->group(function (): void {
             Route::post('depots', [DepotController::class, 'store'])->name('admin.depots.store');
             Route::put('depots/{depot}', [DepotController::class, 'update'])->name('admin.depots.update');
             Route::delete('depots/{depot}', [DepotController::class, 'destroy'])->name('admin.depots.destroy');
+
+            // Sichtungen aus MDKursTracker — Prüfliste, Annehmen setzt den Kurs an die ganze Kette.
+            Route::get('sightings', [AdminSightingController::class, 'index'])->name('admin.sightings.index');
+            Route::get('sightings/counts', [AdminSightingController::class, 'counts'])->name('admin.sightings.counts');
+            Route::post('sightings/accept', [AdminSightingController::class, 'accept'])->name('admin.sightings.accept');
+            Route::post('sightings/reject', [AdminSightingController::class, 'reject'])->name('admin.sightings.reject');
 
             // Kursnummern — das Etikett am Umlauf, nie an der einzelnen Fahrt (KURSE §2 K2).
             Route::get('courses', [CourseController::class, 'index'])->name('admin.courses.index');

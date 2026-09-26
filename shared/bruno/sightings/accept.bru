@@ -1,0 +1,38 @@
+meta {
+  name: Annehmen (Admin)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/sightings/accept
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  { "ids": [{{sightingId}}] }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.accepted: eq 1
+}
+
+docs {
+  # Annehmen
+
+  Setzt die gesichtete Nummer an die **ganze Kette** der Fahrt (auch über einen abweichenden Kurs).
+  `sightingId` setzt „Prüfliste". Eine Sichtung ohne Fahrt liefert 422.
+
+  Beispiel-Response: `{ "data": { "accepted": 1, "trips_assigned": 14, "confirmed_others": 2 } }`
+}

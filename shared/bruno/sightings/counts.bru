@@ -1,0 +1,31 @@
+meta {
+  name: Zahlen (Navigation)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/sightings/counts
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.open: isNumber
+  res.body.data.waiting: isNumber
+}
+
+docs {
+  # Zahlen
+
+  Beispiel-Response: `{ "data": { "open": 3, "waiting": 1 } }`
+}

@@ -1,0 +1,56 @@
+meta {
+  name: Prüfliste (Admin)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/sightings?state=all
+  body: none
+  auth: bearer
+}
+
+params:query {
+  state: all
+  ~line: 1
+  ~date_from: 2026-09-01
+  ~date_to: 2026-09-30
+  ~differs_only: true
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+script:post-response {
+  // erste offene Sichtung fuer Annehmen/Ablehnen merken
+  const offen = (res.body.data || []).find((s) => s.status === "pending");
+  if (offen) bru.setVar("sightingId", offen.id);
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isArray
+  res.body.meta.total: isNumber
+}
+
+docs {
+  # Prüfliste
+
+  `state`: open (Standard, Warteschlange) | waiting | confirmed | accepted | rejected | all.
+  Jede Zeile trägt `comparison` (same | differs | none | no_trip), `local_course` und
+  `chain_trip_count` (Kettenlänge, auf die Annehmen den Kurs setzt).
+
+  Beispiel-Zeile:
+
+  ```json
+  { "id": 1, "display": "1/03", "service_date": "2026-09-01", "match": "matched", "status": "pending",
+    "trip": { "id": 27886, "line": "1", "line_version_id": 12, "version_no": 1, "day_type": "mo_fr" },
+    "local_course": { "id": 4, "number": "05", "display": "1/05" },
+    "comparison": "differs", "chain_trip_count": 14 }
+  ```
+}

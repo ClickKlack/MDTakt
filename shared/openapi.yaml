@@ -2141,6 +2141,24 @@ components:
         mode: { type: string }
         departure_time: { type: string, nullable: true, example: '07:00:00' }
         arrival_time: { type: string, nullable: true, example: '07:25:00' }
+        sightings:
+          type: array
+          description: >
+            Offene Sichtungen aus MDKursTracker an dieser Fahrt, nach Kursnummer gruppiert, die
+            meistgenannte zuerst. Eine Gruppe wird über `ids` gemeinsam angenommen oder abgelehnt
+            (POST /api/v1/admin/sightings/accept bzw. /reject).
+          items:
+            type: object
+            properties:
+              number: { type: string, example: '04' }
+              display: { type: string, example: '1/04' }
+              count: { type: integer }
+              ids: { type: array, items: { type: integer } }
+              dates: { type: array, items: { type: string, format: date } }
+              stops: { type: array, items: { type: string } }
+              comparison: { type: string, enum: [same, differs, none] }
+              next_version: { type: boolean, description: 'Mindestens eine Sichtung erst in der Folgeversion gefunden' }
+              chain_trip_count: { type: integer, nullable: true, description: 'Kettenlänge bei differs' }
         cells:
           type: array
           description: >

@@ -13,6 +13,25 @@ export interface TimetableRow {
   repeat_index: number
 }
 
+/**
+ * Offene Sichtungen einer Fahrt mit derselben Kursnummer — eine Aussage mit `count` Belegen, die
+ * gemeinsam angenommen oder abgelehnt wird. Die meistgenannte Nummer steht zuerst.
+ */
+export interface TimetableSightingGroup {
+  number: string
+  display: string
+  count: number
+  ids: number[]
+  /** Betriebstage, reine Kalenderdaten */
+  dates: string[]
+  stops: string[]
+  comparison: 'same' | 'differs' | 'none'
+  /** Mindestens eine Sichtung wurde erst in der Folgeversion gefunden. */
+  next_version: boolean
+  /** Kettenlänge bei `differs` — für die Rückfrage vor dem Umnummerieren */
+  chain_trip_count: number | null
+}
+
 export interface TimetableTrip {
   id: number
   signature: string
@@ -24,6 +43,8 @@ export interface TimetableTrip {
    * reine Anzeige ist — die Nummer gehört der Kette, nicht der Linie.
    */
   course: { id: number; number: string; display: string } | null
+  /** Offene Sichtungen aus MDKursTracker, nach Kursnummer gruppiert */
+  sightings: TimetableSightingGroup[]
   /** Zeiten als „HH:MM", positionsgleich zu `rows`; null = Zeile wird nicht bedient. */
   cells: (string | null)[]
 }

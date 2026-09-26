@@ -97,7 +97,7 @@ function meldung(e: unknown, fallback: string): string {
 }
 
 async function annehmen(s: Sighting): Promise<void> {
-  const frage = acceptQuestion(s)
+  const frage = acceptQuestion(s, s.trip?.line ?? s.line)
   if (frage !== null && !confirm(frage)) {
     return
   }

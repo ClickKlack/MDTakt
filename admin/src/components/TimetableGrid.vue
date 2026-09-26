@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, type VNode } from 'vue'
-import type { TimetableDirection, TimetableTrip } from '../services/timetable'
+import type { TimetableDirection, TimetableSightingGroup, TimetableTrip } from '../services/timetable'
 import { formatClock } from '../utils/timezone'
 
 const props = defineProps<{
@@ -14,13 +14,45 @@ const props = defineProps<{
   rangeMode?: boolean
   rangeFrom?: number | null
   rangeTo?: number | null
+  /** Fahrt, die hervorgehoben wird — der Einstieg aus der Prüfliste der Sichtungen. */
+  highlightTrip?: number | null
 }>()
 
 const emit = defineEmits<{
   assign: [tripId: number, number: string]
   detach: [tripId: number]
   rangePick: [tripId: number]
+  sightingAccept: [trip: TimetableTrip, group: TimetableSightingGroup]
+  sightingReject: [trip: TimetableTrip, group: TimetableSightingGroup]
+  sightingDetails: [trip: TimetableTrip]
 }>()
+
+/**
+ * Die Zeile „Sichtungen" erscheint nur, wenn es in dieser Richtung etwas zu entscheiden gibt —
+ * sonst kostete sie jeder Tabelle Höhe, ohne etwas zu sagen.
+ */
+const hatSichtungen = computed(() => props.direction.trips.some((t) => t.sightings.length > 0))
+
+/** Die Kurszeile rückt unter die Sichtungszeile; beide bleiben beim Scrollen stehen. */
+const kursTop = computed(() => (hatSichtungen.value ? '5.75rem' : '2.25rem'))
+
+/** rot = weicht vom Kurs der Fahrt ab, gelb = Fahrt hat noch keinen Kurs, grün = stimmt. */
+function chipKlasse(g: TimetableSightingGroup): string {
+  switch (g.comparison) {
+    case 'differs':
+      return 'bg-red-600 text-white hover:bg-red-700'
+    case 'none':
+      return 'bg-amber-400 text-amber-950 hover:bg-amber-500'
+    default:
+      return 'bg-emerald-600 text-white hover:bg-emerald-700'
+  }
+}
+
+function chipTitel(g: TimetableSightingGroup, trip: TimetableTrip): string {
+  const lokal = trip.course ? `lokal ${trip.course.display}` : 'lokal kein Kurs'
+  const folge = g.next_version ? ' · aus Folgeversion' : ''
+  return `Gesichtet ${g.display} (${g.count}×, ${lokal})${folge} — klicken für Details`
+}
 
 /**
  * Liegt diese Spalte im markierten Bereich?
@@ -175,8 +207,13 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
               v-for="(trip, i) in direction.trips"
               :key="trip.id"
               class="sticky top-0 z-20 min-w-14 px-2 py-2 text-center text-xs font-medium ring-1 ring-slate-200 transition"
+              :id="`fahrt-${trip.id}`"
               :class="[
-                rangeMode && imBereich(i) ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-50 text-slate-500',
+                rangeMode && imBereich(i)
+                  ? 'bg-emerald-100 text-emerald-900'
+                  : trip.id === highlightTrip
+                    ? 'bg-amber-200 font-bold text-amber-900'
+                    : 'bg-slate-50 text-slate-500',
                 rangeMode ? 'cursor-pointer hover:bg-emerald-200' : '',
                 rangeMode && istGrenze(i) ? 'ring-2 ring-emerald-600' : '',
               ]"
@@ -195,17 +232,73 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
             der I-13 (D) offen war. Der Kurs haengt an der Kette, nicht an der Fahrt: Ein
             Eintrag hier setzt ihn fuer alle Fahrten des Umlaufs.
           -->
+          <!--
+            Sichtungen aus MDKursTracker: im Fahrplan entscheiden, weil sich hier die Richtigkeit am
+            besten beurteilen laesst - Nachbarspalten und Kurs stehen direkt daneben. Je Spalte die
+            meistgenannte Nummer mit Annehmen/Ablehnen; weitere Nummern und Details per Klick.
+          -->
+          <tr v-if="hatSichtungen">
+            <th
+              class="sticky left-0 top-9 z-30 h-14 bg-violet-50 px-4 py-1 text-left text-xs font-medium uppercase text-violet-700 ring-1 ring-slate-200"
+            >
+              Sichtungen
+            </th>
+            <th
+              v-for="trip in direction.trips"
+              :key="`sicht-${trip.id}`"
+              class="sticky top-9 z-20 h-14 px-0.5 py-1 text-center align-top ring-1 ring-slate-200"
+              :class="trip.id === highlightTrip ? 'bg-amber-100' : 'bg-violet-50'"
+            >
+              <template v-if="trip.sightings.length > 0">
+                <button
+                  type="button"
+                  class="w-full rounded px-1 py-0.5 text-xs font-semibold tabular-nums"
+                  :class="[chipKlasse(trip.sightings[0]), trip.sightings[0].next_version ? 'ring-2 ring-violet-500' : '']"
+                  :title="chipTitel(trip.sightings[0], trip)"
+                  @click="emit('sightingDetails', trip)"
+                >
+                  {{ trip.sightings[0].number }}<sup v-if="trip.sightings[0].count > 1" class="ml-px font-normal">×{{ trip.sightings[0].count }}</sup><sup
+                    v-if="trip.sightings.length > 1"
+                    class="ml-px font-normal"
+                    >+{{ trip.sightings.length - 1 }}</sup
+                  >
+                </button>
+                <div class="mt-0.5 flex justify-center gap-0.5">
+                  <button
+                    type="button"
+                    class="rounded px-1 text-xs text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
+                    :disabled="busy"
+                    :title="`${trip.sightings[0].display} annehmen`"
+                    @click="emit('sightingAccept', trip, trip.sightings[0])"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded px-1 text-xs text-slate-500 hover:bg-slate-200 disabled:opacity-40"
+                    :disabled="busy"
+                    :title="`${trip.sightings[0].display} ablehnen`"
+                    @click="emit('sightingReject', trip, trip.sightings[0])"
+                  >
+                    ✗
+                  </button>
+                </div>
+              </template>
+            </th>
+          </tr>
           <tr>
             <th
-              class="sticky left-0 top-9 z-30 bg-slate-50 px-4 py-1 text-left text-xs font-medium uppercase text-slate-500 ring-1 ring-slate-200"
+              class="sticky left-0 z-30 bg-slate-50 px-4 py-1 text-left text-xs font-medium uppercase text-slate-500 ring-1 ring-slate-200"
+              :style="{ top: kursTop }"
             >
               Kurs
             </th>
             <th
               v-for="(trip, i) in direction.trips"
               :key="`kurs-${trip.id}`"
-              class="sticky top-9 z-20 px-1 py-1 text-center ring-1 ring-slate-200"
+              class="sticky z-20 px-1 py-1 text-center ring-1 ring-slate-200"
               :class="rangeMode && imBereich(i) ? 'bg-emerald-50' : 'bg-slate-50'"
+              :style="{ top: kursTop }"
             >
               <input
                 v-if="bearbeitet === trip.id"

@@ -127,9 +127,11 @@ export async function refreshSightingCounts(): Promise<void> {
  * Die Rückfrage vor dem Annehmen. Weicht der lokale Kurs ab, wird die **ganze Kette**
  * umnummeriert — das soll niemand aus Versehen auslösen. `null` heißt: ohne Rückfrage annehmen.
  */
-export function acceptQuestion(s: Pick<Sighting, 'comparison' | 'local_course' | 'course_number' | 'chain_trip_count' | 'match' | 'trip'>): string | null {
+export function acceptQuestion(
+  s: Pick<Sighting, 'comparison' | 'local_course' | 'course_number' | 'chain_trip_count' | 'match'>,
+  linie: string,
+): string | null {
   const zeilen: string[] = []
-  const linie = s.trip?.line ?? ''
 
   if (s.comparison === 'differs' && s.local_course) {
     zeilen.push(

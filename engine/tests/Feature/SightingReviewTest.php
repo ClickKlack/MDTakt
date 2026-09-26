@@ -269,4 +269,36 @@ final class SightingReviewTest extends TestCase
         $this->withToken($this->token())->postJson('/api/v1/admin/sightings/reject', ['ids' => [999]])
             ->assertStatus(422);
     }
+
+    /**
+     * Der Fahrplan zeigt je Spalte die offenen Sichtungen, gruppiert nach Nummer — die
+     * meistgenannte zuerst. Entschiedene und wartende fehlen.
+     */
+    public function test_timetable_shows_pending_sightings_grouped(): void
+    {
+        $fahrt = $this->fahrt();
+        $this->kurs($fahrt, '03');
+        $this->sichtung($fahrt, '04', ['service_date' => '2026-09-01']);
+        $this->sichtung($fahrt, '4', ['service_date' => '2026-09-02']);
+        $this->sichtung($fahrt, '03', ['match' => SightingMatch::MatchedNextVersion]);
+        $this->sichtung($fahrt, '07', ['status' => SightingStatus::Rejected]);
+        $this->fahrt('07:00:00', '07:30:00');
+
+        $spalten = $this->withToken($this->token())
+            ->getJson("/api/v1/admin/line-versions/{$this->version->id}/timetable")
+            ->assertOk()
+            ->json('data.directions.0.trips');
+
+        $gruppen = collect($spalten)->firstWhere('id', $fahrt->id)['sightings'];
+
+        $this->assertCount(2, $gruppen);
+        $this->assertSame('1/04', $gruppen[0]['display']);
+        $this->assertSame(2, $gruppen[0]['count']);
+        $this->assertSame(['2026-09-01', '2026-09-02'], $gruppen[0]['dates']);
+        $this->assertSame('differs', $gruppen[0]['comparison']);
+        $this->assertSame(1, $gruppen[0]['chain_trip_count']);
+        $this->assertSame('same', $gruppen[1]['comparison']);
+        $this->assertTrue($gruppen[1]['next_version']);
+        $this->assertSame([], collect($spalten)->firstWhere('id', '!=', $fahrt->id)['sightings']);
+    }
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import CourseSequencePanel from '../components/CourseSequencePanel.vue'
@@ -9,8 +9,9 @@ import { assignCourse, detachCourse, type CourseSequenceResult } from '../servic
 import { fetchLines, FAHRPLAN_TYPEN, type FahrplanTyp, type Line } from '../services/lines'
 import { fetchLineVersions, type LineVersion } from '../services/scheduleVersions'
 import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
-import { fetchTimetable, type Timetable } from '../services/timetable'
-import { formatDate } from '../utils/timezone'
+import { fetchTimetable, type Timetable, type TimetableSightingGroup, type TimetableTrip } from '../services/timetable'
+import { acceptQuestion, acceptSightings, rejectSightings } from '../services/sightings'
+import { formatClock, formatDate } from '../utils/timezone'
 import { lineSortKey, lineTypeOrder } from '../utils/lineStyle'
 
 const route = useRoute()
@@ -107,8 +108,10 @@ async function selectVersion(id: number): Promise<void> {
         day_type: dayType.value,
         version: String(id),
         period: selectedPeriod.value ? String(selectedPeriod.value) : undefined,
+        trip: hervorgehoben.value ? String(hervorgehoben.value) : undefined,
       },
     })
+    void zeigeHervorgehobene()
   } catch {
     error.value = 'Fahrplan konnte nicht geladen werden.'
   } finally {
@@ -164,6 +167,78 @@ async function loeseKurs(tripId: number): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+// ---------------------------------------------------------------- Sichtungen aus MDKursTracker
+
+/** Die Fahrt aus dem Link der Prüfliste — sie wird hervorgehoben und ins Bild gescrollt. */
+const hervorgehoben = ref<number | null>(Number(route.query.trip) || null)
+
+/** Fahrt, deren Sichtungen im Detail-Dialog stehen. */
+const sichtungsFahrt = ref<TimetableTrip | null>(null)
+
+async function nimmSichtungAn(trip: TimetableTrip, gruppe: TimetableSightingGroup): Promise<void> {
+  const frage = acceptQuestion(
+    {
+      comparison: gruppe.comparison,
+      local_course: trip.course,
+      course_number: gruppe.number,
+      chain_trip_count: gruppe.chain_trip_count,
+      match: gruppe.next_version ? 'matched_next_version' : 'matched',
+    },
+    selectedLine.value ?? '',
+  )
+  if (frage !== null && !confirm(frage)) {
+    return
+  }
+
+  busy.value = true
+  error.value = null
+  hinweis.value = null
+
+  try {
+    const r = await acceptSightings(gruppe.ids)
+    hinweis.value =
+      `Sichtung ${gruppe.display} angenommen — der Kurs gilt jetzt für ${r.trips_assigned} Fahrt(en) dieses Umlaufs.` +
+      (r.confirmed_others > 0 ? ` ${r.confirmed_others} weitere Sichtung(en) dadurch bestätigt.` : '')
+    sichtungsFahrt.value = null
+    await ladeFahrplan()
+  } catch (e: unknown) {
+    error.value = meldung(e, 'Die Sichtung konnte nicht angenommen werden.')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function lehneSichtungAb(gruppe: TimetableSightingGroup): Promise<void> {
+  // Die Notiz ist freiwillig; Abbrechen bricht das Ablehnen ab.
+  const notiz = prompt(`Sichtung ${gruppe.display} (${gruppe.count}×) ablehnen. Notiz (optional):`, '')
+  if (notiz === null) {
+    return
+  }
+
+  busy.value = true
+  error.value = null
+  hinweis.value = null
+
+  try {
+    await rejectSightings(gruppe.ids, notiz)
+    hinweis.value = `Sichtung ${gruppe.display} abgelehnt.`
+    sichtungsFahrt.value = null
+    await ladeFahrplan()
+  } catch (e: unknown) {
+    error.value = meldung(e, 'Die Sichtung konnte nicht abgelehnt werden.')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function zeigeHervorgehobene(): Promise<void> {
+  if (hervorgehoben.value === null) {
+    return
+  }
+  await nextTick()
+  document.getElementById(`fahrt-${hervorgehoben.value}`)?.scrollIntoView({ block: 'center', inline: 'center' })
 }
 
 /** Nur den Fahrplan nachladen, ohne die Auswahl anzufassen. */
@@ -230,6 +305,13 @@ async function folgeFertig(ergebnis: CourseSequenceResult): Promise<void> {
 // wäre Zufall.
 watch([selectedVersion, selectedLine, dayType, selectedPeriod], () => {
   bereich.value = null
+})
+
+// Die Hervorhebung gilt nur der Fahrt, mit der man hereinkam — nicht einer anderen Linie.
+watch([selectedLine, dayType], () => {
+  if (!loading.value) {
+    hervorgehoben.value = null
+  }
 })
 
 watch([selectedLine, dayType], () => {
@@ -383,7 +465,11 @@ function gueltigkeit(version: LineVersion): string {
         :range-to="bereich?.key === richtung.key ? bereich.bis : null"
         @assign="setzeKurs"
         @detach="loeseKurs"
+        :highlight-trip="hervorgehoben"
         @range-pick="waehleSpalte"
+        @sighting-accept="nimmSichtungAn"
+        @sighting-reject="(_trip, gruppe) => lehneSichtungAb(gruppe)"
+        @sighting-details="(trip) => (sichtungsFahrt = trip)"
       >
         <template #werkzeuge>
           <div class="mt-2 flex flex-wrap items-center gap-3">
@@ -416,6 +502,67 @@ function gueltigkeit(version: LineVersion): string {
           />
         </template>
       </TimetableGrid>
+
+      <!-- Details der Sichtungen einer Fahrt: alle gesichteten Nummern mit Tagen und Halten. -->
+      <div
+        v-if="sichtungsFahrt"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4"
+        @click.self="sichtungsFahrt = null"
+      >
+        <div class="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl">
+          <div class="flex items-start justify-between">
+            <div>
+              <h2 class="text-base font-semibold text-slate-900">Sichtungen dieser Fahrt</h2>
+              <p class="mt-0.5 text-sm text-slate-500">
+                Ab {{ formatClock(sichtungsFahrt.departure_time) }} · lokal
+                <strong>{{ sichtungsFahrt.course?.display ?? 'kein Kurs' }}</strong>
+              </p>
+            </div>
+            <button class="text-slate-400 hover:text-slate-700" @click="sichtungsFahrt = null">✕</button>
+          </div>
+
+          <ul class="mt-4 space-y-3">
+            <li
+              v-for="g in sichtungsFahrt.sightings"
+              :key="g.number"
+              class="rounded-md border p-3"
+              :class="g.comparison === 'differs' ? 'border-red-200 bg-red-50' : g.comparison === 'none' ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <span class="font-semibold tabular-nums">{{ g.display }}</span>
+                  <span class="ml-2 text-sm text-slate-600">{{ g.count }}× gesichtet</span>
+                  <span v-if="g.next_version" class="ml-2 rounded bg-violet-100 px-1.5 py-0.5 text-xs text-violet-800">
+                    aus Folgeversion
+                  </span>
+                </div>
+                <div class="flex shrink-0 gap-1">
+                  <button
+                    class="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                    :disabled="busy"
+                    @click="nimmSichtungAn(sichtungsFahrt, g)"
+                  >
+                    ✓ Annehmen
+                  </button>
+                  <button
+                    class="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    :disabled="busy"
+                    @click="lehneSichtungAb(g)"
+                  >
+                    ✗ Ablehnen
+                  </button>
+                </div>
+              </div>
+              <p class="mt-1.5 text-xs text-slate-600">
+                {{ g.dates.map((d) => formatDate(d)).join(', ') }} · {{ g.stops.join(', ') }}
+              </p>
+              <p v-if="g.comparison === 'differs'" class="mt-1 text-xs text-red-700">
+                Annehmen nummeriert die Kette mit {{ g.chain_trip_count }} Fahrt(en) um.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </div>
     </main>
   </div>
 </template>

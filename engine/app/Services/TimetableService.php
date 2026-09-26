@@ -34,6 +34,7 @@ final class TimetableService
         private readonly ConsolidatedStopNameResolver $stopNames,
         private readonly OperatingDayResolver $operatingDay,
         private readonly CourseLookup $courses,
+        private readonly SightingLookup $sightings,
     ) {}
 
     /**
@@ -245,6 +246,10 @@ final class TimetableService
         // I-13 (D) offen war. Er haengt an der Kette, nicht an der Fahrt (KURSE §2 K2).
         $kurse = $this->courses->forTrips($gruppe->pluck('id')->map(static fn ($x): int => (int) $x)->all());
 
+        // Offene Sichtungen aus MDKursTracker: Im Fahrplan lässt sich am besten beurteilen, ob
+        // eine gesichtete Nummer zur Fahrt passt — Nachbarspalten und Kette stehen daneben.
+        $sichtungen = $this->sightings->pendingForTrips($gruppe->pluck('id')->map(static fn ($x): int => (int) $x)->all(), $line);
+
         foreach ($gruppe as $fahrt) {
             $id = (int) $fahrt->id;
 
@@ -277,6 +282,7 @@ final class TimetableService
                     // "1/03" und nach dem Uebergang "13/03" (KURSE §2 K1).
                     'display' => $line.'/'.$kurse[$id]['number'],
                 ] : null,
+                'sightings' => $sichtungen[$id] ?? [],
                 'cells' => $zellen,
             ];
         }

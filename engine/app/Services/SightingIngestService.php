@@ -302,7 +302,7 @@ final class SightingIngestService
             'course_number' => trim((string) $daten['course_number']),
             'hafas_stop_id' => (string) $daten['hafas_stop_id'],
             // Der Tracker sendet den Namen an der Sichtung nicht immer — im Laufweg steht er.
-            'stop_name' => $daten['stop_name'] ?? self::stopNameFromRoute($route, (string) $daten['hafas_stop_id']),
+            'stop_name' => $daten['stop_name'] ?? self::stopNameFor($route, (string) $daten['hafas_stop_id']),
             'service_date' => (string) $daten['service_date'],
             'observed_at' => CarbonImmutable::parse((string) $daten['observed_at']),
             'departure_planned' => CarbonImmutable::parse((string) $daten['departure_planned']),
@@ -331,6 +331,40 @@ final class SightingIngestService
         $sichtung->save();
 
         return [$sichtung, $ausgang];
+    }
+
+    /**
+     * Name des Halts: zuerst aus dem eigenen Laufweg, sonst aus einem anderen bekannten Laufweg.
+     *
+     * Bei einer Umleitung hält die Fahrt an einem Ersatzhalt, der nicht in ihrem Laufweg steht —
+     * der Tracker führt sie trotzdem am vorgesehenen. Den Halt kennt dann oft die Gegenrichtung
+     * oder eine andere Linie, die dort regulär hält.
+     */
+    public static function stopNameFor(MdktRoute $route, string $hafasStopId): ?string
+    {
+        $name = self::stopNameFromRoute($route, $hafasStopId);
+
+        if ($name !== null) {
+            return $name;
+        }
+
+        // Grobe Vorauswahl im JSON-Text, die genaue Prüfung macht stopNameFromRoute.
+        $andere = MdktRoute::query()
+            ->whereKeyNot($route->id)
+            ->whereRaw('CAST(stops AS TEXT) LIKE ?', ['%'.$hafasStopId.'%'])
+            ->orderByDesc('id')
+            ->limit(20)
+            ->get();
+
+        foreach ($andere as $kandidat) {
+            $name = self::stopNameFromRoute($kandidat, $hafasStopId);
+
+            if ($name !== null) {
+                return $name;
+            }
+        }
+
+        return null;
     }
 
     /**

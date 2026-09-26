@@ -48,7 +48,17 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
    nutzt das Datum lediglich für den Versatz zu UTC (Sommer-/Winterzeit). Am Endhalt darf die **Ankunft im Feld
    `departure_planned`** stehen. Einen Laufweg, den MD-Takt schon kennt, dürft ihr weglassen; mitsenden ist aber immer
    richtig und am einfachsten.
-6. **Nichts selbst berechnen:** Die Fahrt-Signatur, den Fahrplantyp (inkl. Ferien) und den Betriebstag bestimmt
+6. **Ankunft am Linienwechsel mitsenden (`arrival_planned`, nachgefordert 26.09.2026):** Steht das Fahrzeug am
+   Übergangshalt einige Minuten, endet die Fahrt der alten Linie im Fahrplan mit der **Ankunft**, die neue beginnt
+   mit der **Abfahrt**. Fehlt die Ankunft, findet MD-Takt die Fahrt der alten Linie nicht. Beispiel aus dem ersten
+   produktiven Lauf: Linie 5 → 1 an City Carré **an 18:36, ab 18:38** — gesendet war nur 18:38, die Sichtung der 5
+   blieb ohne Treffer (ebenso N2 → N1 am Allee-Center, an 01:12, ab 01:15).
+   **Bitte `arrival_planned` an jedem Halt mitsenden, für den HAFAS eine Ankunft liefert** — mindestens an jedem
+   Halt, an dem `line` wechselt. Das Feld steht schon im Vertrag (optional, UTC mit `Z`, es zählt nur die Uhrzeit);
+   am Endhalt bleibt die Ankunft in `departure_planned` weiterhin richtig. Betroffene Laufwege einfach mit dem
+   nächsten Lauf erneut senden — MD-Takt aktualisiert sie per Fingerprint und ordnet die wartenden Sichtungen
+   beim nächsten Fahrplan-Import neu zu (oder sofort per `sightings:rematch`).
+7. **Nichts selbst berechnen:** Die Fahrt-Signatur, den Fahrplantyp (inkl. Ferien) und den Betriebstag bestimmt
    MD-Takt. `day_type` ist nur informativ. Das **reale Datum** der Sichtung kommt aus `departure_planned` und
    `service_date` der Sichtung selbst, nicht aus dem Laufweg.
 
@@ -94,8 +104,10 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
       "service_nr": "139916_35",           // HAFAS ZI_TA, informativ
       "stops": [                           // VOLLSTÄNDIGER Laufweg, nach seq geordnet
         { "seq": 1, "hafas_stop_id": "300730901", "stop_name": "Magdeburg, Klinikum Olvenstedt",
-          "line": "5", "departure_planned": "2026-04-15T15:21:00Z" }
-        // … alle Halte; bei Linienübergang ändert sich "line" pro Halt
+          "line": "5", "departure_planned": "2026-04-15T15:21:00Z" },
+        // … alle Halte; bei Linienübergang ändert sich "line" pro Halt — dort die Ankunft mitsenden (§2.1 Nr. 6):
+        { "seq": 27, "hafas_stop_id": "300384602", "stop_name": "Magdeburg, City Carré",
+          "line": "1", "arrival_planned": "2026-04-15T16:36:00Z", "departure_planned": "2026-04-15T16:38:00Z" }
       ]
     }
   ],
@@ -177,7 +189,7 @@ sonst matcht das System still falsch.
 | E1 | `course_number` ist die **am Fahrzeug angeschlagene** Kursnummer (Nutzereingabe), **mit oder ohne führende Null** — MD-Takt vergleicht ohne sie („3" = „03", angepasst 26.09.2026) | `recordings.course_number` | sie aus HAFAS abgeleitet/geraten ist |
 | E2 | `course_number` ist die Bezeichnung des **Umlaufs**, und der Umlauf kann **über mehrere Linien** laufen (siehe Hinweis unten) | Fachlogik MVB | ein Fahrzeug beim Linienwechsel eine **andere** Nummer bekommt |
 | E3 | ~~Tagestypen sind genau MO-FR / SA / SO(+Feiertag)~~ — **entfällt (26.09.2026):** MD-Takt bestimmt den Fahrplantyp selbst aus dem Betriebstag, `day_type` ist nur informativ | `trips.day_type` | — |
-| E4 | Pro Fahrt gibt es einen **vollständigen Laufweg mit Soll-Zeit je Halt** | `route_stops` (departure_planned, line, seq) | Laufweg unvollständig ist oder Soll-Zeiten fehlen |
+| E4 | Pro Fahrt gibt es einen **vollständigen Laufweg mit Soll-Zeit je Halt**, am Linienwechsel mit Ankunft **und** Abfahrt | `route_stops` (departure_planned, line, seq) | Laufweg unvollständig ist, Soll-Zeiten fehlen oder am Linienwechsel nur die Abfahrt vorliegt |
 | E5 | **Alle Zeiten in UTC**; `service_date` = **Berlin**-Betriebstag (Fahrtstart) | `recordings`/`route_stops` UTC, `service_date` | Zeiten lokal/naiv sind oder service_date anders definiert |
 | E6 | `schedule_fingerprint` ist **fahrplanstabil & tagesunabhängig** und identifiziert die Route eindeutig | `trips.schedule_fingerprint` | er je Tag/Abruf variiert |
 | E7 | Bei **Linienübergängen** trägt **`route_stops.line` die Linie pro Halt** (nicht nur die Start-Linie) | `route_stops.line` | nur eine Gesamt-Linie pro Fahrt existiert |

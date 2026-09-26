@@ -308,6 +308,13 @@ Die Engine bildet aus dem Laufweg genau die Signatur nach, die der Import je Fah
   Sichtung selbst. Ein im Sommer erfasster Laufweg passt so auch im Winter.
 - **Endhalt:** Der Tracker legt die Ankunft am Endhalt in `departure_planned` ab — die Engine versucht dort ohnehin
   Ankunft und Abfahrt.
+- **Standzeit am Linienwechsel (erster produktiver Lauf, 26.09.2026):** Hält das Fahrzeug am Übergangshalt einige
+  Minuten (City Carré 5 → 1: an 18:36, ab 18:38), endet die Fahrt der alten Linie im Feed mit der Ankunft. Ohne
+  `arrival_planned` fehlt diese Zeit, die Signatur trifft nicht. Der Tracker sendet die Ankunft deshalb mit
+  (REQUIREMENTS §2.1 Nr. 6); der Abgleich bleibt exakt.
+- **Ersatzhalt bei Umleitung:** Der Tracker führt eine umgeleitete Fahrt am vorgesehenen Laufweg, gesichtet wird sie
+  an einem Ersatzhalt, der darin nicht vorkommt. Solche Sichtungen finden keine Fahrt (`waiting` → `no_trip`) und
+  werden abgelehnt. Den Haltnamen holt die Engine dann aus einem anderen Laufweg, der den Halt kennt.
 - **Keine Toleranz.** Gültig ist die Version, deren Intervall den Betriebstag einschließt.
 - **Folgeversion (Baustelle Linie 10):** Der Tracker kennt einen geänderten Laufweg über HAFAS sofort, der Feed oft erst
   eine Woche später. Ohne Treffer am Tag wird deshalb die nächste Version der Linie gesucht, wenn sie **höchstens

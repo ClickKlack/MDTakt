@@ -200,7 +200,7 @@ components:
         hafas_stop_id: { type: string, maxLength: 32, example: '300730901' }
         stop_name: { type: string, nullable: true, maxLength: 255 }
         line: { type: string, maxLength: 8, description: 'Linie **an diesem Halt** (Linienübergänge!)', example: '5' }
-        arrival_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Ankunft, UTC mit Z. Ausgewertet wird nur die Uhrzeit; das Datum (erster HAFAS-Abruf) bestimmt nur den Versatz zu UTC.', example: '2026-09-01T04:20:00Z' }
+        arrival_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Ankunft, UTC mit Z. Am Linienwechsel mitsenden, sonst findet die Engine die Fahrt der alten Linie bei Standzeit nicht. Ausgewertet wird nur die Uhrzeit; das Datum (erster HAFAS-Abruf) bestimmt nur den Versatz zu UTC.', example: '2026-09-01T04:20:00Z' }
         departure_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Abfahrt, UTC mit Z. Pflicht, wenn arrival_planned fehlt; am Endhalt darf hier die Ankunft stehen. Ausgewertet wird nur die Uhrzeit.', example: '2026-09-01T04:10:00Z' }
     SightingRoute:
       type: object

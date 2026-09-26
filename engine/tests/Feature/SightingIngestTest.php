@@ -349,4 +349,30 @@ final class SightingIngestTest extends TestCase
 
         $this->assertSame('Am Nordpark', Sighting::query()->sole()->stop_name);
     }
+
+    /**
+     * Umleitung: Die Fahrt hält an einem Ersatzhalt, der nicht in ihrem Laufweg steht. Den Namen
+     * kennt ein anderer Laufweg — hier der einer anderen Linie.
+     */
+    public function test_ingest_takes_the_stop_name_from_another_route(): void
+    {
+        $body = $this->body();
+        $body['trips'][] = [
+            'mdkt_trip_id' => 900,
+            'schedule_fingerprint' => 'andere-linie',
+            'line' => '9',
+            'direction' => 'Reform',
+            'day_type' => 'MO-FR',
+            'stops' => [
+                ['seq' => 1, 'hafas_stop_id' => '300748202', 'stop_name' => 'Magdeburg, Universitätsbibliothek', 'line' => '9', 'departure_planned' => '2026-09-01T05:00:00Z'],
+                ['seq' => 2, 'hafas_stop_id' => '900009', 'stop_name' => 'Z', 'line' => '9', 'departure_planned' => '2026-09-01T05:05:00Z'],
+            ],
+        ];
+        unset($body['sightings'][0]['stop_name']);
+        $body['sightings'][0]['hafas_stop_id'] = '300748202';
+
+        $this->sende($body)->assertOk();
+
+        $this->assertSame('Universitätsbibliothek', Sighting::query()->sole()->stop_name);
+    }
 }

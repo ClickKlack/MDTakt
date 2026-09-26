@@ -245,13 +245,18 @@ vorher „öffentlich") — die Umlaufdaten sollen nicht massenhaft abziehbar se
 } }
 ```
 
+**Kursnummer wie gespeichert:** `course_number` und `display` liefert MD-Takt genau so, wie der Kurs gepflegt ist —
+mit oder ohne führende Null (`3` oder `03`, `10/3` oder `10/03`). MD-Takt normalisiert nicht. Braucht die Tracker-Anzeige
+zweistellige Nummern, **ergänzt MDKursTracker die führende Null selbst**; beim Vergleich mit eigenen Nummern führende
+Nullen ignorieren.
+
 **Keine Konfidenz (entschieden 26.09.2026):** MD-Takt verwaltet die Wahrheit. Viele Kurse entstehen durch logisches
 Fortschreiben statt aus Sichtungen und sind deshalb nicht weniger richtig — die Antwort unterscheidet das nicht.
 
 **Caching:** `Cache-Control: private, max-age=3600` — eine Stunde, damit ein gerade angenommener Kurs noch am selben
 Tag ankommt. **Feedback-Loop-Verbot:** Eine Auskunft darf nie als Sichtung in Fluss 1 zurückfließen.
 
-**Probe am Bestand (29.09.2026):** 200 zufällige Abfahrten der Linie 10 mit Haltname und Richtung — 200 gefunden,
+**Probe am Bestand (26.09.2026):** 200 zufällige Abfahrten der Linie 10 mit Haltname und Richtung — 200 gefunden,
 keine falsch. Ohne Richtung blieben 26 mehrdeutig: An der Rostocker Straße fahren beide Richtungen zur selben
 Minute an gleichnamigen Bahnsteigen ab.
 
@@ -309,7 +314,7 @@ Die Engine bildet aus dem Laufweg genau die Signatur nach, die der Import je Fah
   14 Tage** nach dem Betriebstag beginnt → `matched_next_version`, markiert, nie automatisch bestätigt.
 - **Mehrere Treffer** → `ambiguous`, es wird nichts geraten.
 
-**Probe am Bestand (29.09.2026):** 400 zufällige Fahrten + 11 Linienwechsel als künstlicher Tracker-Export —
+**Probe am Bestand (26.09.2026):** 400 zufällige Fahrten + 11 Linienwechsel als künstlicher Tracker-Export —
 422 von 422 Sichtungen treffen die richtige Fahrt. Echte Tracker-Daten stehen noch aus
 (`php artisan sightings:ingest-file export.json --dry-run` meldet die Trefferquote, ohne zu speichern).
 
@@ -322,7 +327,8 @@ Die Engine bildet aus dem Laufweg genau die Signatur nach, die der Import je Fah
 | `ambiguous` | Mehrere Fahrten mit derselben Signatur — nur ablehnbar |
 
 `status`: `pending` → `accepted` / `rejected` von Hand; **`confirmed` setzt die Engine selbst**, wenn der gesichtete
-Kurs schon an der Fahrt hängt („03" = „3"). Ändert der Tracker eine entschiedene Sichtung, wird sie wieder `pending`.
+Kurs schon an der Fahrt hängt („03" = „3"; der Tracker sendet ohne führende Null). Auch beim Annehmen zählt die Null
+nicht: Eine Sichtung „3" schließt sich dem vorhandenen Kurs „03" an, statt einen zweiten anzulegen. Ändert der Tracker eine entschiedene Sichtung, wird sie wieder `pending`.
 Löschungen im Tracker werden **dauerhaft nicht** übertragen (Festlegung des Trackers) — die Karenzzeit fängt sie ab,
 eine später gelöschte Sichtung wird in MD-Takt abgelehnt.
 

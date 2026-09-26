@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Enums\SightingMatch;
 use App\Enums\SightingStatus;
+use App\Models\Course;
 use App\Models\MdktRoute;
 use App\Models\Sighting;
 use Carbon\CarbonImmutable;
@@ -261,13 +262,7 @@ final class SightingIngestService
      */
     public static function sameNumber(string $a, string $b): bool
     {
-        $norm = static function (string $n): string {
-            $n = trim($n);
-
-            return ctype_digit($n) ? (ltrim($n, '0') ?: '0') : mb_strtolower($n);
-        };
-
-        return $norm($a) === $norm($b);
+        return Course::sameNumber($a, $b);
     }
 
     /**

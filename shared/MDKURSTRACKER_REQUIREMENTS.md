@@ -160,6 +160,10 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
 ```
 - **Response 200 (nicht gefunden):** `{ "data": { "found": false, "reason": "no-trip-match" | "ambiguous" | "no-course-assigned" } }`
 - `display` ist fertig präfixiert (`Linie/Nummer`) — die Nummer gehört dem Umlauf, der Präfix der Linie an diesem Halt.
+- **Kursnummer wie gespeichert:** `course_number` und `display` kommen genau so, wie der Kurs in MD-Takt gepflegt ist —
+  mit oder ohne führende Null (`3`/`03`, `10/3`/`10/03`). MD-Takt normalisiert nicht. Soll die Tafel zweistellig
+  anzeigen, **ergänzt MDKursTracker die führende Null selbst**; beim Vergleich mit eigenen Nummern führende Nullen
+  ignorieren.
 
 ---
 
@@ -170,7 +174,7 @@ sonst matcht das System still falsch.
 
 | # | MD-Takt erwartet | Stützt sich auf (MDKursTracker) | Bricht, wenn… |
 |---|---|---|---|
-| E1 | `course_number` ist die **am Fahrzeug angeschlagene** Kursnummer (Nutzereingabe), 2-stellig | `recordings.course_number` | sie aus HAFAS abgeleitet/geraten ist |
+| E1 | `course_number` ist die **am Fahrzeug angeschlagene** Kursnummer (Nutzereingabe), **mit oder ohne führende Null** — MD-Takt vergleicht ohne sie („3" = „03", angepasst 26.09.2026) | `recordings.course_number` | sie aus HAFAS abgeleitet/geraten ist |
 | E2 | `course_number` ist die Bezeichnung des **Umlaufs**, und der Umlauf kann **über mehrere Linien** laufen (siehe Hinweis unten) | Fachlogik MVB | ein Fahrzeug beim Linienwechsel eine **andere** Nummer bekommt |
 | E3 | ~~Tagestypen sind genau MO-FR / SA / SO(+Feiertag)~~ — **entfällt (26.09.2026):** MD-Takt bestimmt den Fahrplantyp selbst aus dem Betriebstag, `day_type` ist nur informativ | `trips.day_type` | — |
 | E4 | Pro Fahrt gibt es einen **vollständigen Laufweg mit Soll-Zeit je Halt** | `route_stops` (departure_planned, line, seq) | Laufweg unvollständig ist oder Soll-Zeiten fehlen |
@@ -204,7 +208,7 @@ sonst matcht das System still falsch.
 2. ~~**Inkrementelle Auswahl**~~ — **geklärt:** eine eigene Sync-Spalte des Trackers (§2.1).
 3. ~~**Konfidenz**~~ — **entfällt:** Die Auskunft liefert keine Konfidenz; MD-Takt ist die Wahrheit (§2.2).
 4. **`day_type`-Werte:** Welche genauen Strings nutzt ihr (`MO-FR`/`SA`/`SO`/Feiertag?), und wie behandelt ihr Feiertage?
-5. **Anzeige-Ort Fluss 2:** Bestätigt ihr die vierte `courseSource`-Stufe `confirmed` in der Trip-Gruppen-Detailansicht?
+5. **Anzeige-Ort Fluss 2:** Bestätigt ihr die vierte `courseSource`-Stufe `mdtakt` (§2.2) in der Trip-Gruppen-Detailansicht?
 
 ---
 

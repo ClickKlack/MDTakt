@@ -160,11 +160,13 @@ final class CourseService
         $version = $trip->lineVersion;
         $eigeneLinien = $this->linesOfTrips($this->links->chainFor($trip));
 
+        // Führende Nullen zählen nicht: Eine Sichtung „3" landet auf dem vorhandenen Kurs „03".
         $kandidaten = Course::query()
             ->where('period_id', $version->period_id)
             ->where('day_type', $version->day_type->value)
-            ->where('number', $number)
-            ->get();
+            ->orderBy('id')
+            ->get()
+            ->filter(static fn (Course $kurs): bool => Course::sameNumber($kurs->number, $number));
 
         foreach ($kandidaten as $kurs) {
             $kursLinien = $this->linesOfCourse($kurs->id);

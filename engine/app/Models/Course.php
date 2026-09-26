@@ -41,6 +41,21 @@ final class Course extends Model
     }
 
     /**
+     * Gleiche Kursnummer ohne Rücksicht auf führende Nullen: „03" = „3" (Tracker sendet ohne Null,
+     * im Bestand gibt es beides). Nicht-numerische Nummern vergleichen ohne Groß/Klein.
+     */
+    public static function sameNumber(string $a, string $b): bool
+    {
+        $norm = static function (string $n): string {
+            $n = trim($n);
+
+            return ctype_digit($n) ? (ltrim($n, '0') ?: '0') : mb_strtolower($n);
+        };
+
+        return $norm($a) === $norm($b);
+    }
+
+    /**
      * @return BelongsTo<SchedulePeriod, $this>
      */
     public function period(): BelongsTo

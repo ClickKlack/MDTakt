@@ -184,6 +184,22 @@ final class SightingReviewTest extends TestCase
     }
 
     /**
+     * Der Tracker sendet Kursnummern ohne führende Null. Eine Sichtung „3" schließt sich dem
+     * vorhandenen Kurs „03" derselben Linie an, statt einen zweiten Kurs anzulegen.
+     */
+    public function test_accept_without_leading_zero_reuses_the_existing_course(): void
+    {
+        $vorhanden = $this->kurs($this->fahrt(), '03');
+        $s = $this->sichtung($this->fahrt('07:00:00', '07:30:00'), '3');
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/sightings/accept', ['ids' => [$s->id]])
+            ->assertOk();
+
+        $this->assertSame(1, Course::query()->count());
+        $this->assertSame(2, CourseTrip::query()->where('course_id', $vorhanden->id)->count());
+    }
+
+    /**
      * Konflikt: Die ganze Kette wird umnummeriert, und eine zweite offene Sichtung derselben
      * Kette, die schon die neue Nummer nennt, gilt danach als bestätigt.
      */

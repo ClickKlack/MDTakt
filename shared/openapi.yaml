@@ -226,7 +226,7 @@ components:
         hafas_stop_id: { type: string, maxLength: 32, example: '900002' }
         stop_name: { type: string, nullable: true }
         line: { type: string, maxLength: 8, description: 'Linie am gesichteten Halt', example: '1' }
-        course_number: { type: string, maxLength: 8, example: '03' }
+        course_number: { type: string, maxLength: 8, example: '3', description: 'Am Fahrzeug angeschlagene Nummer; führende Nullen zählen nicht (3 = 03).' }
         service_date: { type: string, format: date, description: 'Betriebstag (Europe/Berlin)', example: '2026-09-01' }
         observed_at: { type: string, format: date-time, example: '2026-09-01T04:09:30Z' }
         departure_planned: { type: string, format: date-time, example: '2026-09-01T04:10:00Z' }
@@ -376,7 +376,7 @@ components:
         ref: { type: string, nullable: true, description: 'Nur in der Sammelabfrage: das mitgegebene ref' }
         found: { type: boolean }
         reason: { type: string, enum: [no-trip-match, ambiguous, no-course-assigned], description: 'Nur bei found=false' }
-        course_number: { type: string, example: '03' }
+        course_number: { type: string, example: '03', description: 'Wie in MD-Takt gespeichert, mit oder ohne führende Null; zweistellige Anzeige ergänzt der Client.' }
         display: { type: string, example: '10/03' }
         line: { type: string }
         matched_trip:

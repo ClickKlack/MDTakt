@@ -1,0 +1,79 @@
+meta {
+  name: Sichtungen einliefern (MDKursTracker)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/collector/sightings
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{mdkurstrackerToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "sync": { "since": null, "generated_at": "2026-09-01T04:11:00Z" },
+    "trips": [
+      {
+        "mdkt_trip_id": 776,
+        "schedule_fingerprint": "bruno-beispiel-linie-1",
+        "line": "1",
+        "direction": "Sudenburg",
+        "day_type": "MO-FR",
+        "stops": [
+          { "seq": 1, "hafas_stop_id": "900001", "stop_name": "A", "line": "1", "departure_planned": "2026-09-01T04:00:00Z" },
+          { "seq": 2, "hafas_stop_id": "900002", "stop_name": "B", "line": "1", "departure_planned": "2026-09-01T04:10:00Z" },
+          { "seq": 3, "hafas_stop_id": "900003", "stop_name": "C", "line": "1", "arrival_planned": "2026-09-01T04:20:00Z" }
+        ]
+      }
+    ],
+    "sightings": [
+      {
+        "mdkt_recording_id": 1935,
+        "schedule_fingerprint": "bruno-beispiel-linie-1",
+        "hafas_stop_id": "900002",
+        "stop_name": "B",
+        "line": "1",
+        "course_number": "03",
+        "service_date": "2026-09-01",
+        "observed_at": "2026-09-01T04:09:30Z",
+        "departure_planned": "2026-09-01T04:10:00Z",
+        "departure_actual": null
+      }
+    ]
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.received.sightings: eq 1
+  res.body.data.results[0].mdkt_recording_id: eq 1935
+  res.body.data.watermark.max_recording_id: eq 1935
+}
+
+docs {
+  # Sichtungen einliefern
+
+  Eigener Token `mdkurstrackerToken` (env `MDKURSTRACKER_API_TOKEN`) — der Collector-Token gilt hier nicht.
+  Idempotent: erneutes Senden liefert `outcome: unchanged`.
+
+  Beispiel-Response (Beispieldaten ohne passende Fahrt → `waiting`):
+
+  ```json
+  { "data": {
+    "received": { "trips": 1, "sightings": 1 },
+    "results": [ { "mdkt_recording_id": 1935, "outcome": "created", "match": "waiting", "status": "pending", "consolidated_trip_id": null } ],
+    "unmatched_fingerprints": [ "bruno-beispiel-linie-1" ],
+    "watermark": { "max_recording_id": 1935, "max_observed_at": "2026-09-01T04:09:30Z" }
+  } }
+  ```
+}

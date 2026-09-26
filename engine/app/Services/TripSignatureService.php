@@ -32,6 +32,17 @@ final class TripSignatureService
     ) {}
 
     /**
+     * Die Signatur-Formel an einer Stelle: Die Sichtungs-Zuordnung bildet sie aus dem Laufweg
+     * des Trackers nach und muss dabei exakt dieselbe Zeichenkette hashen wie der Import.
+     *
+     * @param  string  $sequence  Abfahrts-Uhrzeiten als „HH:MM,HH:MM,…"
+     */
+    public static function signatureFor(string $line, string $dayType, string $sequence): string
+    {
+        return hash('sha256', $line.'|'.$dayType.'|'.$sequence);
+    }
+
+    /**
      * Baut `trip_signatures` für den aktuellen Roh-Bestand neu auf.
      *
      * @return int Anzahl geschriebener Zeilen
@@ -71,7 +82,7 @@ final class TripSignatureService
                 $rows[] = [
                     'trip_id' => $trip->trip_id,
                     'day_type' => $typ,
-                    'signature' => hash('sha256', $trip->route_short_name.'|'.$typ.'|'.$sequenz),
+                    'signature' => self::signatureFor($trip->route_short_name, $typ, $sequenz),
                 ];
 
                 if (count($rows) >= 2000) {

@@ -40,4 +40,10 @@ return [
         'token' => env('COLLECTOR_API_TOKEN'),
     ],
 
+    // Eigener Token für den Sichtungs-Eingang aus MDKursTracker — getrennt vom Collector, damit
+    // der Tracker keine GTFS-Importe auslösen kann (INTEGRATION_MDKURSTRACKER §5.1).
+    'mdkurstracker' => [
+        'token' => env('MDKURSTRACKER_API_TOKEN'),
+    ],
+
 ];

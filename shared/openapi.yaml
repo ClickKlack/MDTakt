@@ -16,6 +16,12 @@ components:
       type: http
       scheme: bearer
       description: Statischer API-Key für Collector-Endpunkte
+    MdkurstrackerToken:
+      type: http
+      scheme: bearer
+      description: >-
+        Statischer API-Key für den Sichtungs-Eingang aus MDKursTracker (env MDKURSTRACKER_API_TOKEN).
+        Getrennt vom Collector-Token — der eine öffnet den anderen Endpunkt nicht.
     AdminToken:
       type: http
       scheme: bearer
@@ -186,6 +192,104 @@ components:
               type: array
               items: { $ref: '#/components/schemas/GtfsImportRun' }
 
+    SightingRouteStop:
+      type: object
+      required: [seq, hafas_stop_id, line]
+      properties:
+        seq: { type: integer, minimum: 0 }
+        hafas_stop_id: { type: string, maxLength: 32, example: '300730901' }
+        stop_name: { type: string, nullable: true, maxLength: 255 }
+        line: { type: string, maxLength: 8, description: 'Linie **an diesem Halt** (Linienübergänge!)', example: '5' }
+        arrival_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Ankunft, UTC mit Z', example: '2026-09-01T04:20:00Z' }
+        departure_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Abfahrt, UTC mit Z. Pflicht, wenn arrival_planned fehlt.', example: '2026-09-01T04:10:00Z' }
+    SightingRoute:
+      type: object
+      required: [schedule_fingerprint, line, stops]
+      properties:
+        mdkt_trip_id: { type: integer, nullable: true, example: 776 }
+        schedule_fingerprint: { type: string, maxLength: 128, description: 'Fingerprint des Trackers; je Request höchstens einmal' }
+        line: { type: string, maxLength: 8, example: '1' }
+        direction: { type: string, nullable: true, example: 'Sudenburg' }
+        day_type: { type: string, nullable: true, description: 'Informativ — die Engine bestimmt den Fahrplantyp selbst aus dem Betriebstag' }
+        service_nr: { type: string, nullable: true }
+        stops:
+          type: array
+          minItems: 2
+          maxItems: 150
+          items: { $ref: '#/components/schemas/SightingRouteStop' }
+    SightingInput:
+      type: object
+      required: [mdkt_recording_id, schedule_fingerprint, hafas_stop_id, line, course_number, service_date, observed_at, departure_planned]
+      properties:
+        mdkt_recording_id: { type: integer, minimum: 1, description: 'Idempotenz-Schlüssel', example: 1935 }
+        schedule_fingerprint: { type: string, maxLength: 128 }
+        hafas_stop_id: { type: string, maxLength: 32, example: '900002' }
+        stop_name: { type: string, nullable: true }
+        line: { type: string, maxLength: 8, description: 'Linie am gesichteten Halt', example: '1' }
+        course_number: { type: string, maxLength: 8, example: '03' }
+        service_date: { type: string, format: date, description: 'Betriebstag (Europe/Berlin)', example: '2026-09-01' }
+        observed_at: { type: string, format: date-time, example: '2026-09-01T04:09:30Z' }
+        departure_planned: { type: string, format: date-time, example: '2026-09-01T04:10:00Z' }
+        departure_actual: { type: string, format: date-time, nullable: true }
+    SightingIngestRequest:
+      type: object
+      required: [trips, sightings]
+      properties:
+        sync:
+          type: object
+          properties:
+            since: { type: string, format: date-time, nullable: true }
+            generated_at: { type: string, format: date-time, nullable: true }
+        trips:
+          type: array
+          maxItems: 200
+          description: 'Laufwege der gesendeten Sichtungen. Darf Fingerprints auslassen, die die Engine schon kennt.'
+          items: { $ref: '#/components/schemas/SightingRoute' }
+        sightings:
+          type: array
+          maxItems: 500
+          items: { $ref: '#/components/schemas/SightingInput' }
+    SightingMatch:
+      type: string
+      enum: [matched, matched_next_version, waiting, no_trip, ambiguous]
+      description: >-
+        matched = Treffer in der am Betriebstag gültigen Version; matched_next_version = erst in der
+        nächsten Version (≤ 14 Tage später, nie auto-bestätigt); waiting = noch kein Treffer, wird nach
+        jedem Import erneut gesucht; no_trip = nach 2 Importen weiter ohne Treffer; ambiguous = mehrere Fahrten.
+    SightingStatus:
+      type: string
+      enum: [pending, confirmed, accepted, rejected]
+      description: 'confirmed setzt die Engine selbst, wenn der Kurs schon an der Fahrt hängt.'
+    SightingIngestResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            received:
+              type: object
+              properties:
+                trips: { type: integer }
+                sightings: { type: integer }
+            results:
+              type: array
+              items:
+                type: object
+                properties:
+                  mdkt_recording_id: { type: integer }
+                  outcome: { type: string, enum: [created, updated, unchanged, unknown_fingerprint] }
+                  match: { allOf: [{ $ref: '#/components/schemas/SightingMatch' }], nullable: true }
+                  status: { allOf: [{ $ref: '#/components/schemas/SightingStatus' }], nullable: true }
+                  consolidated_trip_id: { type: integer, nullable: true }
+            unmatched_fingerprints:
+              type: array
+              items: { type: string }
+            watermark:
+              type: object
+              description: 'Neue Merkmarke für das Nachholen im Tracker'
+              properties:
+                max_recording_id: { type: integer, nullable: true }
+                max_observed_at: { type: string, format: date-time, nullable: true }
     GtfsImportRunResponse:
       type: object
       description: "Zusammenfassung eines Laufs (Start/Chunk/Abschluss)"
@@ -4539,6 +4643,46 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
           description: Lauf ist bereits abgeschlossen oder fehlgeschlagen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/collector/sightings:
+    post:
+      operationId: ingestSightings
+      summary: Sichtungen aus MDKursTracker annehmen
+      description: >-
+        Der Tracker ruft sofort nach dem Speichern einer Sichtung auf und holt Fehlgeschlagenes per Cron
+        nach (INTEGRATION_MDKURSTRACKER §5.1). Idempotent über mdkt_recording_id. Die Engine teilt den
+        Laufweg an Linienwechseln, bildet die Fahrt-Signatur selbst und ordnet die Sichtung einer Fahrt
+        des Konsolidats zu. Hängt der gesichtete Kurs schon an der Fahrt, wird sie automatisch bestätigt.
+        gzip-Body erlaubt (Content-Encoding: gzip).
+      tags: [Collector]
+      security:
+        - MdkurstrackerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SightingIngestRequest' }
+      responses:
+        '200':
+          description: Sichtungen verarbeitet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SightingIngestResponse' }
+        '401':
+          description: Fehlender oder ungültiger Bearer-Token (auch der Collector-Token gilt hier nicht)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validierungsfehler (Grenzen überschritten, Zeit nicht in UTC mit Z, …)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate-Limit überschritten (120 Requests/Minute je IP)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

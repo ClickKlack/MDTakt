@@ -30,6 +30,7 @@ final class GtfsImportService
     public function __construct(
         private readonly TripSignatureService $signatures,
         private readonly ScheduleVersionService $versions,
+        private readonly SightingIngestService $sightings,
     ) {}
 
     /**
@@ -125,6 +126,7 @@ final class GtfsImportService
     public function finishRun(GtfsImportRun $run): GtfsImportRun
     {
         $counts = ($run->counts ?? []) + $this->consolidate($run);
+        $counts += $this->rematchSightings($run);
 
         $run->update([
             'status' => GtfsImportStatus::Success,
@@ -164,8 +166,33 @@ final class GtfsImportService
     }
 
     /**
+     * Ordnet offene Sichtungen gegen den neuen Fahrplan zu. Der Tracker kennt einen geänderten
+     * Laufweg über HAFAS oft eine Woche vor dem Feed — erst jetzt kann die Fahrt gefunden werden.
+     *
+     * Wie die Konsolidierung macht ein Fehler hier den Import nicht ungültig: Er wird vermerkt,
+     * und der Lauf lässt sich mit `sightings:rematch` wiederholen.
+     *
+     * @return array<string, mixed>
+     */
+    private function rematchSightings(GtfsImportRun $run): array
+    {
+        try {
+            $zahlen = $this->sightings->rematchOpen();
+
+            return ['sightings_rematched' => $zahlen['checked'], 'sightings_matched' => $zahlen['matched']];
+        } catch (Throwable $e) {
+            Log::error('Sighting rematch after import failed', [
+                'run_id' => $run->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return ['sightings_rematch_error' => $e->getMessage()];
+        }
+    }
+
+    /**
      * Löscht den gesamten GTFS-Bestand vor dem Neuschreiben (Reihenfolge folgt
-     * den Fremdschlüsseln). sightings.assigned_trip_id wird per nullOnDelete genullt.
+     * den Fremdschlüsseln). Sichtungen hängen am Konsolidat, nicht am Roh-Bestand.
      */
     private function clearAllGtfsData(): void
     {

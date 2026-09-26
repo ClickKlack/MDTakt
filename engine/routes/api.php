@@ -25,6 +25,7 @@ use App\Http\Controllers\Admin\TimetableController;
 use App\Http\Controllers\Admin\TripCourseController;
 use App\Http\Controllers\Admin\TripLinkController;
 use App\Http\Controllers\Collector\ImportController;
+use App\Http\Controllers\Collector\SightingController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\StopController;
 use App\Http\Controllers\TripController;
@@ -157,5 +158,12 @@ Route::prefix('v1')->group(function (): void {
         Route::post('imports', [ImportController::class, 'start'])->name('collector.imports.start');
         Route::post('imports/{run}/stop-times', [ImportController::class, 'stopTimes'])->name('collector.imports.stop-times');
         Route::post('imports/{run}/finish', [ImportController::class, 'finish'])->name('collector.imports.finish');
+    });
+
+    // Sichtungs-Eingang aus MDKursTracker — eigener Token (`services.mdkurstracker.token`), damit
+    // der Tracker keine Importe auslösen kann. Der Tracker ruft je Sichtung sofort auf und holt
+    // Fehlgeschlagenes per Cron nach; 120/min reichen für beides mit großem Abstand.
+    Route::prefix('collector')->middleware(['throttle:120,1', 'collector.token:mdkurstracker', 'decompress'])->group(function (): void {
+        Route::post('sightings', [SightingController::class, 'store'])->name('collector.sightings.store');
     });
 });

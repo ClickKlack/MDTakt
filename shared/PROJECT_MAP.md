@@ -65,7 +65,7 @@ md-takt/
     └── bruno/                        # API-Tests (Bruno)
         ├── environments/
         │   ├── local.bru             # Base-URL: http://localhost, API-Token aus Env
-        │   └── production.bru        # Base-URL: https://api.strassenbahn-magdeburg.de
+        │   └── production.bru        # Base-URL: https://api.mdtakt.strassenbahn-magdeburg.de
         ├── sightings/
         │   ├── ingest.bru            # Eingang aus MDKursTracker (eigener Token)
         │   ├── list.bru              # Prüfliste (Admin)
@@ -88,7 +88,7 @@ md-takt/
 | Umgebung | URL | Modul |
 |---|---|---|
 | Frontend (Live) | https://app.strassenbahn-magdeburg.de | `/viewer` |
-| Backend-API (Live) | https://api.strassenbahn-magdeburg.de | `/engine` |
+| Backend-API (Live) | https://api.mdtakt.strassenbahn-magdeburg.de | `/engine` |
 | Admin-Schaltzentrale | https://admin.strassenbahn-magdeburg.de (TBD) | `/admin` |
 | Hauptdomain | https://strassenbahn-magdeburg.de | — |
 | Collector | Lokales NAS (kein öffentlicher Zugriff) | `/collector` |

@@ -73,7 +73,7 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
 
 ## 3. Schnittstellen-Kontrakt
 
-### 3.1 Fluss 1 — `POST https://api.strassenbahn-magdeburg.de/api/v1/collector/sightings`
+### 3.1 Fluss 1 — `POST https://api.mdtakt.strassenbahn-magdeburg.de/api/v1/collector/sightings`
 - **Header:** `Authorization: Bearer <MDKURSTRACKER_API_TOKEN>` (eigener Token, **nicht** der des NAS-Collectors;
   von MD-Takt vergeben), `Content-Type: application/json`, optional `Content-Encoding: gzip`.
 - **Grenzen:** höchstens 500 Sichtungen, 200 Laufwege, 150 Halte je Laufweg; 120 Requests/Minute. Darüber → 422 bzw. 429.
@@ -135,7 +135,7 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
     HAFAS früher hat als der Feed). MD-Takt ordnet nach jedem Fahrplan-Import selbst neu zu — nichts erneut senden.
 - **Fehler:** 401 (Token), 422 (Validierung), 429 (Rate-Limit) — alle im Format `{ "error": { "code", "message" } }`.
 
-### 3.2 Fluss 2 — `GET|POST https://api.strassenbahn-magdeburg.de/api/v1/collector/course-lookup`
+### 3.2 Fluss 2 — `GET|POST https://api.mdtakt.strassenbahn-magdeburg.de/api/v1/collector/course-lookup`
 - **Auth:** derselbe Bearer-Token wie Fluss 1 (`MDKURSTRACKER_API_TOKEN`). **Limit:** 600 Requests/Minute.
 - Maschinenlesbarer Vertrag: `shared/openapi.yaml`.
 - **Einzeln:** `GET …/course-lookup?hafas_stop=301968501&line=1&time=2026-06-18T16:43:00Z&stop_name=Magdeburg, City Carré&direction=Magdeburg, Sudenburg`

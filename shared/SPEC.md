@@ -148,7 +148,7 @@ Für eine gegebene Sichtung (Kursnummer + Linie + Richtung + Zeit + Haltestelle)
 | Modul | Pfad | Technologie | Hosting |
 |---|---|---|---|
 | Collector | `/collector` | PHP CLI | Lokales NAS |
-| Engine (API) | `/engine` | Laravel 13, PHP 8.3+ | Hetzner, `api.strassenbahn-magdeburg.de` |
+| Engine (API) | `/engine` | Laravel 13, PHP 8.3+ | Hetzner, `api.mdtakt.strassenbahn-magdeburg.de` |
 | Viewer (öffentliche Webseite) | `/viewer` | Vue 3, Vite, Tailwind | Hetzner, `app.strassenbahn-magdeburg.de` |
 | Admin-Schaltzentrale | `/admin` | Vue 3, Vite, Tailwind | Hetzner, `admin.strassenbahn-magdeburg.de` (TBD) |
 | Gemeinsame Defs | `/shared` | OpenAPI 3.x YAML | — |

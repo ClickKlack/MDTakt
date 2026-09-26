@@ -1,6 +1,6 @@
 # Anforderungen an MDKursTracker — Integration mit MD-Takt
 
-> **Adressat:** die MDKursTracker-Seite (Entwickler/Coding-Agent). **Stand: 2026-06-23.**
+> **Adressat:** die MDKursTracker-Seite (Entwickler/Coding-Agent). **Stand: 2026-09-26.** Die MD-Takt-Seite von Fluss 1 ist **fertig und live-bereit** — es fehlt nur noch §2.1 auf eurer Seite.
 > Dieses Dokument ist **eigenständig lesbar** und beschreibt, was MD-Takt von MDKursTracker erwartet,
 > was MDKursTracker bauen muss, und welche Annahmen MD-Takt über eure Daten trifft — letztere explizit,
 > damit ein **Mismatch früh auffällt**. Gegenstück (MD-Takt-Sicht): `INTEGRATION_MDKURSTRACKER.md`.
@@ -19,9 +19,9 @@ Daraus zwei Datenflüsse:
 | | Fluss 1 — Ingest | Fluss 2 — Auskunft |
 |---|---|---|
 | **Richtung** | MDKursTracker → MD-Takt | MDKursTracker → MD-Takt |
-| **Modus** | nächtlicher Batch (Cron) | on-demand je Abfahrt |
+| **Modus** | sofort je Sichtung + Nachhol-Cron | on-demand je Abfahrt |
 | **Zweck** | neue Sichtungen liefern | „Kennt MD-Takt für diese Abfahrt einen Kurs?" |
-| **Wer baut** | Cron + Exporter in MDKursTracker | Lookup-Call + UI-Anzeige in MDKursTracker |
+| **Wer baut** | Push nach dem Speichern + Nachhol-Cron in MDKursTracker | Lookup-Call + UI-Anzeige in MDKursTracker (MD-Takt-Seite noch nicht gebaut) |
 
 **Grundprinzip:** MD-Takt ist ein **reiner Server** und ruft MDKursTracker **nie** von sich aus auf. **MDKursTracker ist
 in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals zu euch; alles läuft über HTTP.
@@ -30,15 +30,28 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
 
 ## 2. Was MDKursTracker bauen muss
 
-### 2.1 Fluss 1 — nächtlicher Export-Cron
-- Ein **Scheduler/Cron** (existiert bei euch noch nicht — neu zu bauen), z. B. täglich nachts.
-- Ermittelt **alle seit dem letzten Sync neuen Sichtungen** (`recordings`) anhand eines **High-Water-Marks**
-  (max. `recordings.id` bzw. `recorded_at` des letzten erfolgreichen Laufs, lokal persistiert).
-- Baut daraus den Batch-Payload (§3.1): die betroffenen **Routen** (aus `trips` + `route_stops`) **plus** die neuen
-  Sichtungen. Sendet ihn per `POST` an MD-Takt (Bearer-Token, gzip empfohlen).
-- Speichert bei Erfolg den neuen High-Water-Mark (aus dem Response-Feld `watermark`).
-- Ausgehende HTTP-Requests sind bei euch bisher nur Richtung HAFAS vorhanden — der curl-Client ist da, ein
-  generischer POST-Aufruf ist also gut machbar.
+### 2.1 Fluss 1 — Push je Sichtung + Nachhol-Cron (geändert 26.09.2026)
+
+Vorher war ein nächtlicher Batch vorgesehen. Jetzt gilt: **Jede Sichtung geht sofort raus**, damit sie in MD-Takt noch
+am selben Tag geprüft werden kann. Ein Cron fängt auf, was dabei nicht ankam.
+
+1. **Push nach dem Speichern.** Sobald eine `recording` mit Kursnummer gespeichert oder geändert ist, schickt
+   MDKursTracker sie per `POST` an MD-Takt (§3.1) — mit dem Laufweg der Fahrt in `trips[]`.
+   - **Den Nutzer nicht blockieren:** Der Aufruf läuft nach der Antwort an den Nutzer bzw. asynchron, mit kurzem
+     Timeout (z. B. 5 s). Ein Fehler hier ist kein Fehler für den Nutzer.
+2. **Nachhol-Cron** (z. B. alle 15 Minuten): sendet alle Sichtungen **über dem High-Water-Mark** erneut, in Blöcken
+   von höchstens 500 Sichtungen und 200 Laufwegen. Nach einer **2xx-Antwort** den High-Water-Mark auf
+   `watermark.max_recording_id` der Antwort setzen; bei einem Fehler **nicht** vorrücken.
+   - Doppelt gesendete Sichtungen sind unschädlich: MD-Takt antwortet `outcome: unchanged`.
+   - Beim ersten Lauf lässt sich so der **Altbestand** einspielen.
+3. **Geänderte Sichtung** (z. B. korrigierte Kursnummer): einfach erneut senden, gleiche `mdkt_recording_id`.
+   MD-Takt legt sie dann wieder zur Prüfung vor. **Löschungen** werden (noch) nicht übertragen.
+4. **Laufweg:** `trips[].stops` = vollständiger Laufweg der Fahrt aus `route_stops`, **Linie je Halt**, Soll-Zeiten in UTC.
+   Wenn vorhanden bitte je Halt auch `arrival_planned` mitsenden (optional) — am Übergangshalt eines
+   Linienwechsels hilft die Ankunft beim Zuordnen. Einen Laufweg, den MD-Takt schon kennt, dürft ihr weglassen;
+   mitsenden ist aber immer richtig und am einfachsten.
+5. **Nichts selbst berechnen:** Die Fahrt-Signatur, den Fahrplantyp (inkl. Ferien) und den Betriebstag bestimmt
+   MD-Takt. `day_type` ist nur informativ.
 
 ### 2.2 Fluss 2 — On-demand-Lookup + Anzeige
 - Beim Rendern der Abfahrtstafel ruft MDKursTracker **je Abfahrt** `GET /api/v1/course-lookup` bei MD-Takt auf (§3.2).
@@ -55,8 +68,10 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
 ## 3. Schnittstellen-Kontrakt
 
 ### 3.1 Fluss 1 — `POST https://api.strassenbahn-magdeburg.de/api/v1/collector/sightings`
-- **Header:** `Authorization: Bearer <COLLECTOR_TOKEN>`, `Content-Type: application/json`,
-  optional `Content-Encoding: gzip`.
+- **Header:** `Authorization: Bearer <MDKURSTRACKER_API_TOKEN>` (eigener Token, **nicht** der des NAS-Collectors;
+  von MD-Takt vergeben), `Content-Type: application/json`, optional `Content-Encoding: gzip`.
+- **Grenzen:** höchstens 500 Sichtungen, 200 Laufwege, 150 Halte je Laufweg; 120 Requests/Minute. Darüber → 422 bzw. 429.
+- Maschinenlesbarer Vertrag: `shared/openapi.yaml` (`POST /api/v1/collector/sightings`).
 - **Body:** zwei Abschnitte. `trips` (Routendefinitionen, je `schedule_fingerprint` **einmal**) liefern den Laufweg
   fürs Matching; `sightings` (die neuen Beobachtungen) referenzieren einen Trip per Fingerprint.
 
@@ -96,8 +111,22 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
 
 - **Alle Zeitstempel ISO-8601 UTC** (`…Z`). `service_date` = Berlin-Betriebstag (`YYYY-MM-DD`).
 - **Idempotenz:** Wiederholtes Senden derselben `mdkt_recording_id` erzeugt **kein** Duplikat (Upsert).
-- **Response 200:** enthält `watermark` (neuen High-Water-Mark) und `matched.unmatched_fingerprints`
-  (Routen ohne GTFS-Treffer → bei euch/uns prüfen).
+- **Zeitformat streng:** genau `YYYY-MM-DDTHH:MM:SSZ`. `+02:00` oder Zeiten ohne Zone werden mit 422 abgewiesen.
+- **Response 200:**
+```jsonc
+{ "data": {
+  "received": { "trips": 1, "sightings": 1 },
+  "results": [ { "mdkt_recording_id": 1935, "outcome": "created", "match": "matched",
+                 "status": "pending", "consolidated_trip_id": 26286 } ],
+  "unmatched_fingerprints": [],
+  "watermark": { "max_recording_id": 1935, "max_observed_at": "2026-06-18T16:42:35Z" }
+} }
+```
+  - `outcome`: `created` | `updated` | `unchanged` | `unknown_fingerprint` (Laufweg fehlte und war MD-Takt unbekannt →
+    mit `trips[]` erneut senden).
+  - `match: waiting` ist **kein Fehler**: MD-Takts Fahrplan kennt die Fahrt noch nicht (z. B. Baustellenfahrplan, den
+    HAFAS früher hat als der Feed). MD-Takt ordnet nach jedem Fahrplan-Import selbst neu zu — nichts erneut senden.
+- **Fehler:** 401 (Token), 422 (Validierung), 429 (Rate-Limit) — alle im Format `{ "error": { "code", "message" } }`.
 
 ### 3.2 Fluss 2 — `GET https://api.strassenbahn-magdeburg.de/api/v1/course-lookup`
 - **Auth:** keine (öffentlicher Read-Endpunkt im MVP).
@@ -131,7 +160,7 @@ sonst matcht das System still falsch.
 |---|---|---|---|
 | E1 | `course_number` ist die **am Fahrzeug angeschlagene** Kursnummer (Nutzereingabe), 2-stellig | `recordings.course_number` | sie aus HAFAS abgeleitet/geraten ist |
 | E2 | `course_number` ist die Bezeichnung des **Umlaufs**, und der Umlauf kann **über mehrere Linien** laufen (siehe Hinweis unten) | Fachlogik MVB | ein Fahrzeug beim Linienwechsel eine **andere** Nummer bekommt |
-| E3 | Tagestypen sind genau **MO-FR / SA / SO(+Feiertag)** | `trips.day_type` | feinere/andere Muster vorkommen (z. B. Mo-Do) |
+| E3 | ~~Tagestypen sind genau MO-FR / SA / SO(+Feiertag)~~ — **entfällt (26.09.2026):** MD-Takt bestimmt den Fahrplantyp selbst aus dem Betriebstag, `day_type` ist nur informativ | `trips.day_type` | — |
 | E4 | Pro Fahrt gibt es einen **vollständigen Laufweg mit Soll-Zeit je Halt** | `route_stops` (departure_planned, line, seq) | Laufweg unvollständig ist oder Soll-Zeiten fehlen |
 | E5 | **Alle Zeiten in UTC**; `service_date` = **Berlin**-Betriebstag (Fahrtstart) | `recordings`/`route_stops` UTC, `service_date` | Zeiten lokal/naiv sind oder service_date anders definiert |
 | E6 | `schedule_fingerprint` ist **fahrplanstabil & tagesunabhängig** und identifiziert die Route eindeutig | `trips.schedule_fingerprint` | er je Tag/Abruf variiert |
@@ -160,7 +189,7 @@ sonst matcht das System still falsch.
 1. **Laufweg-Export:** Gibt es (oder lässt sich leicht bauen) ein Export/Endpoint, der pro Trip den **vollständigen
    Laufweg mit Soll-Zeit + Linie je Halt** liefert (Input für `trips[].stops`)? Heutiger Kandidat: `route_stops`
    intern, `GET /api/recordings/{id}/route` extern — reicht das, oder braucht es einen trip-zentrierten Export?
-2. **Inkrementelle Auswahl:** Welches Feld trägt den **High-Water-Mark** zuverlässig — `recordings.id` oder
+2. **Inkrementelle Auswahl** (für den Nachhol-Cron): Welches Feld trägt den **High-Water-Mark** zuverlässig — `recordings.id` oder
    `recorded_at` (Soft-Deletes/Nachträge beachten)?
 3. **Konfidenz:** Könnt ihr je Fahrt **Erfassungszahl + Einigkeit** (und ob `manual_course_number` gesetzt) mitliefern?
    MD-Takt nutzt das für die `confidence`-Stufe in Fluss 2.
@@ -170,7 +199,9 @@ sonst matcht das System still falsch.
 ---
 
 ## 6. Betrieb, Auth, Fehlerverhalten
-- **Token (Fluss 1):** statischer Bearer-Token, von MD-Takt vergeben, in MDKursTracker-Config (nicht ins Frontend, nicht ins Log).
-- **Fehler Fluss 1:** Bei Nicht-2xx den High-Water-Mark **nicht** vorrücken → nächster Lauf wiederholt den Batch (idempotent dank `mdkt_recording_id`).
+- **Token (Fluss 1):** eigener statischer Bearer-Token (`MDKURSTRACKER_API_TOKEN` auf MD-Takt-Seite), von MD-Takt vergeben,
+  in MDKursTracker-Config (nicht ins Frontend, nicht ins Log). Der Token öffnet nur den Sichtungs-Eingang.
+- **Fehler Fluss 1:** Beim Push: ignorieren, der Nachhol-Cron holt nach. Beim Cron: bei Nicht-2xx den High-Water-Mark
+  **nicht** vorrücken → der nächste Lauf wiederholt (idempotent dank `mdkt_recording_id`).
 - **Fehler Fluss 2:** Timeout/Non-2xx → stiller Fallback auf eigene Anzeige; kurzer Client-Timeout (z. B. 2 s) + Tages-Cache.
 - **Datenschutz:** `user_token` o. ä. personenbezogene Felder **nicht** mitsenden — MD-Takt braucht sie nicht.

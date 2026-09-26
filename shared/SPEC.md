@@ -46,14 +46,16 @@ Eine Sichtung enthält:
   **korrigiert 20.09.2026:** Der Umlauf ist die gepflegte **Kette** (§2.4); die Nummer ist ein
   Etikett daran. Die Nummer ist **je Linie bzw. Linienkombination** eindeutig, nicht netzweit
   (KURSE §2 K3)
-- `line` — Linienbezeichnung (z.B. "1", "6")
-- `direction` — Fahrtrichtung (z.B. "Steubenallee", "Kampstraße")
-- `observed_at` — Zeitstempel der Sichtung (Datum + Uhrzeit)
-- `stop_name` — Haltestelle, an der gesichtet wurde
+- `line` — Linie **am gesichteten Halt** (z.B. "1", "6")
+- `hafas_stop_id`, `stop_name` — Halt, an dem gesichtet wurde
+- `service_date` — Betriebstag (Europe/Berlin) laut Tracker
+- `departure_planned` — Soll-Abfahrt am Halt (UTC); `departure_actual` optional
+- `observed_at` — Zeitpunkt der Erfassung (UTC)
+- der **Laufweg** der Fahrt (Soll-Zeiten + Linie je Halt), per `schedule_fingerprint` einmal gespeichert
 
-**Schnittstelle MDKursTracker → MD-Takt:** Konzept erarbeitet & validiert (2026-06-22) — siehe
-[`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md). Kurzfassung: Integration über die
-**HTTP-API** (MDKursTracker = MariaDB nur lokal, kein DB-Direktzugriff). `course_number` ist Nutzereingabe.
+**Schnittstelle MDKursTracker → MD-Takt (umgesetzt 26.09.2026):** HTTP-API, `POST /api/v1/collector/sightings`
+mit eigenem Token. Der Tracker schickt jede Sichtung sofort und holt Fehlgeschlagenes per Cron nach. Details:
+[`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §5.1 und §8. `course_number` ist Nutzereingabe.
 
 > ~~Umlauf-Schlüssel `(line, course_number, service_date)`~~ — **korrigiert 20.09.2026**, siehe
 > [`KURSE.md`](KURSE.md) §2 K1: Ein Fahrzeug behält beim Linienwechsel seine Kursnummer (eine 1 wird in
@@ -85,26 +87,32 @@ Vollständiges Konzept samt Begründungen: [`KURSE.md`](KURSE.md).
 ### 3.1 Ziel
 Für eine gegebene Sichtung (Kursnummer + Linie + Richtung + Zeit + Haltestelle) soll das System **Kandidaten-Trips** aus den GTFS-Daten vorschlagen, die zeitlich und räumlich passen.
 
-### 3.2 Matching-Logik (Vorschlag, im Frontend manuell bestätigbar)
+### 3.2 Matching-Logik (festgelegt 26.09.2026, umgesetzt in `SightingMatcher`)
 
-1. **Filter nach Betriebstag** — aus `observed_at` den korrekten GTFS `service_date` ermitteln; gültige `service_id`s ergeben sich aus `calendar` (Wochenmuster) kombiniert mit `calendar_dates` (Ausnahmen).
-2. **Filter nach Linie** — `routes.txt` nach `route_short_name` filtern (alle MVB-Linien, Tram + Bus).
-3. **Filter nach Haltestelle** — `stop_times.txt` auf Fahrten einschränken, die die gesichtete Haltestelle bedienen.
-4. **Filter nach Zeitfenster** — Abfahrts-/Ankunftszeit ±N Minuten um `observed_at`.
-5. **Ergebnis:** Liste von `trip_id`-Kandidaten → Nutzer wählt den korrekten Trip aus.
-6. **Zuordnung speichern:** `course_number` wird der bestätigten `trip_id` zugeordnet.
-7. **Umlauf-Ableitung:** Alle `trip_ids` mit derselben `course_number` am selben `service_date` bilden einen Umlauf.
+> Ersetzt den früheren 4-stufigen Filter (Betriebstag → Linie → Haltestelle → ±N Minuten). Mit den Soll-Zeiten aus
+> MDKursTracker ist der Match **deterministisch**; ein Zeitfenster und ein HAFAS↔GTFS-Haltestellen-Crosswalk entfallen.
 
-### 3.3 Offene Frage (vor Implementierung zu klären)
-- Toleranz des Zeitfensters (±5 min? ±10 min?) — konfigurierbar machen.
-- Umgang mit Sichtungen ohne passendem GTFS-Trip (Sonderfahrten, Betriebsfahrten).
+1. **Laufweg teilen** — an jedem Wechsel der Linie je Halt. Eine Tracker-Fahrt L5 → L1 sind im Feed zwei Fahrten.
+   Der Übergangshalt wird auf beiden Seiten versucht, am Endhalt Ankunft und Abfahrt.
+2. **Uhrzeitfolge bilden** — jede Soll-Zeit mit ihrem eigenen Datum nach Europe/Berlin, `HH:MM`, gezählt ab dem
+   Kalendertag des ersten Halts (`23:50, 24:05`). Eine Fahrt, die nach Mitternacht beginnt, steht mit `00:30` da.
+3. **Betriebstag und Fahrplantyp** — aus dem Tag der Sichtung; vor der Betriebstag-Grenze gilt der Vortag
+   (`OperatingDayResolver`), der Typ kommt aus `FahrplanTypClassifier` (vier Typen, inkl. Ferien).
+4. **Signatur** `SHA256(Linie | Fahrplantyp | HH:MM-Folge)` — dieselbe Formel wie beim Import
+   (`TripSignatureService::signatureFor`) — per Index in `consolidated_trips` suchen, in der Version, deren
+   Intervall den Betriebstag einschließt.
+5. **Ohne Treffer:** dieselbe Signatur in der **nächsten** Version der Linie, wenn sie höchstens 14 Tage später
+   beginnt (`matched_next_version`, nie automatisch bestätigt). Sonst `waiting`; nach jedem GTFS-Import wird neu
+   zugeordnet, nach 2 erfolglosen Importen `no_trip`. Mehrere Treffer → `ambiguous`.
+6. **Vergleich und Entscheidung** — hängt der gesichtete Kurs schon an der Fahrt, ist die Sichtung `confirmed`.
+   Sonst entscheidet der Admin (Prüfliste oder Fahrplan): **Annehmen** setzt die Nummer an die **ganze Kette**
+   (§2.4) und nummeriert sie bei Abweichung um; **Ablehnen** lässt die Kursdaten unberührt.
 
-> **Update 2026-06-22 (am realen Datensatz validiert, siehe [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §4):**
-> Mit den MDKursTracker-**Soll-Zeiten** wird das Matching **deterministisch** über
-> `(Linie, Tagestyp, Soll-Zeit-Sequenz lokal)` — kein HAFAS↔GTFS-Stop-ID-Crosswalk nötig, nur
-> Namens-Normalisierung. Das ±Zeitfenster aus Stufe 4 wird damit nur noch Sicherheitsmarge. Eine
-> HAFAS-Fahrt mappt auf **N** GTFS-Trips (Linienübergänge). Die formale Neufassung von §3.2 ist noch
-> offen (Stopp-Regel) und vor I-05 mit Jörg festzulegen.
+### 3.3 Entschieden (vorher offen)
+- **Toleranz des Zeitfensters:** keine — der Match ist exakt. `MATCHING_WINDOW_MINUTES` entfällt.
+- **Sichtungen ohne passenden Trip** (Sonder-, Betriebsfahrten, noch nicht im Feed): `waiting` → `no_trip`,
+  in der Prüfliste sichtbar und ablehnbar.
+- **Eine Sichtung, mehrere Trips:** nein — eine Sichtung gehört zu genau einer Fahrt, der am gesichteten Halt.
 
 ---
 
@@ -167,14 +175,16 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 |---|---|---|
 | `POST` | `/api/v1/collector/gtfs-import` | GTFS-Feed-Import anstoßen |
 | `GET` | `/api/v1/collector/imports` | Import-Historie & Datenstand (interne Token-Variante) |
-| `POST` | `/api/v1/collector/sightings` | Sichtungen im Batch importieren (Fluss 1) |
+| `POST` | `/api/v1/collector/sightings` | Sichtungs-Eingang aus MDKursTracker (Fluss 1) — **eigener Token** `MDKURSTRACKER_API_TOKEN` |
 
 ### Admin / Schaltzentrale (Sanctum-geschützt)
 | Method | Endpunkt | Beschreibung |
 |---|---|---|
 | `POST` | `/api/v1/admin/login` | Admin-Login, gibt Sanctum-Token zurück |
-| `GET` | `/api/v1/sightings?date=` | Sichtungen eines Betriebstags (Kuratierung/Matching) |
-| `POST` | `/api/v1/sightings/{id}/assign` | Trip-Zuordnung zu einer Sichtung bestätigen (Matching) |
+| `GET` | `/api/v1/admin/sightings?state=&line=&date_from=&date_to=&differs_only=` | Prüfliste der Sichtungen mit Vergleich zum lokalen Kurs |
+| `GET` | `/api/v1/admin/sightings/counts` | Offene / wartende Sichtungen (Navigation) |
+| `POST` | `/api/v1/admin/sightings/accept` | Annehmen — Kurs an die ganze Kette, ggf. umnummerieren |
+| `POST` | `/api/v1/admin/sightings/reject` | Ablehnen, mit optionaler Notiz |
 | `GET` | `/api/v1/admin/imports` | Import-Historie & Datenstand fürs Admin-Frontend |
 | `GET` | `/api/v1/admin/stop-links?stop=&period=&day_type=&stand=` | Haltestellen-Editor: endende und beginnende Fahrten samt Entscheidungen (I-14) |
 | `POST` | `/api/v1/admin/trip-links` | Anschluss anlegen oder eine Kette bewusst offen lassen (Betriebsfahrt) |
@@ -192,6 +202,8 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 ## 6. Authentifizierung
 
 - **Collector → Engine:** Bearer-Token (statischer API-Key in `.env`, kein Login).
+- **MDKursTracker → Engine:** eigener statischer Bearer-Token (`MDKURSTRACKER_API_TOKEN`), nur für den
+  Sichtungs-Eingang. Die beiden Tokens öffnen jeweils nur ihre eigenen Endpunkte.
 - **Viewer → Engine:** Kein Auth — **rein lesend**. Der öffentliche Viewer ist eine informative Webseite ohne schreibende Aktionen.
 - **Admin-Schaltzentrale → Engine:** Laravel Sanctum (Login + Token) für **alle** kuratierenden/verwaltenden Aktionen (Matching, Datenkorrektur, Steuerung, Auditing). Da der Matching-Workflow ins Admin-Frontend wandert, ist Sanctum **MVP-relevant** (nicht mehr Post-MVP). Single-Admin-Login; der Collector-Token bleibt rein intern und gelangt **nie** ins Browser-Frontend.
 - **Zukunft:** Vollwertiges Multi-User-System baut auf demselben Sanctum-Fundament auf.
@@ -210,15 +222,35 @@ calendar        (service_id PK, monday..sunday, start_date, end_date)   -- regul
 calendar_dates  (service_id, date, exception_type)                      -- Ausnahmen zum Wochenmuster
 
 -- Betriebsdaten
+-- Sichtungs-Eingang aus MDKursTracker (26.09.2026, INTEGRATION_MDKURSTRACKER §8)
+mdkt_routes (
+    id           BIGSERIAL PK,
+    fingerprint  VARCHAR(128) UNIQUE,   -- schedule_fingerprint des Trackers
+    mdkt_trip_id BIGINT,
+    line         VARCHAR(8),
+    direction    VARCHAR,
+    stops        JSON                   -- Laufweg: seq, hafas_stop_id, stop_name, line, arrival/departure_planned (UTC)
+)
+
 sightings (
-    id            BIGSERIAL PK,
-    course_number VARCHAR NOT NULL,      -- Kursnummer aus MDKursTracker
-    line          VARCHAR NOT NULL,
-    direction     VARCHAR,
-    observed_at   TIMESTAMPTZ NOT NULL,
-    stop_name     VARCHAR,
-    assigned_trip_id VARCHAR FK trips,  -- NULL = noch nicht zugeordnet
-    created_at    TIMESTAMPTZ DEFAULT now()
+    id                   BIGSERIAL PK,
+    mdkt_recording_id    BIGINT UNIQUE,                 -- Idempotenz
+    mdkt_route_id        BIGINT FK mdkt_routes,
+    line                 VARCHAR(8),                    -- Linie am gesichteten Halt
+    course_number        VARCHAR(8),
+    hafas_stop_id        VARCHAR(32),
+    stop_name            VARCHAR,
+    service_date         DATE,
+    observed_at          TIMESTAMPTZ,
+    departure_planned    TIMESTAMPTZ,
+    departure_actual     TIMESTAMPTZ,
+    trip_signature       CHAR(64),
+    consolidated_trip_id BIGINT FK consolidated_trips,  -- NULL = keine Fahrt (mehr); nach Import neu zugeordnet
+    match                VARCHAR(24),   -- matched | matched_next_version | waiting | no_trip | ambiguous
+    match_attempts       SMALLINT,      -- Importe ohne Treffer
+    status               VARCHAR(16),   -- pending | confirmed | accepted | rejected
+    decided_at           TIMESTAMPTZ,
+    decision_note        VARCHAR
 )
 
 -- Umlauf-Ebene (I-14, siehe KURSE.md). Haengt am Konsolidat, nicht am Roh-Bestand:
@@ -246,9 +278,9 @@ course_trips (
 )
 ```
 
-> Die `sightings`-Tabelle stammt aus dem Ur-MVP und ist derzeit **toter Code** — kein Model, kein Zugriff.
-> Ihr `assigned_trip_id` zeigt auf die volatile GTFS-`trip_id` und wird bei jedem Import genullt. Ihr Umbau
-> gehört zu I-04.
+> Die Ur-MVP-Tabelle `sightings` (mit `assigned_trip_id` auf die volatile gtfs.de-`trip_id`) wurde am 26.09.2026
+> ersetzt. Sichtungen hängen jetzt am Konsolidat; der Vergleich mit dem lokalen Kurs wird nicht gespeichert, sondern
+> bei jeder Abfrage berechnet.
 
 ---
 

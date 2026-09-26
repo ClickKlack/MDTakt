@@ -10,8 +10,8 @@ md-takt/
 │
 ├── collector/                        # PHP CLI Tool — läuft auf lokalem NAS
 │   ├── src/
-│   │   ├── Commands/                 # CLI-Einstiegspunkte (GTFS-Import, Sichtungs-Sync)
-│   │   ├── Services/                 # Business-Logik (GtfsFeedService, SightingImportService)
+│   │   ├── Commands/                 # CLI-Einstiegspunkte (GTFS-Import)
+│   │   ├── Services/                 # Business-Logik (GtfsFeedService)
 │   │   └── Http/                     # HTTP-Client für Engine-API
 │   ├── tests/
 │   ├── composer.json
@@ -67,17 +67,18 @@ md-takt/
         │   ├── local.bru             # Base-URL: http://localhost, API-Token aus Env
         │   └── production.bru        # Base-URL: https://api.strassenbahn-magdeburg.de
         ├── sightings/
-        │   ├── list.bru
-        │   ├── create.bru
-        │   └── assign-trip.bru
+        │   ├── ingest.bru            # Eingang aus MDKursTracker (eigener Token)
+        │   ├── list.bru              # Prüfliste (Admin)
+        │   ├── counts.bru
+        │   ├── accept.bru
+        │   └── reject.bru
         ├── blocks/
         │   ├── list-by-date.bru
         │   └── get-by-course.bru
         ├── trips/
         │   └── find-candidates.bru
         └── collector/
-            ├── gtfs-import.bru
-            └── sightings-batch.bru
+            └── gtfs-import.bru
 ```
 
 ---
@@ -103,13 +104,17 @@ md-takt/
       ↓
 [Collector — NAS]
       |-- lädt GTFS-ZIP, entpackt, filtert auf die MVB-Agency (alle Verkehrsmittel: Tram + Bus)
-      |-- holt Sichtungen aus MDKursTracker (API oder NaruaDB, TBD)
-      |-- normalisiert Zeitstempel auf UTC
       |
-      | POST /api/v1/collector/* (Bearer-Token)
+      | POST /api/v1/collector/imports* (Bearer-Token Collector)
+      ↓
+[MDKursTracker — Hetzner]
+      |-- schickt jede Sichtung sofort, Nachhol-Cron für Fehlgeschlagenes
+      |
+      | POST /api/v1/collector/sightings (eigener Bearer-Token)
       ↓
 [Engine — Laravel API]
       |-- validiert Eingabedaten
+      |-- ordnet Sichtungen per Fahrt-Signatur zu (nach jedem GTFS-Import erneut)
       |-- speichert in PostgreSQL (alles UTC / TIMESTAMPTZ)
       |-- stellt Matching-Endpunkte bereit
       |
@@ -121,7 +126,7 @@ md-takt/
       |-- formatiert Zeiten in Browser-Ortszeit (dt. Format) nur in timezone.ts
 
 [Admin-Schaltzentrale — Vue 3 SPA, Sanctum]
-      |-- Matching-Workflow: Sichtung → Kandidaten → Bestätigung
+      |-- Sichtungen prüfen: Prüfliste + Zeile im Fahrplan → Annehmen (Kurs an die Kette) / Ablehnen
       |-- Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing, Steuerung
 ```
 

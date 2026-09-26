@@ -33,14 +33,13 @@ MD-Takt ist eine Plattform zur manuellen Umlauf-Rekonstruktion für den Magdebur
 Bevor du eigenständig entscheidest, **halte an und frage**, wenn:
 
 - die Anforderung nicht in `shared/SPEC.md` beschrieben ist
-- du den Matching-Algorithmus (SPEC §3) implementieren oder verändern sollst — insbesondere:
-  - Welche Toleranz soll das Zeitfenster beim Trip-Matching haben?
-  - Wie soll mit Sichtungen umgegangen werden, für die kein passender GTFS-Trip gefunden wird?
-  - Soll eine Sichtung mehreren Trips zugeordnet werden können?
-  - Wie werden Betriebsfahrten (ohne GTFS-Eintrag) behandelt?
+- du den Matching-Algorithmus (SPEC §3.2, `SightingMatcher`) verändern sollst. Festgelegt am 26.09.2026
+  (SPEC §3.3): keine Toleranz, exakter Signatur-Match, Folgeversion ≤ 14 Tage, ohne Treffer `waiting` → `no_trip`,
+  eine Sichtung gehört zu genau einer Fahrt. Jede Abweichung davon ist eine neue Entscheidung
 - eine Datenbank-Änderung nötig ist, die nicht in der ROADMAP vorgesehen ist
 - du dir bei der Zeitzone einer Zeitangabe nicht sicher bist
-- eine Schnittstelle zu MDKursTracker betroffen ist (noch offen, siehe ROADMAP I-09)
+- eine Schnittstelle zu MDKursTracker betroffen ist — Fluss 1 ist festgelegt (`openapi.yaml`,
+  `INTEGRATION_MDKURSTRACKER.md` §5.1/§8), jede Vertragsänderung trifft die Tracker-Seite; Fluss 2 ist noch offen
 
 ---
 
@@ -135,7 +134,9 @@ Keine API-Tokens oder Passwörter in Logs schreiben.
 
 | Thema | Details |
 |---|---|
-| Zeitfenster-Toleranz Matching | Konfigurierbar via `MATCHING_WINDOW_MINUTES` — Wert noch nicht festgelegt |
-| Sichtungen ohne GTFS-Trip | Umgang mit Betriebsfahrten noch ungeklärt |
-| Schnittstelle MDKursTracker | API oder NaruaDB-Direktzugriff — Entscheidung steht aus |
-| Cron-Intervall Sichtungs-Sync | Noch nicht festgelegt |
+| Kursauskunft für MDKursTracker (Fluss 2) | `GET /course-lookup` — Konzept in INTEGRATION §5.2, `confidence`-Semantik offen |
+| Tracker-Seite Fluss 1 | Push + Nachhol-Cron baut MDKursTracker (REQUIREMENTS §2.1); Cron-Intervall dort festlegen (Vorschlag 15 min) |
+| Löschungen / Rücknahme | Löschungen im Tracker werden nicht übertragen; eine Entscheidung lässt sich nicht per Knopf zurücknehmen |
+
+Entschieden am 26.09.2026 (vorher hier offen): Zeitfenster-Toleranz (keine), Sichtungen ohne GTFS-Trip und
+Betriebsfahrten (`waiting` → `no_trip`, ablehnbar), Schnittstelle (HTTP-API, eigener Token) — siehe SPEC §3.3.

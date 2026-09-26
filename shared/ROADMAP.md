@@ -11,18 +11,22 @@
 | **I-02** | GTFS-Import | Collector + Engine | MVB-Fahrplandaten (Tram + Bus) sind in der DB | ✅ |
 | **I-02b** | Import-Audit | Engine + Collector | Import-Historie & Datenstand nachvollziehbar | ✅ |
 | **I-03** | Stammdaten-API | Engine + Shared | Linien, Haltestellen, Trips abrufbar | ✅ |
-| **I-04** | Sichtungs-API | Engine + Shared | Sichtungen können gespeichert & gelesen werden | ⬜ |
-| **I-05** | Matching-Logik | Engine | Trip-Kandidaten werden für eine Sichtung berechnet | ⬜ |
-| **I-06** | Zuordnung & Umläufe | Engine | Zuordnung bestätigen, Umlauf-Tagesansicht per API | ⬜ |
+| **I-04** | Sichtungs-Eingang & Prüfung | Engine + Admin + Shared | Sichtungen aus MDKursTracker laufen mit Status auf, werden zugeordnet und im Admin entschieden | ✅ |
+| **I-05** | Matching-Logik | Engine | ↪ in I-04 aufgegangen (exakter Signatur-Match) | ✅ |
+| **I-06** | Zuordnung & Umläufe | Engine | ↪ Zuordnung in I-04 (Annehmen setzt den Kurs an die Kette); Umläufe über I-14 | ✅ |
 | **I-07** | Viewer Grundgerüst | Viewer | Öffentliche read-only Webseite, Tagesansicht der Umläufe | ⬜ |
 | **I-08** | Viewer-Ausbau (Info) | Viewer | Linien-/Fahrplananzeige, Haltestellenrecherche | ⬜ |
-| **I-09** | Collector-Integration | Collector | Automatischer GTFS-Import & Sichtungs-Sync vom NAS | ⬜ |
+| **I-09** | Collector-/MDKursTracker-Integration | Collector + MDKursTracker | GTFS vom NAS ✅; Sichtungs-Push + Nachhol-Cron auf Tracker-Seite; Kursauskunft (Fluss 2) | 🟡 |
 | **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen | ⬜ |
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
-| **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, c, e-A, f, Fahrplan + Diff |
+| **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, b, c, e-A, f, Fahrplan + Diff |
 | **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ✅ |
 | **I-14** | **Kurse & Umläufe** | Engine + Admin | Umlauf-Ebene manuell pflegbar: Fahrten verketten, Kursnummern vergeben | ✅ |
 | **I-15** | **Mengen-Pflege** | Engine + Admin | Wiederkehrende Muster über einen Zeitraum setzen und wieder lösen | ✅ |
+
+> **Stand am 26.09.2026.** Der Sichtungs-Pfad ist auf Engine- und Admin-Seite fertig: **I-04** (mit I-05, I-06 und
+> I-12 b) — Eingang aus MDKursTracker, Zuordnung, Prüfliste und Entscheidung im Fahrplan.
+> **Als Nächstes: I-09** — die Tracker-Seite (Push + Nachhol-Cron), dann die Kursauskunft (Fluss 2).
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -46,11 +50,8 @@ Die Iterations-Nummern sind stabile IDs, **nicht** die Reihenfolge der Umsetzung
 | 2 | **I-12 a/c** Admin-Grundgerüst + Import-Auditing | **Zuerst sichtbar = Vertrauen** — zeigt sofort echte GTFS-Daten | ✅ |
 | 3 | **I-13** Fahrplan-Konsolidat | **Zeitkritisch** — sammelt Fahrplan-Historie, die sonst verloren geht | ✅ Phasen B und C |
 | 3b | **I-14** Kurse & Umläufe | Baut das Gefüge, in das die Sichtungs-API ihre Kursnummern liefert | ✅ |
-| 4 | **I-04** Sichtungs-API | Engine-Grundlage: Sichtungen speichern/lesen | ⬜ |
-| 5 | **I-05** Matching-Logik | Engine-Kern fürs Matching — setzt stabile Fahrt-Identität aus I-13 voraus | ⬜ |
-| 6 | **I-06** Zuordnung & Umläufe | Zuordnen + Umlauf-Abfrage | ⬜ |
-| 7 | **I-12 b** Admin-Matching-Workflow | Matching-UI auf den Engine-APIs (mit Seed-/Test-Sichtungen erprobbar) | ⬜ |
-| 8 | **I-09** Collector-/**MDKursTracker-Integration** | Live-Datenfluss (Fluss 1/2) **nach** dem Admin-Frontend | ⬜ |
+| 4–7 | **I-04** (mit I-05, I-06, I-12 b) Sichtungs-Eingang, Zuordnung, Prüfliste, Fahrplan | Zusammengelegt am 26.09.2026 | ✅ |
+| 8 | **I-09** Collector-/**MDKursTracker-Integration** | Tracker-Seite von Fluss 1, dann Fluss 2 | 🟡 |
 | 9 | **I-10** Stabilisierung | Härten, Tests, Doku | ⬜ |
 | 10 | **I-07 + I-08** Viewer | Öffentliche Webseite **ganz zuletzt** | ⬜ |
 
@@ -168,30 +169,60 @@ Alle drei Endpunkte liefern korrekte JSON-Antworten. Bruno-Tests laufen grün.
 
 ---
 
-## I-04 — Sichtungs-API
+## I-04 — Sichtungs-Eingang & Prüfung ✅
 
-**Ziel:** Sichtungen aus MDKursTracker können gespeichert und tagesweise abgerufen werden.
+**Ziel:** Sichtungen aus MDKursTracker laufen in einer Tabelle mit Status auf, werden einer Fahrt zugeordnet und im
+Admin angenommen oder abgelehnt — in einer Prüfliste und direkt im Fahrplan.
 
-### Aufgaben
-- [ ] Eloquent Model: `Sighting`
-- [ ] `SightingService` mit Methoden `storeSighting()`, `getSightingsByDate()`
-- [ ] Endpunkte implementieren:
-  - `POST /api/v1/collector/sightings` — Batch-Import (Bearer-Token geschützt)
-  - `GET /api/v1/sightings?date=` — Sichtungen eines Betriebstags
-- [ ] Validierung: `course_number`, `line`, `observed_at` sind Pflichtfelder
-- [ ] Duplikat-Erkennung: gleiche `course_number` + `observed_at` + `stop_name` nicht doppelt speichern
-- [ ] Unit Tests: `SightingServiceTest` — Speichern, Duplikat-Erkennung, Datumsfilter
-- [ ] Bruno-Dateien: `sightings/create.bru`, `sightings/list.bru`
-- [ ] Logging: Neue Sichtung (`INFO`), Duplikat übersprungen (`WARNING`)
+> **Neu zugeschnitten am 26.09.2026.** Der ursprüngliche Plan (Speichern → Kandidatenliste → Zuordnen per Hand, je
+> Sichtung) stammte aus der Zeit vor Konsolidat (I-13) und Kursen (I-14). Mit den Soll-Zeiten des Trackers ist die
+> Zuordnung deterministisch, und der Kurs gehört an die Kette. I-05, I-06 und I-12 b sind deshalb hier aufgegangen.
+> Konzept und Entscheidungen: [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §8, SPEC §3.2.
+
+### Entschieden (Stopp-Regel — Schnittstelle MDKursTracker, Matching, DB-Änderung)
+- [x] **Sofort-Push je Sichtung + Nachhol-Cron** statt nächtlichem Batch — Laufzeit ist kein Argument, die Latenz schon
+- [x] **Laufweg mitsenden, die Engine hasht** — der Tracker berechnet keine Signatur
+- [x] **Keine Toleranz**: exakter Signatur-Match; ohne Treffer die Folgeversion (≤ 14 Tage), sonst `waiting` → nach
+      2 Importen `no_trip`. Anlass: Baustellenfahrplan der 10, den der Tracker über HAFAS vor dem Feed kennt
+- [x] **Deckungsgleiche Sichtungen werden automatisch bestätigt**
+- [x] **Annehmen bei Abweichung nummeriert die ganze Kette um** (nach Rückfrage mit der Kettenlänge)
+- [x] **Eigener Token** `MDKURSTRACKER_API_TOKEN`, getrennt vom Collector
+
+### Stufe 1 — Eingang und Zuordnung ✅ (`189b469`)
+- [x] Migration: `sightings` neu (ersetzt das Ur-MVP-Gerüst), `mdkt_routes`; Enums `SightingMatch`, `SightingStatus`
+- [x] `SightingMatcher` (Laufweg teilen, Uhrzeitfolge, Betriebstag, Signatur, Folgeversion);
+      Signatur-Formel an einer Stelle (`TripSignatureService::signatureFor`)
+- [x] `SightingIngestService`: Upsert, Auto-Bestätigung, `rematchOpen()` am Ende jedes GTFS-Imports
+- [x] `POST /api/v1/collector/sightings` (Throttle, eigener Token, gzip; Grenzen 500/200/150)
+- [x] `sightings:ingest-file --dry-run` (Trefferquote eines Tracker-Exports), `sightings:rematch`
+- [x] Probe am Bestand: 422 von 422 Sichtungen richtig zugeordnet (künstlicher Export aus echten Fahrten)
+
+### Stufe 2 — Prüfliste ✅ (`c2a41ae`)
+- [x] `SightingReviewService`: Liste mit Live-Vergleich, Annehmen (ganze Kette), Ablehnen mit Notiz
+- [x] `GET /admin/sightings`, `GET /admin/sightings/counts`, `POST /admin/sightings/accept|reject`
+- [x] Admin „Sichtungen" mit Filtern und Zähler in der Navigation
+
+### Stufe 3 — Entscheidung im Fahrplan ✅ (`487da24`)
+- [x] `SightingLookup`: offene Sichtungen je Fahrt, nach Nummer gruppiert, in der Fahrplan-Matrix
+- [x] Zeile „Sichtungen" über der Kurszeile mit ✓/✗, Detail-Dialog, Hervorheben der Fahrt aus der Prüfliste
+
+### Offen (bewusst nicht in I-04)
+- [ ] Löschungen im Tracker übertragen
+- [ ] Entscheidung zurücknehmen (Rückgängig) — bisher nur über die Kurs-Pflege im Fahrplan
+- [ ] Echte Tracker-Daten per `--dry-run` prüfen, sobald ein Export vorliegt
 
 ### Abnahmekriterium
-Sichtungen können per POST gespeichert und per GET tagesweise abgerufen werden. Duplikate werden still ignoriert.
+Eine per `POST /api/v1/collector/sightings` gelieferte Sichtung erscheint in der Prüfliste und im Fahrplan an der
+richtigen Fahrt; Annehmen setzt den Kurs an die ganze Kette. ✅ (Smoke-Tests 26.09.2026)
 
 ---
 
 ## I-05 — Matching-Logik
 
 **Ziel:** Für eine Sichtung werden passende GTFS-Trip-Kandidaten berechnet und zurückgegeben.
+
+> ✅ **In I-04 aufgegangen (26.09.2026).** Statt einer Kandidatenliste mit Zeitfenster ordnet die Engine über die
+> exakte Fahrt-Signatur zu (SPEC §3.2). Der folgende Plan bleibt als Historie stehen.
 
 > ⚠️ Vor Implementierung: Zeitfenster-Toleranz (±N Minuten) mit Jörg abstimmen.
 > ⚠️ **Setzt I-13 voraus:** Zuordnungen müssen an der stabilen Fahrt-Signatur hängen, nicht an der gtfs.de-`trip_id` —
@@ -222,6 +253,10 @@ Für eine Beispiel-Sichtung vom aktuellen Tag liefert der Endpunkt mindestens ei
 ## I-06 — Zuordnung & Umläufe
 
 **Ziel:** Eine Sichtung kann einem Trip zugeordnet werden. Umläufe eines Tages sind per API abrufbar.
+
+> ✅ **Aufgegangen (26.09.2026).** Die Zuordnung erledigt I-04 (Annehmen setzt den Kurs an die ganze Kette), die Umläufe
+> führt I-14 als gepflegte Ketten. Ein öffentlicher `blocks`-Endpunkt für den Viewer folgt mit I-07. Der folgende
+> Plan bleibt als Historie stehen.
 
 ### Aufgaben
 - [ ] `BlockResolverService` implementieren:
@@ -291,19 +326,21 @@ Ein Nutzer kann ohne Login Linien durchsehen, einen Fahrplan je Linie/Haltestell
 
 > ⏱️ **Reihenfolge:** Die MDKursTracker-Live-Anbindung (Fluss 1/2) erfolgt laut Priorisierung **nach** der
 > Admin-Schaltzentrale (I-12) — das Admin-Frontend soll zuerst Sichtbarkeit/Vertrauen schaffen.
-> ⚠️ Vor Implementierung: Schnittstelle zu MDKursTracker (API vs. NaruaDB-Direktzugriff) final entscheiden.
+> ✅ **Engine-Seite von Fluss 1 umgesetzt (I-04, 26.09.2026).** Offen ist die **Tracker-Seite**: Push je Sichtung und
+> Nachhol-Cron — Anforderungen in [`MDKURSTRACKER_REQUIREMENTS.md`](MDKURSTRACKER_REQUIREMENTS.md) §2.1. Danach Fluss 2
+> (`GET /api/v1/course-lookup`, INTEGRATION §5.2). Der NAS-Collector bleibt reiner GTFS-Lieferant.
 > 📄 **Schnittstelle geklärt (2026-06-22):** über **HTTP-API** (MDKursTracker = MariaDB nur lokal). Engine
 > bleibt reiner Server; Sync-Cron empfohlen in MDKursTracker; Collector nur GTFS. Details + offene Punkte:
 > [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §3/§5.
 
 ### Aufgaben
-- [ ] Schnittstellen-Entscheidung MDKursTracker dokumentieren
-- [ ] `SightingImportService` im Collector:
-  - Sichtungen aus MDKursTracker lesen (API oder DB)
-  - Normalisieren & als Batch an `POST /api/v1/collector/sightings` senden
+- [x] Schnittstellen-Entscheidung MDKursTracker dokumentieren (HTTP-API, Push + Nachhol-Cron, eigener Token)
+- [ ] **MDKursTracker:** Push je Sichtung + Nachhol-Cron (REQUIREMENTS §2.1) — *nicht* im Collector
+- [ ] Token `MDKURSTRACKER_API_TOKEN` in Produktion vergeben und im Tracker hinterlegen
+- [ ] Fluss 2: `GET /api/v1/course-lookup` (Engine) + Anzeige im Tracker
 - [ ] CLI-Commands:
   - `collector:import-gtfs` — GTFS-Feed laden & importieren
-  - `collector:sync-sightings` — neue Sichtungen synchronisieren
+  - ~~`collector:sync-sightings`~~ — entfällt, der Tracker liefert selbst
 - [ ] Fehlerbehandlung: HTTP-Timeouts, DB-Verbindungsfehler, Feed nicht erreichbar
 - [ ] Logging: alle Schritte auf `stdout` + tägliche Logdatei (Monolog `StreamHandler`)
 - [ ] Cron-Eintrag auf NAS dokumentieren (z.B. GTFS täglich 03:00, Sichtungen stündlich)
@@ -367,7 +404,11 @@ Fahrplanperioden-Erkennung und Import-Auditing. Alle schreibenden/kuratierenden 
 - [x] Sanctum-Login-Flow (Token speichern, Axios-Interceptor, Logout)
 - [x] `timezone.ts` im Admin (`admin/src/utils/timezone.ts`): UTC → lokale Browser-Zeitzone, nur hier
 
-### (b) Matching-Workflow — **MVP** (aus dem Viewer hierher verschoben)
+### (b) Matching-Workflow — **MVP** (aus dem Viewer hierher verschoben) ✅
+
+> Umgesetzt als I-04 Stufe 2 und 3 (26.09.2026): Prüfliste „Sichtungen" und Entscheidung im Fahrplan. Die ursprünglich
+> geplante Kandidatenauswahl entfällt, weil die Zuordnung deterministisch ist.
+
 - [ ] `MatchingView`: Sichtungsliste (`GET /api/v1/sightings?date=`), Kandidaten (`GET /api/v1/trips?...`), Zuordnen (`POST /api/v1/sightings/{id}/assign`)
 - [ ] Umlauf-Kuratierung: zugeordnete Trips chronologisch, offene Sichtungen gleicher `course_number` hervorheben
 - [ ] Sonderfall keine Kandidaten → Hinweis + Handlungsempfehlung

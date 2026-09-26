@@ -57,7 +57,7 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
    Halt, an dem `line` wechselt. Das Feld steht schon im Vertrag (optional, UTC mit `Z`, es zählt nur die Uhrzeit);
    am Endhalt bleibt die Ankunft in `departure_planned` weiterhin richtig. Betroffene Laufwege einfach mit dem
    nächsten Lauf erneut senden — MD-Takt aktualisiert sie per Fingerprint und ordnet die wartenden Sichtungen
-   beim nächsten Fahrplan-Import neu zu (oder sofort per `sightings:rematch`).
+   dieses Laufwegs **sofort** neu zu; die Sichtungen selbst müsst ihr dafür nicht erneut senden.
 7. **Nichts selbst berechnen:** Die Fahrt-Signatur, den Fahrplantyp (inkl. Ferien) und den Betriebstag bestimmt
    MD-Takt. `day_type` ist nur informativ. Das **reale Datum** der Sichtung kommt aus `departure_planned` und
    `service_date` der Sichtung selbst, nicht aus dem Laufweg.

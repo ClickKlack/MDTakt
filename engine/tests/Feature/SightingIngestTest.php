@@ -283,6 +283,27 @@ final class SightingIngestTest extends TestCase
         $this->assertSame(0, $sichtung->match_attempts);
     }
 
+    /**
+     * Der Tracker reicht Zeiten nach (Ankunft am Linienwechsel) und sendet dafür nur den Laufweg,
+     * nicht die schon übertragene Sichtung. Die wartende Sichtung wird trotzdem sofort zugeordnet.
+     */
+    public function test_ingest_rematches_waiting_sightings_when_their_route_changes(): void
+    {
+        $fahrt = $this->fahrt();
+        $body = $this->body();
+        $body['trips'][0]['stops'][2]['arrival_planned'] = '2026-09-01T04:21:00Z';
+        $this->sende($body)->assertOk()->assertJsonPath('data.results.0.match', 'waiting');
+
+        $korrigiert = $this->body();
+        $korrigiert['sightings'] = [];
+        $this->sende($korrigiert)->assertOk();
+
+        $sichtung = Sighting::query()->sole();
+        $this->assertSame(SightingMatch::Matched, $sichtung->match);
+        $this->assertSame($fahrt->id, $sichtung->consolidated_trip_id);
+        $this->assertSame(0, $sichtung->match_attempts);
+    }
+
     public function test_rematch_turns_waiting_into_no_trip_after_two_imports(): void
     {
         $this->sende($this->body())->assertOk();

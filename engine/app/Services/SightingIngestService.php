@@ -52,10 +52,17 @@ final class SightingIngestService
     {
         return DB::transaction(function () use ($trips, $sightings): array {
             $routen = [];
+            $geaenderteRouten = [];
 
             foreach ($trips as $trip) {
                 $route = $this->storeRoute($trip);
                 $routen[$route->fingerprint] = $route;
+
+                // Nachgereichte Zeiten (z. B. Ankunft am Linienwechsel) betreffen auch Sichtungen,
+                // die in diesem Request gar nicht mitkommen — der Tracker sendet sie nicht erneut.
+                if (! $route->wasRecentlyCreated && $route->wasChanged('stops')) {
+                    $geaenderteRouten[] = $route->id;
+                }
             }
 
             $ergebnisse = [];
@@ -84,6 +91,10 @@ final class SightingIngestService
                 $ergebnisse[] = $this->result($sichtung->mdkt_recording_id, $ausgang, $sichtung);
             }
 
+            if ($geaenderteRouten !== []) {
+                $this->rematchOpen(countAttempt: false, routeIds: $geaenderteRouten);
+            }
+
             $zusammenfassung = [
                 'received' => ['trips' => count($trips), 'sightings' => count($sightings)],
                 'results' => $ergebnisse,
@@ -110,27 +121,30 @@ final class SightingIngestService
      * Import entfernt hat. Eine entschiedene Sichtung behält ihren Status; nur ihre Fahrt wird
      * wiedergefunden.
      *
-     * @param  bool  $countAttempt  false beim Aufruf von Hand — der zählt nicht als Import
+     * @param  bool  $countAttempt  false beim Aufruf von Hand oder nach geändertem Laufweg — das zählt nicht als Import
+     * @param  array<int, int>|null  $routeIds  nur Sichtungen dieser Laufwege; null = alle
      * @return array{checked: int, matched: int, still_open: int, confirmed: int}
      */
-    public function rematchOpen(bool $countAttempt = true): array
+    public function rematchOpen(bool $countAttempt = true, ?array $routeIds = null): array
     {
         $zahlen = ['checked' => 0, 'matched' => 0, 'still_open' => 0, 'confirmed' => 0];
 
         Sighting::query()
             ->with('route')
+            ->when($routeIds !== null, fn ($q) => $q->whereIn('mdkt_route_id', $routeIds))
             ->where(function ($q): void {
-                $q->where('status', SightingStatus::Pending->value)
-                    ->whereIn('match', [
-                        SightingMatch::Waiting->value,
-                        SightingMatch::NoTrip->value,
-                        SightingMatch::Ambiguous->value,
-                        SightingMatch::MatchedNextVersion->value,
-                    ]);
-            })
-            ->orWhere(function ($q): void {
-                $q->whereNull('consolidated_trip_id')
-                    ->whereIn('match', [SightingMatch::Matched->value, SightingMatch::MatchedNextVersion->value]);
+                $q->where(function ($q): void {
+                    $q->where('status', SightingStatus::Pending->value)
+                        ->whereIn('match', [
+                            SightingMatch::Waiting->value,
+                            SightingMatch::NoTrip->value,
+                            SightingMatch::Ambiguous->value,
+                            SightingMatch::MatchedNextVersion->value,
+                        ]);
+                })->orWhere(function ($q): void {
+                    $q->whereNull('consolidated_trip_id')
+                        ->whereIn('match', [SightingMatch::Matched->value, SightingMatch::MatchedNextVersion->value]);
+                });
             })
             ->chunkById(200, function ($teil) use (&$zahlen, $countAttempt): void {
                 foreach ($teil as $sichtung) {
@@ -147,7 +161,10 @@ final class SightingIngestService
                 }
             });
 
-        Log::info('Open sightings rematched', $zahlen + ['counted_as_import' => $countAttempt]);
+        Log::info('Open sightings rematched', $zahlen + [
+            'counted_as_import' => $countAttempt,
+            'route_ids' => $routeIds,
+        ]);
 
         return $zahlen;
     }

@@ -311,7 +311,8 @@ Die Engine bildet aus dem Laufweg genau die Signatur nach, die der Import je Fah
 - **Standzeit am Linienwechsel (erster produktiver Lauf, 26.09.2026):** Hält das Fahrzeug am Übergangshalt einige
   Minuten (City Carré 5 → 1: an 18:36, ab 18:38), endet die Fahrt der alten Linie im Feed mit der Ankunft. Ohne
   `arrival_planned` fehlt diese Zeit, die Signatur trifft nicht. Der Tracker sendet die Ankunft deshalb mit
-  (REQUIREMENTS §2.1 Nr. 6); der Abgleich bleibt exakt.
+  (REQUIREMENTS §2.1 Nr. 6); der Abgleich bleibt exakt. Ändert sich ein schon bekannter Laufweg, ordnet die Engine
+  dessen offene Sichtungen im selben Request neu zu — nicht erst beim nächsten Import.
 - **Ersatzhalt bei Umleitung:** Der Tracker führt eine umgeleitete Fahrt am vorgesehenen Laufweg, gesichtet wird sie
   an einem Ersatzhalt, der darin nicht vorkommt. Solche Sichtungen finden keine Fahrt (`waiting` → `no_trip`) und
   werden abgelehnt. Den Haltnamen holt die Engine dann aus einem anderen Laufweg, der den Halt kennt.

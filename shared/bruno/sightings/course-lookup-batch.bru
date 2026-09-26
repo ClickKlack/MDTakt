@@ -1,0 +1,41 @@
+meta {
+  name: Kursauskunft Sammelabfrage (Fluss 2)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/v1/collector/course-lookup
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{mdkurstrackerToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "departures": [
+      { "ref": "abf-1", "hafas_stop": "900002", "line": "10", "time": "2026-09-29T04:10:00Z", "stop_name": "Hasselbachplatz" },
+      { "ref": "abf-2", "hafas_stop": "900003", "line": "1", "time": "2026-09-29T04:20:00Z", "direction": "Magdeburg, Sudenburg" }
+    ]
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data[0].ref: eq abf-1
+  res.body.data[1].ref: eq abf-2
+}
+
+docs {
+  # Sammelabfrage
+
+  Bis zu 100 Abfahrten einer Tafel auf einmal; `ref` kommt je Ergebnis zurück, die Reihenfolge bleibt erhalten.
+}

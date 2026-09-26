@@ -26,7 +26,8 @@
 
 > **Stand am 26.09.2026.** Der Sichtungs-Pfad ist auf Engine- und Admin-Seite fertig: **I-04** (mit I-05, I-06 und
 > I-12 b) — Eingang aus MDKursTracker, Zuordnung, Prüfliste und Entscheidung im Fahrplan.
-> **Als Nächstes: I-09** — die Tracker-Seite (Push + Nachhol-Cron), dann die Kursauskunft (Fluss 2).
+> Die Kursauskunft (Fluss 2) ist auf Engine-Seite ebenfalls fertig.
+> **Als Nächstes: I-09 auf Tracker-Seite** — Push + Nachhol-Cron, dann die Anzeige der Kursauskunft.
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -337,7 +338,9 @@ Ein Nutzer kann ohne Login Linien durchsehen, einen Fahrplan je Linie/Haltestell
 - [x] Schnittstellen-Entscheidung MDKursTracker dokumentieren (HTTP-API, Push + Nachhol-Cron, eigener Token)
 - [ ] **MDKursTracker:** Push je Sichtung + Nachhol-Cron (REQUIREMENTS §2.1) — *nicht* im Collector
 - [ ] Token `MDKURSTRACKER_API_TOKEN` in Produktion vergeben und im Tracker hinterlegen
-- [ ] Fluss 2: `GET /api/v1/course-lookup` (Engine) + Anzeige im Tracker
+- [x] Fluss 2 Engine: `GET|POST /api/v1/collector/course-lookup` (26.09.2026) — Linie + Halt + Soll-Zeit, Halt aus
+      Sichtungen gelernt, sonst Name, dann Richtung; keine Konfidenz (MD-Takt ist die Wahrheit); Probe: 200 von 200 Abfahrten der 10
+- [ ] Fluss 2 Tracker: Abfrage (gesammelt je Tafel) + Anzeige, REQUIREMENTS §2.2
 - [ ] CLI-Commands:
   - `collector:import-gtfs` — GTFS-Feed laden & importieren
   - ~~`collector:sync-sightings`~~ — entfällt, der Tracker liefert selbst

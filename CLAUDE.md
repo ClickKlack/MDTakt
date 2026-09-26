@@ -39,7 +39,7 @@ Bevor du eigenständig entscheidest, **halte an und frage**, wenn:
 - eine Datenbank-Änderung nötig ist, die nicht in der ROADMAP vorgesehen ist
 - du dir bei der Zeitzone einer Zeitangabe nicht sicher bist
 - eine Schnittstelle zu MDKursTracker betroffen ist — Fluss 1 ist festgelegt (`openapi.yaml`,
-  `INTEGRATION_MDKURSTRACKER.md` §5.1/§8), jede Vertragsänderung trifft die Tracker-Seite; Fluss 2 ist noch offen
+  `INTEGRATION_MDKURSTRACKER.md` §5/§8) — beide Flüsse; jede Vertragsänderung trifft die Tracker-Seite
 
 ---
 
@@ -134,8 +134,7 @@ Keine API-Tokens oder Passwörter in Logs schreiben.
 
 | Thema | Details |
 |---|---|
-| Kursauskunft für MDKursTracker (Fluss 2) | `GET /course-lookup` — Konzept in INTEGRATION §5.2, `confidence`-Semantik offen |
-| Tracker-Seite Fluss 1 | Push + Nachhol-Cron baut MDKursTracker (REQUIREMENTS §2.1); Cron-Intervall dort festlegen (Vorschlag 15 min) |
+| Tracker-Seite beider Flüsse | Push + Nachhol-Cron und Kursauskunft-Anzeige baut MDKursTracker (REQUIREMENTS §2.1/§2.2); Cron-Intervall dort festlegen (Vorschlag 15 min) |
 | Löschungen / Rücknahme | Löschungen im Tracker werden nicht übertragen; eine Entscheidung lässt sich nicht per Knopf zurücknehmen |
 
 Entschieden am 26.09.2026 (vorher hier offen): Zeitfenster-Toleranz (keine), Sichtungen ohne GTFS-Trip und

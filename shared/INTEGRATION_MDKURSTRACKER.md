@@ -1,7 +1,7 @@
 # Integration MDKursTracker ↔ MD-Takt
 
-> **Stand: 2026-09-26.** Fluss 1 (Sichtungs-Eingang) ist **umgesetzt** — Engine-Seite samt Prüfliste und
-> Entscheidung im Fahrplan (§8). Offen sind die Tracker-Seite (Push + Nachhol-Cron) und Fluss 2 (Kursauskunft).
+> **Stand: 2026-09-26.** Beide Flüsse sind auf Engine-Seite **umgesetzt**: Sichtungs-Eingang samt Prüfliste und
+> Entscheidung im Fahrplan (§8) und Kursauskunft (§5.2). Offen ist die Tracker-Seite beider Flüsse.
 > Ursprüngliches Konzept vom 23.06.2026, am realen Datensatz validiert.
 > Anforderungen an die MDKursTracker-Seite separat in [`MDKURSTRACKER_REQUIREMENTS.md`](MDKURSTRACKER_REQUIREMENTS.md).
 
@@ -14,8 +14,8 @@
 - **Fluss 1 (Ingest):** MDKursTracker schickt jede Sichtung **sofort nach dem Speichern** an
   `POST /api/v1/collector/sightings` und holt Fehlgeschlagenes per **Nachhol-Cron** über eine Merkmarke nach
   (entschieden 26.09.2026, vorher: nächtlicher Batch). Eigener Token, getrennt vom NAS-Collector.
-- **Fluss 2 (Auskunft):** MDKursTracker fragt **on-demand** je Abfahrt → `GET /api/v1/course-lookup`
-  (Parameter: HAFAS-`stop_id`, Linie, Soll-Zeit, Datum) → Kursnummer falls bekannt.
+- **Fluss 2 (Auskunft):** MDKursTracker fragt **on-demand** je Abfahrt oder je Tafel → `GET|POST /api/v1/collector/course-lookup`
+  (HAFAS-Halt, Linie, Soll-Zeit, optional Haltname und Richtung; Tracker-Token) → Kursnummer falls bekannt (§5.2).
 - **Matching validiert & deterministisch:** `(Linie, Tagestyp, Soll-Zeit-Sequenz lokal)`. Kein HAFAS↔GTFS-Stop-ID-Crosswalk nötig.
   Die **Engine** bildet die Fahrt-Signatur aus dem mitgesendeten Laufweg selbst — der Tracker hasht nichts (§8.1).
 - **Sichtungen laufen in eine Tabelle mit Status** und werden im Admin angenommen oder abgelehnt — in einer
@@ -69,7 +69,7 @@ NAS-Collector  ──GTFS-Feed──▶  MD-Takt-Engine            (unverändert
                                (reiner Server, ruft nie raus)
 MDKursTracker      ──je Sichtung sofort──▶  POST /collector/sightings   Fluss 1 (Ingest)
 MDKursTracker-Cron ──Nachholen (Merkmarke)──▶  POST /collector/sightings
-MDKursTracker      ──on-demand je Abfahrt──▶  GET /course-lookup        Fluss 2 (Auskunft)
+MDKursTracker      ──je Abfahrt / Tafel──▶  GET|POST /collector/course-lookup   Fluss 2 (Auskunft)
 ```
 
 - **Fluss 1 = Sofort-Push je Sichtung + Nachhol-Cron** (entschieden 26.09.2026). Jede Sichtung bringt ihren
@@ -211,50 +211,60 @@ Die Stop-Map (§4.3) ist **nicht** umgesetzt; die Zuordnung braucht sie nicht.
 ```
 `unmatched_fingerprints` macht **Mismatches sichtbar** (Routen, für die kein GTFS-Trip gefunden wurde → manuell prüfen).
 
-### 5.2 Fluss 2 — `GET /api/v1/course-lookup`
-**Zweck:** On-demand-Auskunft, ob für eine Abfahrt eine Kursnummer bekannt ist. **Auth:** öffentlicher Read-Endpunkt
-(kein Auth im MVP, analog Viewer; Kursnummern sind öffentliche Anzeige-Info). Cachebar.
+### 5.2 Fluss 2 — `GET|POST /api/v1/collector/course-lookup` (umgesetzt 26.09.2026)
+**Zweck:** Kursauskunft je Abfahrt der Tafel. **Auth:** derselbe Tracker-Token wie Fluss 1 (entschieden 26.09.2026,
+vorher „öffentlich") — die Umlaufdaten sollen nicht massenhaft abziehbar sein. Eigenes Limit 600/min.
+`GET` für eine Abfahrt, `POST` mit `departures[]` für bis zu 100 (je mit `ref`, das zurückkommt).
+**Maßgeblich ist `openapi.yaml`.**
 
-**Query-Parameter:**
-| Param | Pflicht | Bsp | Bedeutung |
-|---|---|---|---|
-| `hafas_stop` | ja | `301968501` | HAFAS extId der Haltestelle (inkl. Steig) |
-| `line` | ja | `1` | Linie **an diesem Halt** (Linienübergänge!) |
-| `time` | ja | `2026-06-18T16:43:00Z` | Soll-Abfahrt, ISO-8601 **UTC** |
-| `date` | ja | `2026-06-18` | Betriebstag (Berlin), für Tagestyp + Periode |
-| `stop_name` | optional | `Magdeburg, …` | Cold-Start-Fallback, wenn Stop-Map den HAFAS-Stop noch nicht kennt |
+| Param | Pflicht | Bedeutung |
+|---|---|---|
+| `hafas_stop` | ja | HAFAS-extId der Abfahrt (inkl. Steig) |
+| `line` | ja | Linie **an diesem Halt** |
+| `time` | ja | Soll-Abfahrt, UTC mit `Z` |
+| `stop_name` | nein | Rückfall, solange die HAFAS-ID noch nicht gelernt ist |
+| `direction` | nein | Richtung/Ziel wie auf der Tafel — trennt zwei Richtungen zur selben Minute |
+| `date` | nein | informativ; den Betriebstag bestimmt die Engine aus `time` |
 
-**Auflösung (Engine):** `hafas_stop` → GTFS-Stop via Stop-Map (sonst Namens-Fallback) → aktive `service_id`s für `date`
-(I-03) → `time` UTC→Berlin-Lokalzeit → GTFS-`stop_time` bei `(gtfs_stop_id, line, Lokalzeit, aktiver service_id)` → Trip
-→ Kurs-Zuordnung über die Signatur.
+**Auflösung (Engine, `DepartureCourseLookupService`):**
+1. Soll-Zeit → Netz-Zeit. Gesucht wird in allen drei Schreibweisen des Feeds: `HH:MM` am Kalendertag,
+   `HH:MM` am Vortag (Fahrt beginnt nach Mitternacht vor der Betriebstag-Grenze), `HH+24:MM` am Vortag.
+2. Kandidaten: Fahrten der Linie in der am Betriebstag gültigen Version, die an einem Halt **genau** zu dieser Minute
+   abfahren. Keine Toleranz.
+3. Eingrenzen über den Halt: zuerst die **aus Sichtungen gelernte** HAFAS-ID (Halt der zugeordneten Fahrt zur
+   Soll-Uhrzeit der Sichtung; keine eigene Tabelle, eine Stunde gecacht — die Stop-Map aus §4.3 in einfacher Form),
+   sonst der **Haltname** (normalisiert, „Magdeburg, …" und „Str." eingeebnet). Bleiben mehrere, trennt `direction`
+   über den Zielhalt der Fahrt.
+4. Genau eine Fahrt mit Kurs → `found: true`. Sonst `reason`: `no-trip-match` | `ambiguous` | `no-course-assigned`.
 
 **Response 200 (gefunden):**
 ```jsonc
 { "data": {
-  "found": true,
-  "course_number": "03",
-  "line": "1",
-  "confidence": "majority",        // confirmed | majority | single | heuristic  (Semantik s. §6)
-  "source": "mdkurstracker-sighting",
-  "matched_trip":  { "signature": "…", "gtfs_trip_id": "1316520", "departure_local": "17:55:00" },
-  "stop_mapping":  { "resolved_via": "learned", "gtfs_stop_id": "498258" }
+  "found": true, "course_number": "03", "display": "10/03", "line": "10",
+  "matched_trip": { "id": 26286, "line_version_id": 338, "departure_local": "06:10:00" },
+  "stop_resolved_via": "sighting"     // sighting | name | time-only, ggf. +direction
 } }
 ```
-**Response 200 (nicht gefunden):** `{ "data": { "found": false, "reason": "stop-unmapped" | "no-trip-match" | "no-course-assigned" } }`
 
-`confidence`/`source` lässt MDKursTracker selbst entscheiden, wie es den Kurs anzeigt; `reason` macht **Mismatches
-diagnostizierbar**. Caching: Antwort stabil je `(hafas_stop, line, time, date)` bis zur (Neu-)Zuordnung →
-`Cache-Control`/ETag; MDKursTracker cacht je Tag.
+**Keine Konfidenz (entschieden 26.09.2026):** MD-Takt verwaltet die Wahrheit. Viele Kurse entstehen durch logisches
+Fortschreiben statt aus Sichtungen und sind deshalb nicht weniger richtig — die Antwort unterscheidet das nicht.
+
+**Caching:** `Cache-Control: private, max-age=3600` — eine Stunde, damit ein gerade angenommener Kurs noch am selben
+Tag ankommt. **Feedback-Loop-Verbot:** Eine Auskunft darf nie als Sichtung in Fluss 1 zurückfließen.
+
+**Probe am Bestand (29.09.2026):** 200 zufällige Abfahrten der Linie 10 mit Haltname und Richtung — 200 gefunden,
+keine falsch. Ohne Richtung blieben 26 mehrdeutig: An der Rostocker Straße fahren beide Richtungen zur selben
+Minute an gleichnamigen Bahnsteigen ab.
 
 ---
 
 ## 6. Offene Punkte
 
-> **Stand 26.09.2026:** Punkte 1, 4 und 5 sind mit Fluss 1 entschieden und umgesetzt (§8). Offen bleiben 2, 3 und 6
-> — sie betreffen Fluss 2 bzw. die Tracker-Seite.
+> **Stand 26.09.2026:** Punkte 1, 2, 4 und 5 sind entschieden und umgesetzt (§5.2, §8). Offen bleiben 3 (Laufweg-Export
+> auf Tracker-Seite) und 6 (Feedback-Loop — Aufgabe des Trackers).
 
 1. ~~**§3.2-Algorithmus fachlich festschreiben**~~ — **erledigt:** exakter Signatur-Match, SPEC §3.2 neu gefasst.
-2. **`confidence`-Semantik / „Kurs feststehend":** Wann gilt eine Kurszuordnung als `confirmed` vs. `majority`/`single`?
+2. ~~**`confidence`-Semantik**~~ — **entfällt:** Die Auskunft liefert keine Konfidenz, MD-Takt ist die Wahrheit (§5.2). Ursprünglich: **„Kurs feststehend":** Wann gilt eine Kurszuordnung als `confirmed` vs. `majority`/`single`?
    (z. B. Admin-Override → confirmed; n übereinstimmende Sichtungen → majority …). Bestimmt die Aussagekraft von Fluss 2.
 3. **MDKursTracker-Endpunkt für den Soll-Zeit-Laufweg** pro Trip prüfen/bereitstellen (Input für `trips[]` in Fluss 1).
 4. ~~**Datenmodell-Neufassung MD-Takt**~~ — **erledigt** für Fluss 1 (`mdkt_routes`, `sightings`; Stop-Map entfällt vorerst). Ursprünglich:: importierte Routen + Stop-Map (Koordinaten + Konfidenz) +

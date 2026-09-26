@@ -168,7 +168,6 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 | `GET` | `/api/v1/trips?date=&line=&stop=` | GTFS-Trips / Fahrplananzeige filtern |
 | `GET` | `/api/v1/blocks?date=` | Alle Umläufe eines Tages (gruppiert nach `course_number`) |
 | `GET` | `/api/v1/blocks/{course_number}?date=` | Einzelner Umlauf mit allen zugeordneten Trips |
-| `GET` | `/api/v1/course-lookup?hafas_stop=&line=&time=&date=` | Kursauskunft für MDKursTracker (Fluss 2, siehe `INTEGRATION_MDKURSTRACKER.md`) |
 
 ### Collector (intern, API-Token geschützt)
 | Method | Endpunkt | Beschreibung |
@@ -176,6 +175,7 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 | `POST` | `/api/v1/collector/gtfs-import` | GTFS-Feed-Import anstoßen |
 | `GET` | `/api/v1/collector/imports` | Import-Historie & Datenstand (interne Token-Variante) |
 | `POST` | `/api/v1/collector/sightings` | Sichtungs-Eingang aus MDKursTracker (Fluss 1) — **eigener Token** `MDKURSTRACKER_API_TOKEN` |
+| `GET`/`POST` | `/api/v1/collector/course-lookup` | Kursauskunft für MDKursTracker (Fluss 2) je Abfahrt / je Tafel — Tracker-Token |
 
 ### Admin / Schaltzentrale (Sanctum-geschützt)
 | Method | Endpunkt | Beschreibung |
@@ -203,7 +203,7 @@ Alle Antworten als JSON. Fehlerformat: `{ "error": { "code": int, "message": str
 
 - **Collector → Engine:** Bearer-Token (statischer API-Key in `.env`, kein Login).
 - **MDKursTracker → Engine:** eigener statischer Bearer-Token (`MDKURSTRACKER_API_TOKEN`), nur für den
-  Sichtungs-Eingang. Die beiden Tokens öffnen jeweils nur ihre eigenen Endpunkte.
+  Sichtungs-Eingang und die Kursauskunft. Die beiden Tokens öffnen jeweils nur ihre eigenen Endpunkte.
 - **Viewer → Engine:** Kein Auth — **rein lesend**. Der öffentliche Viewer ist eine informative Webseite ohne schreibende Aktionen.
 - **Admin-Schaltzentrale → Engine:** Laravel Sanctum (Login + Token) für **alle** kuratierenden/verwaltenden Aktionen (Matching, Datenkorrektur, Steuerung, Auditing). Da der Matching-Workflow ins Admin-Frontend wandert, ist Sanctum **MVP-relevant** (nicht mehr Post-MVP). Single-Admin-Login; der Collector-Token bleibt rein intern und gelangt **nie** ins Browser-Frontend.
 - **Zukunft:** Vollwertiges Multi-User-System baut auf demselben Sanctum-Fundament auf.

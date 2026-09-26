@@ -1,0 +1,49 @@
+meta {
+  name: Kursauskunft (Fluss 2)
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/v1/collector/course-lookup?hafas_stop=900002&line=10&time=2026-09-29T04:10:00Z&stop_name=Hasselbachplatz&direction=Magdeburg, Rothensee
+  body: none
+  auth: bearer
+}
+
+params:query {
+  hafas_stop: 900002
+  line: 10
+  time: 2026-09-29T04:10:00Z
+  stop_name: Hasselbachplatz
+  direction: Magdeburg, Rothensee
+}
+
+auth:bearer {
+  token: {{mdkurstrackerToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.found: isBoolean
+}
+
+docs {
+  # Kursauskunft
+
+  Tracker-Token. Linie + HAFAS-Halt + Soll-Zeit (UTC) → gepflegter Kurs. `stop_name` und `direction`
+  grenzen ein, solange die Engine die HAFAS-ID noch nicht aus Sichtungen kennt.
+
+  Beispiel-Response (gefunden):
+
+  ```json
+  { "data": { "found": true, "course_number": "03", "display": "10/03", "line": "10",
+              "matched_trip": { "id": 26286, "line_version_id": 338, "departure_local": "06:10:00" },
+              "stop_resolved_via": "sighting" } }
+  ```
+
+  Nicht gefunden: `{ "data": { "found": false, "reason": "no-trip-match" | "ambiguous" | "no-course-assigned" } }`
+}

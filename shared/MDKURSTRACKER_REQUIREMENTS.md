@@ -1,6 +1,6 @@
 # Anforderungen an MDKursTracker — Integration mit MD-Takt
 
-> **Adressat:** die MDKursTracker-Seite (Entwickler/Coding-Agent). **Stand: 2026-09-26.** Die MD-Takt-Seite von Fluss 1 ist **fertig und live-bereit** — es fehlt nur noch §2.1 auf eurer Seite.
+> **Adressat:** die MDKursTracker-Seite (Entwickler/Coding-Agent). **Stand: 2026-09-26.** Die MD-Takt-Seite **beider Flüsse** ist fertig und live-bereit — es fehlen §2.1 und §2.2 auf eurer Seite.
 > Dieses Dokument ist **eigenständig lesbar** und beschreibt, was MD-Takt von MDKursTracker erwartet,
 > was MDKursTracker bauen muss, und welche Annahmen MD-Takt über eure Daten trifft — letztere explizit,
 > damit ein **Mismatch früh auffällt**. Gegenstück (MD-Takt-Sicht): `INTEGRATION_MDKURSTRACKER.md`.
@@ -21,7 +21,7 @@ Daraus zwei Datenflüsse:
 | **Richtung** | MDKursTracker → MD-Takt | MDKursTracker → MD-Takt |
 | **Modus** | sofort je Sichtung + Nachhol-Cron | on-demand je Abfahrt |
 | **Zweck** | neue Sichtungen liefern | „Kennt MD-Takt für diese Abfahrt einen Kurs?" |
-| **Wer baut** | Push nach dem Speichern + Nachhol-Cron in MDKursTracker | Lookup-Call + UI-Anzeige in MDKursTracker (MD-Takt-Seite noch nicht gebaut) |
+| **Wer baut** | Push nach dem Speichern + Nachhol-Cron in MDKursTracker | Lookup-Call (je Abfahrt oder je Tafel) + UI-Anzeige in MDKursTracker |
 
 **Grundprinzip:** MD-Takt ist ein **reiner Server** und ruft MDKursTracker **nie** von sich aus auf. **MDKursTracker ist
 in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals zu euch; alles läuft über HTTP.
@@ -53,15 +53,22 @@ am selben Tag geprüft werden kann. Ein Cron fängt auf, was dabei nicht ankam.
 5. **Nichts selbst berechnen:** Die Fahrt-Signatur, den Fahrplantyp (inkl. Ferien) und den Betriebstag bestimmt
    MD-Takt. `day_type` ist nur informativ.
 
-### 2.2 Fluss 2 — On-demand-Lookup + Anzeige
-- Beim Rendern der Abfahrtstafel ruft MDKursTracker **je Abfahrt** `GET /api/v1/course-lookup` bei MD-Takt auf (§3.2).
-- **Caching:** Die Antwort ist je `(hafas_stop, line, time, date)` stabil → tageweise cachen, nicht pro Seitenaufruf neu abfragen.
+### 2.2 Fluss 2 — Kursauskunft + Anzeige (geändert 26.09.2026)
+- Beim Rendern der Abfahrtstafel fragt MDKursTracker MD-Takt nach den Kursen (§3.2) — **am besten gesammelt**:
+  ein `POST` mit allen Abfahrten der Tafel (bis 100) statt je Abfahrt ein `GET`.
+- **Mitsenden, was die Tafel hat:** `hafas_stop`, `line` (Linie an diesem Halt), `time` (Soll-Abfahrt UTC), dazu
+  **`stop_name` und `direction`** (Richtung/Ziel der Abfahrt). MD-Takt lernt die HAFAS-Halte erst aus euren Sichtungen;
+  bis dahin grenzen Name und Richtung ein. Ohne Richtung bleiben z. B. an der Rostocker Straße beide Richtungen
+  zur selben Minute mehrdeutig.
+- **Caching:** höchstens **eine Stunde** je `(hafas_stop, line, time)` — die Antwort sagt es per
+  `Cache-Control: private, max-age=3600`. Ein gerade in MD-Takt angenommener Kurs soll noch am selben Tag ankommen.
 - **Graceful Degradation:** Ist MD-Takt nicht erreichbar oder `found:false`, zeigt die Tafel einfach nur eure eigene
   Fingerprint-Info — kein harter Fehler.
-- **Anzeige:** Der gelieferte Kurs ist eine **zusätzliche Quelle**. Vorschlag: vierte `courseSource`-Stufe
-  `confirmed`/`extern` neben euren bestehenden `manual`/`recorded`/`heuristic`, angezeigt in der Trip-Gruppen-Detailansicht.
-- **Kein Persistieren als Sichtung:** Die Lookup-Antwort darf **niemals** wieder als eigene Sichtung in Fluss 1
-  zurückfließen (Feedback-Loop-Verbot).
+- **Anzeige:** Der gelieferte Kurs ist **die gepflegte Wahrheit aus MD-Takt** — viele Kurse entstehen dort durch
+  logisches Fortschreiben, nicht nur aus Sichtungen. Eine Konfidenz gibt es deshalb nicht. Vorschlag: vierte
+  `courseSource`-Stufe `mdtakt` neben `manual`/`recorded`/`heuristic`.
+- **Kein Persistieren als Sichtung:** Die Auskunft darf **niemals** als eigene Sichtung in Fluss 1 zurückfließen
+  (Feedback-Loop-Verbot) — sonst bestätigte MD-Takt sich selbst.
 
 ---
 
@@ -128,26 +135,31 @@ am selben Tag geprüft werden kann. Ein Cron fängt auf, was dabei nicht ankam.
     HAFAS früher hat als der Feed). MD-Takt ordnet nach jedem Fahrplan-Import selbst neu zu — nichts erneut senden.
 - **Fehler:** 401 (Token), 422 (Validierung), 429 (Rate-Limit) — alle im Format `{ "error": { "code", "message" } }`.
 
-### 3.2 Fluss 2 — `GET https://api.strassenbahn-magdeburg.de/api/v1/course-lookup`
-- **Auth:** keine (öffentlicher Read-Endpunkt im MVP).
-- **Query-Parameter:**
+### 3.2 Fluss 2 — `GET|POST https://api.strassenbahn-magdeburg.de/api/v1/collector/course-lookup`
+- **Auth:** derselbe Bearer-Token wie Fluss 1 (`MDKURSTRACKER_API_TOKEN`). **Limit:** 600 Requests/Minute.
+- Maschinenlesbarer Vertrag: `shared/openapi.yaml`.
+- **Einzeln:** `GET …/course-lookup?hafas_stop=301968501&line=1&time=2026-06-18T16:43:00Z&stop_name=Magdeburg, City Carré&direction=Magdeburg, Sudenburg`
+- **Gesammelt:** `POST …/course-lookup` mit `{ "departures": [ { "ref": "…", "hafas_stop": "…", "line": "…", "time": "…",
+  "stop_name": "…", "direction": "…" } ] }` — höchstens 100; die Antwort ist eine Liste in derselben Reihenfolge,
+  jedes Ergebnis mit eurem `ref`.
 
-| Param | Pflicht | Beispiel | Quelle in MDKursTracker |
-|---|---|---|---|
-| `hafas_stop` | ja | `301968501` | `recordings.stop_id` bzw. die HAFAS-extId der angezeigten Abfahrt |
-| `line` | ja | `1` | Linie **an diesem Halt** (bei Übergängen `route_stops.line`, nicht die Gesamt-Linie) |
-| `time` | ja | `2026-06-18T16:43:00Z` | Soll-Abfahrt der HAFAS-Abfahrt, **UTC** |
-| `date` | ja | `2026-06-18` | Betriebstag (Berlin) |
-| `stop_name` | optional | `Magdeburg, …` | Fallback, falls MD-Takt den Halt noch nicht gelernt hat |
+| Param | Pflicht | Quelle in MDKursTracker |
+|---|---|---|
+| `hafas_stop` | ja | HAFAS-extId der Abfahrt (inkl. Steig) |
+| `line` | ja | Linie **an diesem Halt** |
+| `time` | ja | Soll-Abfahrt, **UTC mit `Z`** |
+| `stop_name` | empfohlen | Haltname der Tafel |
+| `direction` | empfohlen | Richtung/Ziel der Abfahrt |
+| `date` | nein | informativ |
 
 - **Response 200 (gefunden):**
 ```jsonc
-{ "data": { "found": true, "course_number": "03", "line": "1",
-            "confidence": "majority", "source": "mdkurstracker-sighting",
-            "matched_trip": { "gtfs_trip_id": "1316520", "departure_local": "17:55:00" } } }
+{ "data": { "found": true, "course_number": "03", "display": "1/03", "line": "1",
+            "matched_trip": { "id": 26286, "line_version_id": 338, "departure_local": "17:55:00" },
+            "stop_resolved_via": "sighting" } }
 ```
-- **Response 200 (nicht gefunden):** `{ "data": { "found": false, "reason": "stop-unmapped" | "no-trip-match" | "no-course-assigned" } }`
-- `confidence`/`source` → ihr entscheidet die Darstellung; `reason` → Diagnose bei Fehlanzeige.
+- **Response 200 (nicht gefunden):** `{ "data": { "found": false, "reason": "no-trip-match" | "ambiguous" | "no-course-assigned" } }`
+- `display` ist fertig präfixiert (`Linie/Nummer`) — die Nummer gehört dem Umlauf, der Präfix der Linie an diesem Halt.
 
 ---
 
@@ -191,17 +203,17 @@ sonst matcht das System still falsch.
    intern, `GET /api/recordings/{id}/route` extern — reicht das, oder braucht es einen trip-zentrierten Export?
 2. **Inkrementelle Auswahl** (für den Nachhol-Cron): Welches Feld trägt den **High-Water-Mark** zuverlässig — `recordings.id` oder
    `recorded_at` (Soft-Deletes/Nachträge beachten)?
-3. **Konfidenz:** Könnt ihr je Fahrt **Erfassungszahl + Einigkeit** (und ob `manual_course_number` gesetzt) mitliefern?
-   MD-Takt nutzt das für die `confidence`-Stufe in Fluss 2.
+3. ~~**Konfidenz**~~ — **entfällt:** Die Auskunft liefert keine Konfidenz; MD-Takt ist die Wahrheit (§2.2).
 4. **`day_type`-Werte:** Welche genauen Strings nutzt ihr (`MO-FR`/`SA`/`SO`/Feiertag?), und wie behandelt ihr Feiertage?
 5. **Anzeige-Ort Fluss 2:** Bestätigt ihr die vierte `courseSource`-Stufe `confirmed` in der Trip-Gruppen-Detailansicht?
 
 ---
 
 ## 6. Betrieb, Auth, Fehlerverhalten
-- **Token (Fluss 1):** eigener statischer Bearer-Token (`MDKURSTRACKER_API_TOKEN` auf MD-Takt-Seite), von MD-Takt vergeben,
-  in MDKursTracker-Config (nicht ins Frontend, nicht ins Log). Der Token öffnet nur den Sichtungs-Eingang.
+- **Token (beide Flüsse):** eigener statischer Bearer-Token (`MDKURSTRACKER_API_TOKEN` auf MD-Takt-Seite), von MD-Takt
+  vergeben, in MDKursTracker-Config (nicht ins Frontend, nicht ins Log). Er öffnet nur Sichtungs-Eingang und Kursauskunft —
+  die Abfrage läuft also **serverseitig** im Tracker, nie aus dem Browser.
 - **Fehler Fluss 1:** Beim Push: ignorieren, der Nachhol-Cron holt nach. Beim Cron: bei Nicht-2xx den High-Water-Mark
   **nicht** vorrücken → der nächste Lauf wiederholt (idempotent dank `mdkt_recording_id`).
-- **Fehler Fluss 2:** Timeout/Non-2xx → stiller Fallback auf eigene Anzeige; kurzer Client-Timeout (z. B. 2 s) + Tages-Cache.
+- **Fehler Fluss 2:** Timeout/Non-2xx → stiller Fallback auf eigene Anzeige; kurzer Client-Timeout (z. B. 2 s) + Cache ≤ 1 h.
 - **Datenschutz:** `user_token` o. ä. personenbezogene Felder **nicht** mitsenden — MD-Takt braucht sie nicht.

@@ -25,6 +25,7 @@ use App\Http\Controllers\Admin\StopLinkController;
 use App\Http\Controllers\Admin\TimetableController;
 use App\Http\Controllers\Admin\TripCourseController;
 use App\Http\Controllers\Admin\TripLinkController;
+use App\Http\Controllers\Collector\CourseLookupController;
 use App\Http\Controllers\Collector\ImportController;
 use App\Http\Controllers\Collector\SightingController;
 use App\Http\Controllers\LineController;
@@ -172,5 +173,12 @@ Route::prefix('v1')->group(function (): void {
     // Fehlgeschlagenes per Cron nach; 120/min reichen für beides mit großem Abstand.
     Route::prefix('collector')->middleware(['throttle:120,1', 'collector.token:mdkurstracker', 'decompress'])->group(function (): void {
         Route::post('sightings', [SightingController::class, 'store'])->name('collector.sightings.store');
+    });
+
+    // Kursauskunft für MDKursTracker (Fluss 2) — derselbe Tracker-Token, aber ein eigenes Limit: Eine
+    // Abfahrtstafel fragt je Abfahrt oder gesammelt, mehrere Tafeln gleichzeitig sind normal.
+    Route::prefix('collector')->middleware(['throttle:600,1', 'collector.token:mdkurstracker', 'decompress'])->group(function (): void {
+        Route::get('course-lookup', [CourseLookupController::class, 'show'])->name('collector.course-lookup.show');
+        Route::post('course-lookup', [CourseLookupController::class, 'batch'])->name('collector.course-lookup.batch');
     });
 });

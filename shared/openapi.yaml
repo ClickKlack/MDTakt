@@ -360,6 +360,32 @@ components:
           maxItems: 500
           items: { type: integer }
         note: { type: string, nullable: true, maxLength: 255, description: 'Nur beim Ablehnen ausgewertet' }
+    CourseLookupDeparture:
+      type: object
+      required: [hafas_stop, line, time]
+      properties:
+        hafas_stop: { type: string, maxLength: 32, description: 'HAFAS-extId der Abfahrt (inkl. Steig)', example: '301968501' }
+        line: { type: string, maxLength: 8, description: 'Linie an diesem Halt', example: '10' }
+        time: { type: string, format: date-time, description: 'Soll-Abfahrt, UTC mit Z', example: '2026-09-29T04:10:00Z' }
+        date: { type: string, format: date, nullable: true, description: 'Informativ — den Betriebstag bestimmt die Engine aus time' }
+        stop_name: { type: string, nullable: true, maxLength: 255, description: 'Rückfall, solange die Engine die HAFAS-ID noch nicht aus Sichtungen kennt' }
+        direction: { type: string, nullable: true, maxLength: 255, description: 'Richtung/Ziel wie auf der Tafel — trennt zwei Richtungen zur selben Minute' }
+    CourseLookupResult:
+      type: object
+      properties:
+        ref: { type: string, nullable: true, description: 'Nur in der Sammelabfrage: das mitgegebene ref' }
+        found: { type: boolean }
+        reason: { type: string, enum: [no-trip-match, ambiguous, no-course-assigned], description: 'Nur bei found=false' }
+        course_number: { type: string, example: '03' }
+        display: { type: string, example: '10/03' }
+        line: { type: string }
+        matched_trip:
+          type: object
+          properties:
+            id: { type: integer }
+            line_version_id: { type: integer }
+            departure_local: { type: string, description: 'GTFS-Lokalzeit, kann über 24:00 liegen', example: '06:10:00' }
+        stop_resolved_via: { type: string, enum: [sighting, name, time-only, sighting+direction, name+direction, time-only+direction] }
     GtfsImportRunResponse:
       type: object
       description: "Zusammenfassung eines Laufs (Start/Chunk/Abschluss)"
@@ -4909,6 +4935,96 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: Schon entschieden oder unbekannte ID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/collector/course-lookup:
+    get:
+      operationId: lookupCourse
+      summary: Kursauskunft für eine Abfahrt (MDKursTracker, Fluss 2)
+      description: >-
+        Sucht die Fahrt der Linie, die am Betriebstag genau zu dieser Minute abfährt, grenzt über den
+        HAFAS-Halt (aus Sichtungen gelernt), sonst über den Haltnamen und notfalls über die Richtung ein,
+        und liefert den gepflegten Kurs. Keine Toleranz; zwei übrig bleibende Fahrten ergeben ambiguous.
+        Die Antwort darf eine Stunde gecacht werden (Cache-Control: private, max-age=3600).
+        Die Antwort darf nie als Sichtung in den Eingang zurückfließen.
+      tags: [Collector]
+      security:
+        - MdkurstrackerToken: []
+      parameters:
+        - { name: hafas_stop, in: query, required: true, schema: { type: string } }
+        - { name: line, in: query, required: true, schema: { type: string } }
+        - { name: time, in: query, required: true, schema: { type: string, format: date-time }, description: 'UTC mit Z' }
+        - { name: date, in: query, schema: { type: string, format: date } }
+        - { name: stop_name, in: query, schema: { type: string } }
+        - { name: direction, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Ergebnis (auch bei found=false)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/CourseLookupResult' }
+        '401':
+          description: Fehlender oder ungültiger Tracker-Token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validierungsfehler
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate-Limit überschritten (600 Requests/Minute je IP)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: lookupCourses
+      summary: Kursauskunft für eine ganze Abfahrtstafel (bis zu 100 Abfahrten)
+      tags: [Collector]
+      security:
+        - MdkurstrackerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [departures]
+              properties:
+                departures:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    allOf:
+                      - $ref: '#/components/schemas/CourseLookupDeparture'
+                      - type: object
+                        properties:
+                          ref: { type: string, maxLength: 64, description: 'Frei wählbar, kommt in der Antwort zurück' }
+      responses:
+        '200':
+          description: Ergebnis je Abfahrt, in der Reihenfolge der Anfrage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CourseLookupResult' }
+        '401':
+          description: Fehlender oder ungültiger Tracker-Token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validierungsfehler (mehr als 100 Abfahrten, Zeit nicht in UTC, …)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

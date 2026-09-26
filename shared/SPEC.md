@@ -54,7 +54,7 @@ Eine Sichtung enthält:
 - der **Laufweg** der Fahrt (Soll-Zeiten + Linie je Halt), per `schedule_fingerprint` einmal gespeichert
 
 **Schnittstelle MDKursTracker → MD-Takt (umgesetzt 26.09.2026):** HTTP-API, `POST /api/v1/collector/sightings`
-mit eigenem Token. Der Tracker schickt jede Sichtung sofort und holt Fehlgeschlagenes per Cron nach. Details:
+mit eigenem Token. Ein Cron im Tracker schickt Sichtungen nach einer Karenzzeit; Löschungen werden nicht übertragen. Details:
 [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §5.1 und §8. `course_number` ist Nutzereingabe.
 
 > ~~Umlauf-Schlüssel `(line, course_number, service_date)`~~ — **korrigiert 20.09.2026**, siehe
@@ -94,8 +94,9 @@ Für eine gegebene Sichtung (Kursnummer + Linie + Richtung + Zeit + Haltestelle)
 
 1. **Laufweg teilen** — an jedem Wechsel der Linie je Halt. Eine Tracker-Fahrt L5 → L1 sind im Feed zwei Fahrten.
    Der Übergangshalt wird auf beiden Seiten versucht, am Endhalt Ankunft und Abfahrt.
-2. **Uhrzeitfolge bilden** — jede Soll-Zeit mit ihrem eigenen Datum nach Europe/Berlin, `HH:MM`, gezählt ab dem
-   Kalendertag des ersten Halts (`23:50, 24:05`). Eine Fahrt, die nach Mitternacht beginnt, steht mit `00:30` da.
+2. **Uhrzeitfolge bilden** — Soll-Zeiten nach Europe/Berlin, `HH:MM`. Im Laufweg zählt nur die Uhrzeit (sein Datum ist
+   das des ersten HAFAS-Abrufs); springt sie zurück, beginnt ein neuer Tag (`23:50, 24:05`). Eine Fahrt, die nach
+   Mitternacht beginnt, steht mit `00:30` da.
 3. **Betriebstag und Fahrplantyp** — aus dem Tag der Sichtung; vor der Betriebstag-Grenze gilt der Vortag
    (`OperatingDayResolver`), der Typ kommt aus `FahrplanTypClassifier` (vier Typen, inkl. Ferien).
 4. **Signatur** `SHA256(Linie | Fahrplantyp | HH:MM-Folge)` — dieselbe Formel wie beim Import

@@ -306,7 +306,8 @@ final class SightingIngestService
             'line' => (string) $daten['line'],
             'course_number' => trim((string) $daten['course_number']),
             'hafas_stop_id' => (string) $daten['hafas_stop_id'],
-            'stop_name' => $daten['stop_name'] ?? null,
+            // Der Tracker sendet den Namen an der Sichtung nicht immer — im Laufweg steht er.
+            'stop_name' => $daten['stop_name'] ?? self::stopNameFromRoute($route, (string) $daten['hafas_stop_id']),
             'service_date' => (string) $daten['service_date'],
             'observed_at' => CarbonImmutable::parse((string) $daten['observed_at']),
             'departure_planned' => CarbonImmutable::parse((string) $daten['departure_planned']),
@@ -335,6 +336,21 @@ final class SightingIngestService
         $sichtung->save();
 
         return [$sichtung, $ausgang];
+    }
+
+    /**
+     * Name des Halts aus dem Laufweg, über die HAFAS-ID. Ohne „Magdeburg, " — die Prüfliste zeigt nur
+     * Magdeburger Halte, und der Ortspräfix nähme dort nur Platz weg.
+     */
+    public static function stopNameFromRoute(MdktRoute $route, string $hafasStopId): ?string
+    {
+        foreach ($route->stops as $halt) {
+            if ((string) $halt['hafas_stop_id'] === $hafasStopId && ! empty($halt['stop_name'])) {
+                return (string) preg_replace('/^Magdeburg,\s*/u', '', (string) $halt['stop_name']);
+            }
+        }
+
+        return null;
     }
 
     /**

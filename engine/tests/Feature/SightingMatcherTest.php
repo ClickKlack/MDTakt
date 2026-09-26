@@ -269,4 +269,40 @@ final class SightingMatcherTest extends TestCase
         $this->assertNull($ergebnis->match);
         $this->assertSame('stop-not-on-route', $ergebnis->reason);
     }
+
+    /**
+     * Rückmeldung des Trackers: Alle Laufweg-Zeiten tragen das Datum des ersten HAFAS-Abrufs — auch
+     * die nach Mitternacht. 00:10Z ist hier eigentlich schon der Folgetag, steht aber mit dem Datum des
+     * Abrufs da. Der Tageswechsel muss aus der zurückspringenden Uhrzeit kommen, nicht aus dem Datum.
+     */
+    public function test_match_route_dates_are_ignored_across_midnight(): void
+    {
+        $route = $this->route([
+            ['900001', '1', '2026-04-15T21:50:00Z'],   // 23:50 lokal
+            ['900002', '1', '2026-04-15T00:10:00Z'],   // 02:10 lokal — Datum des Abrufs, nicht des Tages
+        ]);
+        $fahrt = $this->fahrt($this->version(von: '2026-08-17', bis: '2026-09-01'), ['23:50', '26:10']);
+
+        // Gesichtet am 02.09. um 02:10 — die Fahrt gehört zum Betriebstag 01.09.
+        $ergebnis = $this->match($route, '1', '900002', '2026-09-02T00:10:00Z');
+
+        $this->assertSame(SightingMatch::Matched, $ergebnis->match);
+        $this->assertSame($fahrt->id, $ergebnis->tripId);
+        $this->assertSame('2026-09-01', $ergebnis->operatingDate);
+    }
+
+    /**
+     * Rückmeldung des Trackers: Am Endhalt steht die Ankunft im Feld `departure_planned`.
+     */
+    public function test_match_end_stop_arrival_in_departure_field(): void
+    {
+        $route = $this->route([
+            ['900001', '1', '2026-04-15T04:00:00Z'],
+            ['900002', '1', '2026-04-15T04:10:00Z'],
+            ['900003', '1', '2026-04-15T04:20:00Z'],   // Endhalt: Ankunft, im Abfahrtsfeld
+        ]);
+        $fahrt = $this->fahrt($this->version(), ['06:00', '06:10', '06:20']);
+
+        $this->assertSame($fahrt->id, $this->match($route, '1', '900002', '2026-09-01T04:10:00Z')->tripId);
+    }
 }

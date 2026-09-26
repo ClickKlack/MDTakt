@@ -8,8 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * Antwort des Sichtungs-Eingangs. `watermark` übernimmt der Tracker als neue Merkmarke für das
- * Nachholen; `unmatched_fingerprints` macht Laufwege ohne Treffer auf beiden Seiten sichtbar.
+ * Antwort des Sichtungs-Eingangs. `watermark` ist informativ — der Tracker wählt über seine eigene
+ * Sync-Spalte aus; `unmatched_fingerprints` macht Laufwege ohne Treffer auf beiden Seiten sichtbar.
  *
  * @property-read array<string, mixed> $resource
  */

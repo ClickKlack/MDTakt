@@ -134,8 +134,8 @@ Keine API-Tokens oder Passwörter in Logs schreiben.
 
 | Thema | Details |
 |---|---|
-| Tracker-Seite beider Flüsse | Push + Nachhol-Cron und Kursauskunft-Anzeige baut MDKursTracker (REQUIREMENTS §2.1/§2.2); Cron-Intervall dort festlegen (Vorschlag 15 min) |
-| Löschungen / Rücknahme | Löschungen im Tracker werden nicht übertragen; eine Entscheidung lässt sich nicht per Knopf zurücknehmen |
+| Tracker-Seite beider Flüsse | Sync-Cron mit Karenzzeit und Kursauskunft-Anzeige baut MDKursTracker (REQUIREMENTS §2.1/§2.2); Intervall und Karenzzeit legt der Tracker fest |
+| Rücknahme | Eine Entscheidung über eine Sichtung lässt sich nicht per Knopf zurücknehmen (Löschungen im Tracker werden dauerhaft nicht übertragen — entschieden) |
 
 Entschieden am 26.09.2026 (vorher hier offen): Zeitfenster-Toleranz (keine), Sichtungen ohne GTFS-Trip und
 Betriebsfahrten (`waiting` → `no_trip`, ablehnbar), Schnittstelle (HTTP-API, eigener Token) — siehe SPEC §3.3.

@@ -108,7 +108,7 @@ md-takt/
       | POST /api/v1/collector/imports* (Bearer-Token Collector)
       ↓
 [MDKursTracker — Hetzner]
-      |-- schickt jede Sichtung sofort, Nachhol-Cron für Fehlgeschlagenes
+      |-- Sync-Cron schickt Sichtungen nach einer Karenzzeit
       |
       | POST /api/v1/collector/sightings (eigener Bearer-Token)
       ↓

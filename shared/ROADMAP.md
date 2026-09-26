@@ -16,7 +16,7 @@
 | **I-06** | Zuordnung & Umläufe | Engine | ↪ Zuordnung in I-04 (Annehmen setzt den Kurs an die Kette); Umläufe über I-14 | ✅ |
 | **I-07** | Viewer Grundgerüst | Viewer | Öffentliche read-only Webseite, Tagesansicht der Umläufe | ⬜ |
 | **I-08** | Viewer-Ausbau (Info) | Viewer | Linien-/Fahrplananzeige, Haltestellenrecherche | ⬜ |
-| **I-09** | Collector-/MDKursTracker-Integration | Collector + MDKursTracker | GTFS vom NAS ✅; Sichtungs-Push + Nachhol-Cron auf Tracker-Seite; Kursauskunft (Fluss 2) | 🟡 |
+| **I-09** | Collector-/MDKursTracker-Integration | Collector + MDKursTracker | GTFS vom NAS ✅; Sync-Cron mit Karenzzeit auf Tracker-Seite; Kursauskunft (Fluss 2) | 🟡 |
 | **I-10** | Stabilisierung | Alle | Logging, Fehlerbehandlung, Bruno-Tests vervollständigen | ⬜ |
 | **I-11** | Auth-Fundament | Engine | Laravel Sanctum: Admin-Login & geschützte `/admin`-Endpunkte (Voraussetzung fürs Matching) | ✅ |
 | **I-12** | Admin-Schaltzentrale | Admin + Engine | Matching-Workflow, Datenkorrektur, Fahrplanperioden-Erkennung, Import-Auditing | 🟡 a, b, c, e-A, f, Fahrplan + Diff |
@@ -27,7 +27,7 @@
 > **Stand am 26.09.2026.** Der Sichtungs-Pfad ist auf Engine- und Admin-Seite fertig: **I-04** (mit I-05, I-06 und
 > I-12 b) — Eingang aus MDKursTracker, Zuordnung, Prüfliste und Entscheidung im Fahrplan.
 > Die Kursauskunft (Fluss 2) ist auf Engine-Seite ebenfalls fertig.
-> **Als Nächstes: I-09 auf Tracker-Seite** — Push + Nachhol-Cron, dann die Anzeige der Kursauskunft.
+> **Als Nächstes: I-09 auf Tracker-Seite** — Sync-Cron mit Karenzzeit, dann die Anzeige der Kursauskunft.
 
 > **Stand am 18.08.2026.** Umgesetzt sind Fundament, Import inkl. Audit, Stammdaten-API, Auth und von der
 > Admin-Schaltzentrale die Bereiche (a) Grundgerüst, (c) Import-Auditing, (e) Phase A (Fahrplantypen) und
@@ -181,7 +181,8 @@ Admin angenommen oder abgelehnt — in einer Prüfliste und direkt im Fahrplan.
 > Konzept und Entscheidungen: [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §8, SPEC §3.2.
 
 ### Entschieden (Stopp-Regel — Schnittstelle MDKursTracker, Matching, DB-Änderung)
-- [x] **Sofort-Push je Sichtung + Nachhol-Cron** statt nächtlichem Batch — Laufzeit ist kein Argument, die Latenz schon
+- [x] ~~Sofort-Push je Sichtung + Nachhol-Cron~~ → **Cron mit Karenzzeit** (Festlegung des Trackers, 26.09.2026);
+      maßgeblich ist die Sync-Spalte des Trackers, Löschungen werden dauerhaft nicht übertragen
 - [x] **Laufweg mitsenden, die Engine hasht** — der Tracker berechnet keine Signatur
 - [x] **Keine Toleranz**: exakter Signatur-Match; ohne Treffer die Folgeversion (≤ 14 Tage), sonst `waiting` → nach
       2 Importen `no_trip`. Anlass: Baustellenfahrplan der 10, den der Tracker über HAFAS vor dem Feed kennt
@@ -208,7 +209,6 @@ Admin angenommen oder abgelehnt — in einer Prüfliste und direkt im Fahrplan.
 - [x] Zeile „Sichtungen" über der Kurszeile mit ✓/✗, Detail-Dialog, Hervorheben der Fahrt aus der Prüfliste
 
 ### Offen (bewusst nicht in I-04)
-- [ ] Löschungen im Tracker übertragen
 - [ ] Entscheidung zurücknehmen (Rückgängig) — bisher nur über die Kurs-Pflege im Fahrplan
 - [ ] Echte Tracker-Daten per `--dry-run` prüfen, sobald ein Export vorliegt
 
@@ -327,16 +327,17 @@ Ein Nutzer kann ohne Login Linien durchsehen, einen Fahrplan je Linie/Haltestell
 
 > ⏱️ **Reihenfolge:** Die MDKursTracker-Live-Anbindung (Fluss 1/2) erfolgt laut Priorisierung **nach** der
 > Admin-Schaltzentrale (I-12) — das Admin-Frontend soll zuerst Sichtbarkeit/Vertrauen schaffen.
-> ✅ **Engine-Seite von Fluss 1 umgesetzt (I-04, 26.09.2026).** Offen ist die **Tracker-Seite**: Push je Sichtung und
-> Nachhol-Cron — Anforderungen in [`MDKURSTRACKER_REQUIREMENTS.md`](MDKURSTRACKER_REQUIREMENTS.md) §2.1. Danach Fluss 2
+> ✅ **Engine-Seite von Fluss 1 umgesetzt (I-04, 26.09.2026).** Offen ist die **Tracker-Seite**: Sync-Cron mit
+> Karenzzeit — Anforderungen in [`MDKURSTRACKER_REQUIREMENTS.md`](MDKURSTRACKER_REQUIREMENTS.md) §2.1. Danach Fluss 2
 > (`GET /api/v1/course-lookup`, INTEGRATION §5.2). Der NAS-Collector bleibt reiner GTFS-Lieferant.
 > 📄 **Schnittstelle geklärt (2026-06-22):** über **HTTP-API** (MDKursTracker = MariaDB nur lokal). Engine
 > bleibt reiner Server; Sync-Cron empfohlen in MDKursTracker; Collector nur GTFS. Details + offene Punkte:
 > [`INTEGRATION_MDKURSTRACKER.md`](INTEGRATION_MDKURSTRACKER.md) §3/§5.
 
 ### Aufgaben
-- [x] Schnittstellen-Entscheidung MDKursTracker dokumentieren (HTTP-API, Push + Nachhol-Cron, eigener Token)
-- [ ] **MDKursTracker:** Push je Sichtung + Nachhol-Cron (REQUIREMENTS §2.1) — *nicht* im Collector
+- [x] Schnittstellen-Entscheidung MDKursTracker dokumentieren (HTTP-API, Cron mit Karenzzeit, eigener Token)
+- [ ] **MDKursTracker:** Sync-Cron mit Karenzzeit (REQUIREMENTS §2.1) — *nicht* im Collector
+- [x] Laufweg-Zeiten tragen das Datum des ersten HAFAS-Abrufs → Zuordnung wertet nur die Uhrzeit aus (26.09.2026)
 - [ ] Token `MDKURSTRACKER_API_TOKEN` in Produktion vergeben und im Tracker hinterlegen
 - [x] Fluss 2 Engine: `GET|POST /api/v1/collector/course-lookup` (26.09.2026) — Linie + Halt + Soll-Zeit, Halt aus
       Sichtungen gelernt, sonst Name, dann Richtung; keine Konfidenz (MD-Takt ist die Wahrheit); Probe: 200 von 200 Abfahrten der 10

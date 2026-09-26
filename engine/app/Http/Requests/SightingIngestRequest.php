@@ -7,8 +7,8 @@ namespace App\Http\Requests;
 /**
  * Validiert den Sichtungs-Eingang aus MDKursTracker (INTEGRATION_MDKURSTRACKER §5.1).
  *
- * Die Grenzen sind hart gezogen: Der Tracker schickt im Normalfall eine Sichtung, beim
- * Nachholen einige Dutzend. Alles darüber ist kein Betrieb, sondern ein Fehler oder ein Angriff.
+ * Die Grenzen sind hart gezogen: Der Tracker schickt per Cron nach einer Karenzzeit, im
+ * Normalfall einige Sichtungen, beim ersten Lauf den Altbestand in Blöcken. Alles darüber ist kein Betrieb, sondern ein Fehler oder ein Angriff.
  * Zeitstempel ausschließlich als ISO-8601 in UTC mit `Z` — eine lokale oder naive Zeit ließe sich
  * nicht eindeutig auf den Fahrplan legen.
  */

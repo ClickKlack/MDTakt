@@ -11,9 +11,9 @@
 
 - **Richtung:** MD-Takt-Engine = **reiner Server, ruft nie raus**. MDKursTracker ist Client beide Richtungen.
   NAS-Collector macht **nur GTFS**.
-- **Fluss 1 (Ingest):** MDKursTracker schickt jede Sichtung **sofort nach dem Speichern** an
-  `POST /api/v1/collector/sightings` und holt Fehlgeschlagenes per **Nachhol-Cron** über eine Merkmarke nach
-  (entschieden 26.09.2026, vorher: nächtlicher Batch). Eigener Token, getrennt vom NAS-Collector.
+- **Fluss 1 (Ingest):** Ein **Cron in MDKursTracker** schickt Sichtungen nach einer **Karenzzeit** an
+  `POST /api/v1/collector/sightings` (vom Tracker festgelegt 26.09.2026; maßgeblich ist seine Sync-Spalte).
+  Löschungen werden dauerhaft nicht übertragen. Eigener Token, getrennt vom NAS-Collector.
 - **Fluss 2 (Auskunft):** MDKursTracker fragt **on-demand** je Abfahrt oder je Tafel → `GET|POST /api/v1/collector/course-lookup`
   (HAFAS-Halt, Linie, Soll-Zeit, optional Haltname und Richtung; Tracker-Token) → Kursnummer falls bekannt (§5.2).
 - **Matching validiert & deterministisch:** `(Linie, Tagestyp, Soll-Zeit-Sequenz lokal)`. Kein HAFAS↔GTFS-Stop-ID-Crosswalk nötig.
@@ -67,17 +67,16 @@ DBMS: **MariaDB ≥10.4, nur lokal**. Kein DB-Direktzugriff → Integration übe
 ```
 NAS-Collector  ──GTFS-Feed──▶  MD-Takt-Engine            (unverändert, nur GTFS)
                                (reiner Server, ruft nie raus)
-MDKursTracker      ──je Sichtung sofort──▶  POST /collector/sightings   Fluss 1 (Ingest)
-MDKursTracker-Cron ──Nachholen (Merkmarke)──▶  POST /collector/sightings
+MDKursTracker-Cron ──nach Karenzzeit──▶  POST /collector/sightings     Fluss 1 (Ingest)
 MDKursTracker      ──je Abfahrt / Tafel──▶  GET|POST /collector/course-lookup   Fluss 2 (Auskunft)
 ```
 
-- **Fluss 1 = Sofort-Push je Sichtung + Nachhol-Cron** (entschieden 26.09.2026). Jede Sichtung bringt ihren
-  Laufweg mit (Soll-Zeiten + Linie je Halt). Der Aufruf blockiert den Tracker nicht; schlägt er fehl, holt ein Cron
-  über den High-Water-Mark nach. Derselbe Endpunkt nimmt 1 bis N Sichtungen.
-  **Warum nicht nachts:** Laufzeit ist kein Argument — bei einigen Dutzend Sichtungen am Tag ist die Zuordnung ein
-  Index-Lookup je Sichtung, ein Nachtlauf wäre in unter einer Sekunde fertig. Der Unterschied ist die Latenz: Eine
-  Sichtung soll prüfbar sein, solange man sich an sie erinnert.
+- **Fluss 1 = Cron mit Karenzzeit** (vom Tracker festgelegt 26.09.2026; vorher geplant: Sofort-Push + Nachhol-Cron).
+  Jede Sichtung bringt ihren Laufweg mit (Soll-Zeiten + Linie je Halt). Die Karenzzeit gibt dem Nutzer Gelegenheit,
+  eine Sichtung zu korrigieren oder zu löschen, bevor sie MD-Takt erreicht — **Löschungen werden danach dauerhaft nicht
+  übertragen**. Maßgeblich für die Auswahl ist die Sync-Spalte des Trackers; `watermark` in der Antwort ist informativ.
+  **Laufzeit ist kein Argument** — bei einigen Dutzend Sichtungen am Tag ist die Zuordnung ein Index-Lookup je Sichtung.
+  Entscheidend ist die Latenz, und die bestimmt der Tracker mit Intervall und Karenzzeit.
 - **Fluss 2 = On-demand-Einzelabfrage.** MDKursTracker ist query-getrieben (Live-HAFAS-Abfahrten je Halt) und hat keinen
   gespeicherten Fahrplan zum Vor-Annotieren → ein **Cron-Pull *nach* MDKursTracker ergibt keinen Sinn**. Stattdessen
   fragt es beim Rendern der Abfahrtstafel je Abfahrt live: „Kennt MDTakt für diesen Halt/Linie/Soll-Zeit einen Kurs?"
@@ -148,7 +147,7 @@ Ringverläufen (gleicher Halt zweimal). Ein Trip-Match liefert ~alle Halt-Paare 
 > das Datenmodell final ist (Stopp-Regel). MDKursTracker-Sicht separat in [`MDKURSTRACKER_REQUIREMENTS.md`](MDKURSTRACKER_REQUIREMENTS.md).
 
 ### 5.1 Fluss 1 — `POST /api/v1/collector/sightings`
-**Zweck:** Sichtungs-Eingang — sofort je Sichtung und beim Nachholen. **Auth:** eigener Bearer-Token
+**Zweck:** Sichtungs-Eingang — per Cron des Trackers nach Karenzzeit. **Auth:** eigener Bearer-Token
 `MDKURSTRACKER_API_TOKEN` (`collector.token:mdkurstracker`) — der Collector-Token gilt hier nicht und umgekehrt.
 gzip-Body erlaubt (`decompress`), Throttle 120/min. Grenzen je Request: 500 Sichtungen, 200 Routen, 150 Halte je Route.
 Zeiten nur als ISO-8601 UTC mit `Z`. **Maßgeblich ist `openapi.yaml`** — hier der Überblick.
@@ -298,8 +297,12 @@ Die Engine bildet aus dem Laufweg genau die Signatur nach, die der Import je Fah
 - **Mitternacht:** Der Feed schreibt **nicht** `25:10`. Eine Fahrt, die vor Mitternacht beginnt, läuft als `24:08`
   weiter; eine, die danach beginnt, steht mit `00:30` da und gehört zum **Vortag** und dessen Fahrplantyp
   (`OperatingDayResolver`).
-- **Zeitzone:** Jede Zeit wird mit ihrem **eigenen** Datum nach Europe/Berlin umgerechnet. Der Laufweg stammt vom Tag
-  der Erfassung, nicht der Sichtung — ein im Sommer erfasster Laufweg passt so auch im Winter.
+- **Im Laufweg zählt nur die Uhrzeit** (Rückmeldung des Trackers, 26.09.2026): Alle Zeiten tragen das Datum des ersten
+  HAFAS-Abrufs, auch die nach Mitternacht. Den Tageswechsel liest die Engine daraus ab, dass die Uhrzeit entlang des
+  Laufwegs zurückspringt; das Datum dient nur dem Versatz zu UTC (Sommer-/Winterzeit). Der Betriebstag kommt aus der
+  Sichtung selbst. Ein im Sommer erfasster Laufweg passt so auch im Winter.
+- **Endhalt:** Der Tracker legt die Ankunft am Endhalt in `departure_planned` ab — die Engine versucht dort ohnehin
+  Ankunft und Abfahrt.
 - **Keine Toleranz.** Gültig ist die Version, deren Intervall den Betriebstag einschließt.
 - **Folgeversion (Baustelle Linie 10):** Der Tracker kennt einen geänderten Laufweg über HAFAS sofort, der Feed oft erst
   eine Woche später. Ohne Treffer am Tag wird deshalb die nächste Version der Linie gesucht, wenn sie **höchstens
@@ -320,7 +323,8 @@ Die Engine bildet aus dem Laufweg genau die Signatur nach, die der Import je Fah
 
 `status`: `pending` → `accepted` / `rejected` von Hand; **`confirmed` setzt die Engine selbst**, wenn der gesichtete
 Kurs schon an der Fahrt hängt („03" = „3"). Ändert der Tracker eine entschiedene Sichtung, wird sie wieder `pending`.
-Löschungen im Tracker werden nicht übertragen.
+Löschungen im Tracker werden **dauerhaft nicht** übertragen (Festlegung des Trackers) — die Karenzzeit fängt sie ab,
+eine später gelöschte Sichtung wird in MD-Takt abgelehnt.
 
 ### 8.3 Prüfen und Entscheiden (Admin)
 - **Prüfliste** (`/sichtungen`): Standard ist die Warteschlange (offen und entscheidbar); „wartet auf Fahrplan" und

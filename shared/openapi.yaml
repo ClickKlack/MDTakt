@@ -200,8 +200,8 @@ components:
         hafas_stop_id: { type: string, maxLength: 32, example: '300730901' }
         stop_name: { type: string, nullable: true, maxLength: 255 }
         line: { type: string, maxLength: 8, description: 'Linie **an diesem Halt** (Linienübergänge!)', example: '5' }
-        arrival_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Ankunft, UTC mit Z', example: '2026-09-01T04:20:00Z' }
-        departure_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Abfahrt, UTC mit Z. Pflicht, wenn arrival_planned fehlt.', example: '2026-09-01T04:10:00Z' }
+        arrival_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Ankunft, UTC mit Z. Ausgewertet wird nur die Uhrzeit; das Datum (erster HAFAS-Abruf) bestimmt nur den Versatz zu UTC.', example: '2026-09-01T04:20:00Z' }
+        departure_planned: { type: string, format: date-time, nullable: true, description: 'Soll-Abfahrt, UTC mit Z. Pflicht, wenn arrival_planned fehlt; am Endhalt darf hier die Ankunft stehen. Ausgewertet wird nur die Uhrzeit.', example: '2026-09-01T04:10:00Z' }
     SightingRoute:
       type: object
       required: [schedule_fingerprint, line, stops]
@@ -286,7 +286,7 @@ components:
               items: { type: string }
             watermark:
               type: object
-              description: 'Neue Merkmarke für das Nachholen im Tracker'
+              description: 'Informativ — maßgeblich für die Auswahl ist die Sync-Spalte des Trackers'
               properties:
                 max_recording_id: { type: integer, nullable: true }
                 max_observed_at: { type: string, format: date-time, nullable: true }
@@ -4766,8 +4766,7 @@ paths:
       operationId: ingestSightings
       summary: Sichtungen aus MDKursTracker annehmen
       description: >-
-        Der Tracker ruft sofort nach dem Speichern einer Sichtung auf und holt Fehlgeschlagenes per Cron
-        nach (INTEGRATION_MDKURSTRACKER §5.1). Idempotent über mdkt_recording_id. Die Engine teilt den
+        Ein Cron im Tracker sendet Sichtungen nach einer Karenzzeit (INTEGRATION_MDKURSTRACKER §5.1). Idempotent über mdkt_recording_id. Die Engine teilt den
         Laufweg an Linienwechseln, bildet die Fahrt-Signatur selbst und ordnet die Sichtung einer Fahrt
         des Konsolidats zu. Hängt der gesichtete Kurs schon an der Fahrt, wird sie automatisch bestätigt.
         gzip-Body erlaubt (Content-Encoding: gzip).

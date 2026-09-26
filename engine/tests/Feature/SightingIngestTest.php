@@ -335,4 +335,18 @@ final class SightingIngestTest extends TestCase
         $this->assertDatabaseCount('mdkt_routes', 0);
         unlink($datei);
     }
+
+    /**
+     * Integrationstest mit dem Tracker: Er sendet an der Sichtung keinen Haltnamen. Der Laufweg hat ihn.
+     */
+    public function test_ingest_takes_the_stop_name_from_the_route(): void
+    {
+        $body = $this->body();
+        unset($body['sightings'][0]['stop_name']);
+        $body['trips'][0]['stops'][1]['stop_name'] = 'Magdeburg, Am Nordpark';
+
+        $this->sende($body)->assertOk();
+
+        $this->assertSame('Am Nordpark', Sighting::query()->sole()->stop_name);
+    }
 }

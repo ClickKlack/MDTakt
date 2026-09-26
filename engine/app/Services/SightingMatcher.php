@@ -25,11 +25,16 @@ use Illuminate\Support\Facades\Log;
  *    wird deshalb an jedem Wechsel der Linie je Halt geteilt. Zu welchem Teil der Übergangshalt
  *    gehört, ist aus HAFAS nicht sicher abzulesen — er wird darum in beiden Varianten versucht.
  * 2. **Mitternacht.** Eine Fahrt, die vor Mitternacht beginnt, läuft im Feed als `24:08` weiter;
- *    eine, die danach beginnt, steht mit `00:19` da. Gezählt wird also ab dem Kalendertag des
- *    ersten Halts der Fahrt.
+ *    eine, die danach beginnt, steht mit `00:19` da. Gezählt wird also ab dem Tag des ersten Halts.
  * 3. **Betriebstag.** Eine Fahrt vor der Betriebstag-Grenze gehört zum Vortag und trägt dessen
  *    Fahrplantyp ({@see OperatingDayResolver}). Der Tag wird aus der Sichtung abgeleitet, nicht aus
- *    dem Laufweg: Dessen Zeiten stammen vom Tag, an dem der Tracker ihn erfasst hat.
+ *    dem Laufweg.
+ *
+ * **Im Laufweg zählt nur die Uhrzeit** (Rückmeldung des Trackers, 26.09.2026): Alle Zeiten tragen das
+ * Datum des ersten HAFAS-Abrufs, auch die nach Mitternacht. Den Tageswechsel liest die Zuordnung
+ * deshalb daraus ab, dass die Uhrzeit entlang des Laufwegs zurückspringt — nie aus dem Datum. Das
+ * Datum dient nur noch dazu, UTC mit dem richtigen Versatz (Sommer-/Winterzeit) in Netz-Zeit
+ * umzurechnen; so wurde die Zeit beim Abruf auch erzeugt.
  *
  * Alle lokalen Zeiten sind **Europe/Berlin** — die Netz-Zeit, in der GTFS seine Uhrzeiten führt.
  */
@@ -73,19 +78,19 @@ final class SightingMatcher
         $index = $this->segmentFor($segmente, $position, $line);
         $segment = $segmente[$index];
 
-        // Tage zwischen dem Laufweg-Tag des Trackers und dem Tag der Sichtung — um so viel liegt
-        // der Start der gesichteten Fahrt neben dem Start im gespeicherten Laufweg.
+        // Der gesichtete Halt liegt womöglich schon nach Mitternacht, der Start der Fahrt davor. Um so
+        // viele Tage liegt der Starttag vor dem Tag der Sichtung — abgelesen an den Laufweg-Minuten.
         $anker = $halte[$position]['time'];
-        $versatz = self::daysBetween($anker, $gesichtet);
+        $tagDerSichtung = CarbonImmutable::parse($gesichtet->toDateString(), 'UTC');
 
         $varianten = $this->variants($halte, $segmente, $index);
         $jeTag = [];
 
         foreach ($varianten as $zeiten) {
             $start = $zeiten[0];
-            $betriebstag = CarbonImmutable::parse($start->toDateString(), 'UTC')->addDays($versatz);
+            $betriebstag = $tagDerSichtung->subDays(intdiv($anker, 1440) - intdiv($start, 1440));
 
-            if ($this->operatingDay->shiftsBack($segment['line'], (int) $start->secondsSinceMidnight())) {
+            if ($this->operatingDay->shiftsBack($segment['line'], ($start % 1440) * 60)) {
                 $betriebstag = $betriebstag->subDay();
             }
 
@@ -217,21 +222,37 @@ final class SightingMatcher
     }
 
     /**
-     * Laufweg nach `seq`, Zeiten in Netz-Zeit. Halte ganz ohne Zeit fallen heraus — der Import
-     * überspringt sie in der Signatur genauso.
+     * Laufweg nach `seq`, Zeiten als **Laufweg-Minuten**: Minuten ab Mitternacht des Starttags, über
+     * 1440 hinaus, sobald die Uhrzeit gegenüber dem vorigen Halt zurückspringt. Halte ganz ohne Zeit
+     * fallen heraus — der Import überspringt sie in der Signatur genauso.
      *
      * @param  array<int, array<string, mixed>>  $stops
-     * @return array<int, array{hafas: string, line: string, arr: ?CarbonImmutable, dep: ?CarbonImmutable, time: CarbonImmutable}>
+     * @return array<int, array{hafas: string, line: string, arr: ?int, dep: ?int, time: int}>
      */
     private function localStops(array $stops): array
     {
         usort($stops, static fn (array $a, array $b): int => (int) $a['seq'] <=> (int) $b['seq']);
 
         $halte = [];
+        $tag = 0;
+        $vorher = null;
+
+        // Zurückspringende Uhrzeit = neuer Tag. Innerhalb eines Halts kommt die Ankunft vor der Abfahrt.
+        $fortschreiben = static function (?int $uhr) use (&$tag, &$vorher): ?int {
+            if ($uhr === null) {
+                return null;
+            }
+
+            if ($vorher !== null && $uhr + 1440 * $tag < $vorher) {
+                $tag++;
+            }
+
+            return $vorher = $uhr + 1440 * $tag;
+        };
 
         foreach ($stops as $stop) {
-            $ankunft = self::local($stop['arrival_planned'] ?? null);
-            $abfahrt = self::local($stop['departure_planned'] ?? null);
+            $ankunft = $fortschreiben(self::clockMinutes($stop['arrival_planned'] ?? null));
+            $abfahrt = $fortschreiben(self::clockMinutes($stop['departure_planned'] ?? null));
 
             if ($ankunft === null && $abfahrt === null) {
                 continue;
@@ -253,7 +274,7 @@ final class SightingMatcher
      * Wo auf dem Laufweg wurde gesichtet? Ein Halt kann auf Ringfahrten zweimal vorkommen — dann
      * entscheidet die Uhrzeit.
      *
-     * @param  array<int, array{hafas: string, line: string, time: CarbonImmutable}>  $halte
+     * @param  array<int, array{hafas: string, line: string, time: int}>  $halte
      */
     private function sightingPosition(array $halte, string $line, string $hafasStopId, CarbonImmutable $gesichtet): ?int
     {
@@ -264,7 +285,7 @@ final class SightingMatcher
             // Rückfall: Halt-ID unbekannt, aber Linie und Uhrzeit passen.
             $kandidaten = array_keys(array_filter(
                 $halte,
-                static fn (array $h): bool => $h['line'] === $line && $h['time']->format('H:i') === $uhrzeit,
+                static fn (array $h): bool => $h['line'] === $line && self::clock($h['time']) === $uhrzeit,
             ));
         }
 
@@ -273,7 +294,7 @@ final class SightingMatcher
         }
 
         foreach ($kandidaten as $i) {
-            if ($halte[$i]['time']->format('H:i') === $uhrzeit) {
+            if (self::clock($halte[$i]['time']) === $uhrzeit) {
                 return $i;
             }
         }
@@ -339,9 +360,9 @@ final class SightingMatcher
      * Die Uhrzeitfolgen, unter denen der Abschnitt im Feed stehen kann: mit oder ohne den
      * Übergangshalt an jedem Ende, und am letzten Halt Ankunft oder Abfahrt.
      *
-     * @param  array<int, array{arr: ?CarbonImmutable, dep: ?CarbonImmutable}>  $halte
+     * @param  array<int, array{arr: ?int, dep: ?int}>  $halte
      * @param  array<int, array{line: string, from: int, to: int}>  $segmente
-     * @return array<int, array<int, CarbonImmutable>>
+     * @return array<int, array<int, int>>
      */
     private function variants(array $halte, array $segmente, int $index): array
     {
@@ -371,13 +392,14 @@ final class SightingMatcher
                     $mitte[] = $halte[$i]['dep'] ?? $halte[$i]['arr'];
                 }
 
-                // Am Endhalt steht im Feed meist die Ankunft; HAFAS liefert dort je nach Halt
-                // nur die eine oder die andere. Beide Lesarten werden versucht.
+                // Am Endhalt steht im Feed meist die Ankunft; der Tracker legt sie dort in
+                // `departure_planned` ab, an einem Übergangshalt kann beides kommen. Beide Lesarten
+                // werden versucht.
                 $letzte = [];
 
                 foreach ([$halte[$bis]['arr'], $halte[$bis]['dep']] as $t) {
                     if ($t !== null) {
-                        $letzte[$t->format('Y-m-d H:i')] = $t;
+                        $letzte[$t] = $t;
                     }
                 }
 
@@ -391,31 +413,38 @@ final class SightingMatcher
     }
 
     /**
-     * „HH:MM,HH:MM,…" wie im Feed: ab dem Kalendertag des ersten Halts gezählt, danach über 24.
+     * „HH:MM,HH:MM,…" wie im Feed: ab dem Tag des ersten Halts gezählt, danach über 24.
      *
-     * @param  array<int, CarbonImmutable>  $zeiten
+     * @param  array<int, int>  $zeiten  Laufweg-Minuten
      */
     private static function sequence(array $zeiten): string
     {
-        $start = $zeiten[0];
+        $starttag = intdiv($zeiten[0], 1440) * 1440;
 
-        return implode(',', array_map(static function (CarbonImmutable $t) use ($start): string {
-            $stunde = $t->hour + 24 * self::daysBetween($start, $t);
+        return implode(',', array_map(static function (int $t) use ($starttag): string {
+            $minuten = $t - $starttag;
 
-            return sprintf('%02d:%02d', $stunde, $t->minute);
+            return sprintf('%02d:%02d', intdiv($minuten, 60), $minuten % 60);
         }, $zeiten));
     }
 
-    /**
-     * Kalendertage zwischen zwei lokalen Zeitpunkten. Über das Datum gerechnet, nicht über
-     * Sekunden: An den Umstellungstagen hat ein Tag 23 oder 25 Stunden.
-     */
-    private static function daysBetween(CarbonImmutable $von, CarbonImmutable $bis): int
+    /** Laufweg-Minuten als Uhrzeit „HH:MM" — für den Vergleich mit der Sichtung. */
+    private static function clock(int $minuten): string
     {
-        $a = CarbonImmutable::parse($von->toDateString(), 'UTC');
-        $b = CarbonImmutable::parse($bis->toDateString(), 'UTC');
+        $m = $minuten % 1440;
 
-        return (int) round(($b->getTimestamp() - $a->getTimestamp()) / 86400);
+        return sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+    }
+
+    /**
+     * Uhrzeit in Netz-Zeit als Minuten ab Mitternacht. Das Datum des Zeitstempels bestimmt nur den
+     * Versatz zu UTC; welcher Tag es war, trägt der Laufweg nicht verlässlich.
+     */
+    private static function clockMinutes(?string $utc): ?int
+    {
+        $lokal = self::local($utc);
+
+        return $lokal === null ? null : $lokal->hour * 60 + $lokal->minute;
     }
 
     private static function local(?string $utc): ?CarbonImmutable

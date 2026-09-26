@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, type VNode } from 
 import type { Depot } from '../services/depots'
 import type { Line } from '../services/lines'
 import type { StopLinkBoard, StopLinkTrip } from '../services/stopLinks'
+import { courseMarkClass, courseMarkTitle } from '../utils/courseMark'
 import { formatClock, formatDuration } from '../utils/timezone'
 import LineBadge from './LineBadge.vue'
 
@@ -449,11 +450,11 @@ function aufEscape(e: KeyboardEvent): void {
               class="rounded px-1.5 py-0.5 text-xs tabular-nums transition disabled:opacity-50"
               :class="
                 zeile.ending.course
-                  ? 'bg-slate-800 font-semibold text-white hover:bg-slate-700'
+                  ? courseMarkClass(zeile.ending.course.sighting)
                   : 'border border-dashed border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-700'
               "
               :disabled="busy"
-              :title="zeile.ending.course ? 'Kurs ändern' : 'Kursnummer eintragen'"
+              :title="zeile.ending.course ? `Kurs ändern${courseMarkTitle(zeile.ending.course.sighting)}` : 'Kursnummer eintragen'"
               @click.stop="bearbeiteKurs(zeile.ending)"
             >
               {{ zeile.ending.course ? zeile.ending.course.display : 'ohne Kurs' }}
@@ -579,11 +580,11 @@ function aufEscape(e: KeyboardEvent): void {
               class="rounded px-1.5 py-0.5 text-xs tabular-nums transition disabled:opacity-50"
               :class="
                 zeile.starting.course
-                  ? 'bg-slate-800 font-semibold text-white hover:bg-slate-700'
+                  ? courseMarkClass(zeile.starting.course.sighting)
                   : 'border border-dashed border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-700'
               "
               :disabled="busy"
-              :title="zeile.starting.course ? 'Kurs ändern' : 'Kursnummer eintragen'"
+              :title="zeile.starting.course ? `Kurs ändern${courseMarkTitle(zeile.starting.course.sighting)}` : 'Kursnummer eintragen'"
               @click.stop="bearbeiteKurs(zeile.starting)"
             >
               {{ zeile.starting.course ? zeile.starting.course.display : 'ohne Kurs' }}

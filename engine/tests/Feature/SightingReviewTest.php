@@ -14,6 +14,7 @@ use App\Models\LineVersion;
 use App\Models\Sighting;
 use App\Models\TripLink;
 use App\Models\User;
+use App\Services\ConsolidatedTripInfoResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\ConsolidatedFixtures;
 use Tests\TestCase;
@@ -316,5 +317,47 @@ final class SightingReviewTest extends TestCase
         $this->assertSame('same', $gruppen[1]['comparison']);
         $this->assertTrue($gruppen[1]['next_version']);
         $this->assertSame([], collect($spalten)->firstWhere('id', '!=', $fahrt->id)['sightings']);
+    }
+
+    /**
+     * Kursnummer gesichtet oder nur fortgeschrieben? Grün (`seen`) nur für die gesichtete Fahrt,
+     * rot (`disputed`) bei offener abweichender Sichtung. Abgelehnte zählen nicht, eine
+     * entschiedene Sichtung, die nicht mehr zum Kurs passt, auch nicht.
+     */
+    public function test_course_sighting_marks(): void
+    {
+        $gesehen = $this->fahrt();
+        $kurs = $this->kurs($gesehen, '03');
+        $kette = $this->fahrt('07:00:00', '07:30:00');
+        CourseTrip::factory()->create(['course_id' => $kurs->id, 'consolidated_trip_id' => $kette->id]);
+        $strittig = $this->fahrt('08:00:00', '08:30:00');
+        $this->kurs($strittig, '03');
+        $abgelehnt = $this->fahrt('09:00:00', '09:30:00');
+        $this->kurs($abgelehnt, '03');
+        $ueberholt = $this->fahrt('10:00:00', '10:30:00');
+        $this->kurs($ueberholt, '05');
+
+        $this->sichtung($gesehen, '3', ['status' => SightingStatus::Accepted]);
+        $this->sichtung($strittig, '03', ['status' => SightingStatus::Confirmed]);
+        $this->sichtung($strittig, '04');
+        $this->sichtung($abgelehnt, '03', ['status' => SightingStatus::Rejected]);
+        $this->sichtung($ueberholt, '03', ['status' => SightingStatus::Accepted]);
+
+        $spalten = collect($this->withToken($this->token())
+            ->getJson("/api/v1/admin/line-versions/{$this->version->id}/timetable")
+            ->assertOk()
+            ->json('data.directions.0.trips'))->keyBy('id');
+
+        $this->assertSame('seen', $spalten[$gesehen->id]['course']['sighting']);
+        $this->assertNull($spalten[$kette->id]['course']['sighting']);
+        $this->assertSame('disputed', $spalten[$strittig->id]['course']['sighting']);
+        $this->assertNull($spalten[$abgelehnt->id]['course']['sighting']);
+        $this->assertNull($spalten[$ueberholt->id]['course']['sighting']);
+
+        // Dieselbe Auskunft für Anschlüsse: Die Haltestellen-Tafel nutzt den Fahrt-Resolver.
+        $info = app(ConsolidatedTripInfoResolver::class)->forIds([$gesehen->id, $strittig->id, $kette->id]);
+        $this->assertSame('seen', $info[$gesehen->id]['course']['sighting']);
+        $this->assertSame('disputed', $info[$strittig->id]['course']['sighting']);
+        $this->assertNull($info[$kette->id]['course']['sighting']);
     }
 }

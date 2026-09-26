@@ -1,3 +1,4 @@
+import type { CourseSightingMark } from '../utils/courseMark'
 import api from './api'
 import type { VersionInterval } from './scheduleVersions'
 
@@ -42,7 +43,7 @@ export interface TimetableTrip {
    * Der Umlauf, zu dem diese Fahrt gehört. `display` trägt den Linien-Präfix (`1/03`), der
    * reine Anzeige ist — die Nummer gehört der Kette, nicht der Linie.
    */
-  course: { id: number; number: string; display: string } | null
+  course: { id: number; number: string; display: string; sighting: CourseSightingMark } | null
   /** Offene Sichtungen aus MDKursTracker, nach Kursnummer gruppiert */
   sightings: TimetableSightingGroup[]
   /** Zeiten als „HH:MM", positionsgleich zu `rows`; null = Zeile wird nicht bedient. */

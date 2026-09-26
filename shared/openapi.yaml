@@ -1832,6 +1832,14 @@ components:
             id: { type: integer }
             number: { type: string }
             display: { type: string, example: '13/03' }
+            sighting:
+              type: string
+              enum: [seen, disputed]
+              nullable: true
+              description: >
+                Beleg durch Sichtungen, nur fuer **diese** Fahrt (nicht die Kette): `seen` = eine
+                bestaetigte oder angenommene Sichtung nennt diese Nummer; `disputed` = eine offene
+                Sichtung nennt eine andere (geht vor `seen`). Abgelehnte zaehlen nicht.
         decision:
           allOf: [{ $ref: '#/components/schemas/StopLinkDecision' }]
           nullable: true
@@ -2167,6 +2175,22 @@ components:
         mode: { type: string }
         departure_time: { type: string, nullable: true, example: '07:00:00' }
         arrival_time: { type: string, nullable: true, example: '07:25:00' }
+        course:
+          type: object
+          nullable: true
+          description: Kurs der Kette, zu der diese Fahrt gehoert.
+          properties:
+            id: { type: integer }
+            number: { type: string }
+            display: { type: string, example: '1/03' }
+            sighting:
+              type: string
+              enum: [seen, disputed]
+              nullable: true
+              description: >
+                Beleg durch Sichtungen, nur fuer **diese** Fahrt (nicht die Kette): `seen` = eine
+                bestaetigte oder angenommene Sichtung nennt diese Nummer; `disputed` = eine offene
+                Sichtung nennt eine andere (geht vor `seen`). Abgelehnte zaehlen nicht.
         sightings:
           type: array
           description: >

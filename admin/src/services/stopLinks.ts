@@ -1,3 +1,4 @@
+import type { CourseSightingMark } from '../utils/courseMark'
 import api from './api'
 import type { DepotRef } from './depots'
 import type { FahrplanTyp } from './lines'
@@ -75,7 +76,7 @@ export interface StopLinkTrip {
    */
   departure_sort: number
   arrival_sort: number
-  course: { id: number; number: string; display: string } | null
+  course: { id: number; number: string; display: string; sighting: CourseSightingMark } | null
   decision: StopLinkDecision | null
 }
 

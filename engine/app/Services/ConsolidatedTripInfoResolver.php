@@ -61,6 +61,7 @@ final class ConsolidatedTripInfoResolver
         );
 
         $kurse = $this->courses->forTrips($eindeutig);
+        $belege = $this->courses->sightingMarks($kurse);
 
         $ergebnis = [];
 
@@ -89,6 +90,8 @@ final class ConsolidatedTripInfoResolver
                     // Dieselbe Kette heißt auf der 1 „1/03" und nach dem Übergang „13/03"
                     // (KURSE §2 K1).
                     'display' => $f->line.'/'.$kurs['number'],
+                    // Gesichtet (`seen`) oder offen abweichend gesichtet (`disputed`) — nur diese Fahrt.
+                    'sighting' => $belege[$id] ?? null,
                 ],
             ];
         }

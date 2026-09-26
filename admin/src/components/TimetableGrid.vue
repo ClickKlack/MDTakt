@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, type VNode } from 'vue'
 import type { TimetableDirection, TimetableSightingGroup, TimetableTrip } from '../services/timetable'
+import { courseMarkClass, courseMarkTitle } from '../utils/courseMark'
 import { formatClock } from '../utils/timezone'
 
 const props = defineProps<{
@@ -317,11 +318,15 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
                 class="w-full rounded px-1 py-0.5 text-xs tabular-nums transition disabled:opacity-50"
                 :class="
                   trip.course
-                    ? 'bg-slate-800 font-semibold text-white hover:bg-slate-700'
+                    ? courseMarkClass(trip.course.sighting)
                     : 'text-slate-300 hover:bg-slate-200 hover:text-slate-600'
                 "
                 :disabled="busy"
-                :title="trip.course ? `Kurs ${trip.course.display} — klicken zum Ändern` : 'Kursnummer eintragen'"
+                :title="
+                  trip.course
+                    ? `Kurs ${trip.course.display}${courseMarkTitle(trip.course.sighting)} — klicken zum Ändern`
+                    : 'Kursnummer eintragen'
+                "
                 @click="bearbeite(trip)"
               >
                 {{ trip.course ? trip.course.number : '–' }}

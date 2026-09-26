@@ -346,6 +346,11 @@ eine später gelöschte Sichtung wird in MD-Takt abgelehnt.
   (`same`/`differs`/`none`/`no_trip`) wird bei jeder Abfrage berechnet, nicht gespeichert.
 - **Fahrplan:** Zeile „Sichtungen" über der Kurszeile, je Spalte die meistgenannte Nummer mit ✓/✗ — hier lässt sich die
   Richtigkeit am besten beurteilen.
+- **Kursnummer eingefärbt** (Fahrplan und Anschlüsse, 26.09.2026): **grün** = an genau dieser Fahrt gesichtet
+  (bestätigte oder angenommene Sichtung mit dieser Nummer), **rot** = offene Sichtung nennt eine andere Nummer,
+  **dunkel** = gepflegt oder über die Kette fortgeschrieben. Abgelehnte Sichtungen zählen nicht; eine entschiedene
+  Sichtung, die nach einer Änderung von Hand nicht mehr zur Nummer passt, färbt nicht. Gilt je Fahrplanversion —
+  in einer späteren Version ist dieselbe Fahrt eine andere und bleibt dunkel, bis sie erneut gesichtet wird.
 - **Annehmen** setzt die Nummer an die **ganze Kette** der Fahrt (KURSE §2 K2). Trägt die Kette einen anderen Kurs,
   wird sie **umnummeriert** — nach Rückfrage mit der Kettenlänge. Offene Sichtungen derselben Kette, die danach
   stimmen, werden bestätigt.

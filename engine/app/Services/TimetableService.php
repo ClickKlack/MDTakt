@@ -245,6 +245,7 @@ final class TimetableService
         // Der Kurs sagt, zu welchem Umlauf eine Fahrt gehoert — die Auskunft, wegen der
         // I-13 (D) offen war. Er haengt an der Kette, nicht an der Fahrt (KURSE §2 K2).
         $kurse = $this->courses->forTrips($gruppe->pluck('id')->map(static fn ($x): int => (int) $x)->all());
+        $belege = $this->courses->sightingMarks($kurse);
 
         // Offene Sichtungen aus MDKursTracker: Im Fahrplan lässt sich am besten beurteilen, ob
         // eine gesichtete Nummer zur Fahrt passt — Nachbarspalten und Kette stehen daneben.
@@ -281,6 +282,7 @@ final class TimetableService
                     // Der Linien-Praefix ist reine Anzeige: dieselbe Kette heisst auf der 1
                     // "1/03" und nach dem Uebergang "13/03" (KURSE §2 K1).
                     'display' => $line.'/'.$kurse[$id]['number'],
+                    'sighting' => $belege[$id] ?? null,
                 ] : null,
                 'sightings' => $sichtungen[$id] ?? [],
                 'cells' => $zellen,

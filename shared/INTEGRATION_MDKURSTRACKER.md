@@ -129,6 +129,15 @@ Bei jedem Re-Import werden die Pointer neu aufgelöst (Identität → aktuelle I
   Typ ab — der Tracker muss Ferien nicht kennen. Die **Periodengrenzen** bleiben aus der Signatur heraus.
 
 ### 4.3 Selbstlernende Stop-Map
+
+> **Umgesetzt 28.09.2026 (`HafasStopMap`), einfacher als unten skizziert:** Die Zuordnung ist ein exakter
+> Signatur-Treffer — der getroffene Laufweg-Abschnitt hat dieselbe Uhrzeitfolge wie die Fahrt im Feed, also gleich
+> viele Halte in derselben Reihenfolge. Die Halte werden nach **Position** gepaart; keine Konfidenz, kein
+> Überstimmen nötig. Probe mit den 173 zugeordneten Sichtungen der Produktion: alle paarbar, gelernte HAFAS-IDs
+> 59 → 268 (von 275 in den Laufwegen); 263 von 267 Paaren stimmen auch dem Namen nach, die übrigen 4 sind richtige
+> Paare mit abweichendem Namen (`Flugplatz/Technisches Hilfswerk (Lindenhof)` = `Lindenhof / Flugplatz`,
+> `Opernhaus (Listemannstr.)` = `Universitätsplatz / Opernhaus`). Ursprüngliche Skizze:
+
 Nebenprodukt des Matchings (das die Map **nicht** voraussetzt): Nach dem Trip-Match beide Laufwege **per Zeit im
 Gleichschritt** durchgehen und `HAFAS-extId @ HH:MM` ↔ `GTFS-Koordinaten @ HH:MM` mit **+1 Konfidenz** buchen. Über
 viele Fahrten konvergiert die Map, Fehlpaare werden überstimmt. Lernen auf `(trip, stop, Zeit)`-Ebene wegen
@@ -230,8 +239,9 @@ vorher „öffentlich") — die Umlaufdaten sollen nicht massenhaft abziehbar se
    `HH:MM` am Vortag (Fahrt beginnt nach Mitternacht vor der Betriebstag-Grenze), `HH+24:MM` am Vortag.
 2. Kandidaten: Fahrten der Linie in der am Betriebstag gültigen Version, die an einem Halt **genau** zu dieser Minute
    abfahren. Keine Toleranz.
-3. Eingrenzen über den Halt: zuerst die **aus Sichtungen gelernte** HAFAS-ID (Halt der zugeordneten Fahrt zur
-   Soll-Uhrzeit der Sichtung; keine eigene Tabelle, eine Stunde gecacht — die Stop-Map aus §4.3 in einfacher Form),
+3. Eingrenzen über den Halt: zuerst die **aus Sichtungen gelernte** HAFAS-ID (`HafasStopMap`, §4.3: seit 28.09.2026
+   aus dem **ganzen Laufweg** jeder zugeordneten Sichtung, Rückfall der Halt der Sichtung; keine eigene Tabelle,
+   eine Stunde gecacht),
    sonst der **Haltname** (`StopNameMatcher`, erweitert 28.09.2026): „Magdeburg, …", „Str.", die Bahnhofs-Kürzel
    `Bhf./Bf./Hbf`, jede Abkürzung mit Punkt als Wortanfang (`Ges.-Haus`, `Halberst.`, `Friedensbr.`, `u.`), HAFAS-Zusätze
    `(Tram/Bus)` und ein vorangestellter Stadtteil (`Sudenburg, …`) sind eingeebnet; Klammerzusätze fallen nur in einer

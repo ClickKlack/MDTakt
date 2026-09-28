@@ -20,7 +20,22 @@ final readonly class SightingMatchResult
         public ?string $signature = null,
         public ?string $operatingDate = null,
         public ?string $reason = null,
+        /**
+         * HAFAS-IDs des getroffenen Laufweg-Abschnitts, in der Reihenfolge der Halte der Fahrt im
+         * Feed — gleiche Uhrzeitfolge, also gleich viele Halte. Grundlage der Stop-Map (§4.3).
+         *
+         * @var array<int, string>|null
+         */
+        public ?array $hafasStops = null,
     ) {}
+
+    /**
+     * @param  array<int, string>|null  $hafasStops
+     */
+    public function withHafasStops(?array $hafasStops): self
+    {
+        return new self($this->match, $this->tripId, $this->signature, $this->operatingDate, $this->reason, $hafasStops);
+    }
 
     public static function none(string $reason, ?string $operatingDate = null): self
     {

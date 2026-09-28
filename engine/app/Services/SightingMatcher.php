@@ -85,8 +85,9 @@ final class SightingMatcher
 
         $varianten = $this->variants($halte, $segmente, $index);
         $jeTag = [];
+        $halteJeSignatur = [];
 
-        foreach ($varianten as $zeiten) {
+        foreach ($varianten as ['times' => $zeiten, 'hafas' => $hafas]) {
             $start = $zeiten[0];
             $betriebstag = $tagDerSichtung->subDays(intdiv($anker, 1440) - intdiv($start, 1440));
 
@@ -98,9 +99,16 @@ final class SightingMatcher
             $signatur = TripSignatureService::signatureFor($segment['line'], $typ, self::sequence($zeiten));
 
             $jeTag[$betriebstag->toDateString()][$typ][$signatur] = true;
+            $halteJeSignatur[$signatur] = $hafas;
         }
 
-        return $this->lookup($segment['line'], $jeTag);
+        $ergebnis = $this->lookup($segment['line'], $jeTag);
+
+        // Welche HAFAS-Halte zur getroffenen Signatur gehören — in derselben Reihenfolge wie die
+        // Halte der Fahrt im Feed, denn die Uhrzeitfolge ist identisch.
+        return $ergebnis->signature === null
+            ? $ergebnis
+            : $ergebnis->withHafasStops($halteJeSignatur[$ergebnis->signature] ?? null);
     }
 
     /**
@@ -360,9 +368,9 @@ final class SightingMatcher
      * Die Uhrzeitfolgen, unter denen der Abschnitt im Feed stehen kann: mit oder ohne den
      * Übergangshalt an jedem Ende, und am letzten Halt Ankunft oder Abfahrt.
      *
-     * @param  array<int, array{arr: ?int, dep: ?int}>  $halte
+     * @param  array<int, array{hafas: string, arr: ?int, dep: ?int}>  $halte
      * @param  array<int, array{line: string, from: int, to: int}>  $segmente
-     * @return array<int, array<int, int>>
+     * @return array<int, array{times: array<int, int>, hafas: array<int, string>}>
      */
     private function variants(array $halte, array $segmente, int $index): array
     {
@@ -387,9 +395,14 @@ final class SightingMatcher
                 }
 
                 $mitte = [];
+                $hafas = [];
 
-                for ($i = $von; $i < $bis; $i++) {
-                    $mitte[] = $halte[$i]['dep'] ?? $halte[$i]['arr'];
+                for ($i = $von; $i <= $bis; $i++) {
+                    $hafas[] = $halte[$i]['hafas'];
+
+                    if ($i < $bis) {
+                        $mitte[] = $halte[$i]['dep'] ?? $halte[$i]['arr'];
+                    }
                 }
 
                 // Am Endhalt steht im Feed meist die Ankunft; der Tracker legt sie dort in
@@ -404,7 +417,7 @@ final class SightingMatcher
                 }
 
                 foreach ($letzte as $ende) {
-                    $varianten[] = [...$mitte, $ende];
+                    $varianten[] = ['times' => [...$mitte, $ende], 'hafas' => $hafas];
                 }
             }
         }

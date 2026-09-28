@@ -11,7 +11,9 @@ use App\Models\ConsolidatedTrip;
 use App\Models\Course;
 use App\Models\CourseTrip;
 use App\Models\LineVersion;
+use App\Models\MdktRoute;
 use App\Models\Sighting;
+use App\Services\TripSignatureService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\ConsolidatedFixtures;
@@ -277,5 +279,40 @@ final class CourseLookupTest extends TestCase
         $this->frage($query + ['direction' => 'Magdeburg, Barleber See (Tram/Bus)'])
             ->assertJsonPath('data.course_number', '03')
             ->assertJsonPath('data.stop_resolved_via', 'name+direction');
+    }
+
+    /**
+     * Stop-Map aus dem ganzen Laufweg: Gesichtet wurde nur am Halt B, der Laufweg nennt auch C.
+     * Danach ist C über seine HAFAS-ID auflösbar — ohne Namen, obwohl zur selben Minute eine
+     * zweite Fahrt an einem anderen Halt abfährt.
+     */
+    public function test_lookup_learns_hafas_stops_from_the_whole_route(): void
+    {
+        $version = $this->version();
+        $hin = $this->f->fahrt(
+            $version,
+            ['A', 'B', 'C'],
+            ['06:00:00', '06:10:00', '06:20:00'],
+            TripSignatureService::signatureFor('1', 'mo_fr', '06:00,06:10,06:20'),
+        );
+        $this->f->fahrt($version, ['X', 'Y', 'Z'], ['06:10:00', '06:20:00', '06:30:00']);
+        $this->kurs($hin, '03');
+        Sighting::factory()->create([
+            'mdkt_route_id' => MdktRoute::factory()->create()->id,
+            'line' => '1',
+            'hafas_stop_id' => '900002',
+            'course_number' => '3',
+            'service_date' => '2026-09-01',
+            'departure_planned' => '2026-09-01T04:10:00Z',
+            'consolidated_trip_id' => $hin->id,
+            'match' => SightingMatch::Matched,
+            'status' => SightingStatus::Accepted,
+        ]);
+
+        $this->frage(['hafas_stop' => '900003', 'line' => '1', 'time' => '2026-09-08T04:20:00Z'])
+            ->assertOk()
+            ->assertJsonPath('data.course_number', '03')
+            ->assertJsonPath('data.matched_trip.id', $hin->id)
+            ->assertJsonPath('data.stop_resolved_via', 'sighting');
     }
 }

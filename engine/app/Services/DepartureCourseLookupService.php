@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Enums\SightingStatus;
 use App\Support\GtfsTime;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -31,11 +29,6 @@ final class DepartureCourseLookupService
 {
     private const NETWORK_TIMEZONE = 'Europe/Berlin';
 
-    /** Die gelernte Halt-Zuordnung ändert sich nur mit neuen Sichtungen — eine Stunde genügt. */
-    private const STOP_MAP_TTL_SECONDS = 3600;
-
-    private const STOP_MAP_CACHE_KEY = 'course-lookup.hafas-stop-map';
-
     public function __construct(
         private readonly FahrplanTypClassifier $classifier,
         private readonly OperatingDayResolver $operatingDay,
@@ -43,6 +36,7 @@ final class DepartureCourseLookupService
         private readonly ConsolidatedStopNameResolver $stopNames,
         private readonly StopNameMatcher $names,
         private readonly CourseLookup $courses,
+        private readonly HafasStopMap $stopMap,
     ) {}
 
     /**
@@ -203,7 +197,7 @@ final class DepartureCourseLookupService
      */
     private function narrowByStop(array $kandidaten, string $hafasStop, ?string $stopName): array
     {
-        $gelernt = $this->hafasStopMap()[$hafasStop] ?? [];
+        $gelernt = $this->stopMap->all()[$hafasStop] ?? [];
 
         if ($gelernt !== []) {
             $amHalt = array_values(array_filter($kandidaten, static fn (array $k): bool => in_array($k['stop_id'], $gelernt, true)));
@@ -266,54 +260,6 @@ final class DepartureCourseLookupService
         }
 
         return [];
-    }
-
-    /**
-     * HAFAS-ID → Konsolidat-Halte, abgeleitet aus den zugeordneten Sichtungen: Der Halt ihrer Fahrt
-     * zu ihrer Soll-Uhrzeit. Abgelehnte Sichtungen zählen nicht — dort kann die Zuordnung falsch sein.
-     *
-     * @return array<string, array<int, int>>
-     */
-    private function hafasStopMap(): array
-    {
-        return Cache::remember(self::STOP_MAP_CACHE_KEY, self::STOP_MAP_TTL_SECONDS, function (): array {
-            $sichtungen = DB::table('sightings')
-                ->whereNotNull('consolidated_trip_id')
-                ->where('status', '!=', SightingStatus::Rejected->value)
-                ->select('hafas_stop_id', 'consolidated_trip_id', 'departure_planned')
-                ->get();
-
-            if ($sichtungen->isEmpty()) {
-                return [];
-            }
-
-            $halte = [];
-
-            DB::table('consolidated_stop_times')
-                ->whereIn('consolidated_trip_id', $sichtungen->pluck('consolidated_trip_id')->unique()->all())
-                ->select('consolidated_trip_id', 'stop_id', 'departure_time', 'arrival_time')
-                ->orderBy('consolidated_trip_id')
-                ->get()
-                ->each(function (object $st) use (&$halte): void {
-                    $zeit = substr((string) ($st->departure_time ?? $st->arrival_time), 0, 5);
-                    $halte[(int) $st->consolidated_trip_id][$zeit][] = (int) $st->stop_id;
-                });
-
-            $karte = [];
-
-            foreach ($sichtungen as $s) {
-                $uhr = CarbonImmutable::parse((string) $s->departure_planned)->setTimezone(self::NETWORK_TIMEZONE);
-                $treffer = $halte[(int) $s->consolidated_trip_id][$uhr->format('H:i')]
-                    ?? $halte[(int) $s->consolidated_trip_id][sprintf('%02d:%s', $uhr->hour + 24, $uhr->format('i'))]
-                    ?? [];
-
-                foreach ($treffer as $stopId) {
-                    $karte[(string) $s->hafas_stop_id][$stopId] = $stopId;
-                }
-            }
-
-            return array_map('array_values', $karte);
-        });
     }
 
     /**

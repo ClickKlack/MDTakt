@@ -232,8 +232,14 @@ vorher „öffentlich") — die Umlaufdaten sollen nicht massenhaft abziehbar se
    abfahren. Keine Toleranz.
 3. Eingrenzen über den Halt: zuerst die **aus Sichtungen gelernte** HAFAS-ID (Halt der zugeordneten Fahrt zur
    Soll-Uhrzeit der Sichtung; keine eigene Tabelle, eine Stunde gecacht — die Stop-Map aus §4.3 in einfacher Form),
-   sonst der **Haltname** (normalisiert, „Magdeburg, …" und „Str." eingeebnet). Bleiben mehrere, trennt `direction`
-   über den Zielhalt der Fahrt.
+   sonst der **Haltname** (`StopNameMatcher`, erweitert 28.09.2026): „Magdeburg, …", „Str.", die Bahnhofs-Kürzel
+   `Bhf./Bf./Hbf`, jede Abkürzung mit Punkt als Wortanfang (`Ges.-Haus`, `Halberst.`, `Friedensbr.`, `u.`), HAFAS-Zusätze
+   `(Tram/Bus)` und ein vorangestellter Stadtteil (`Sudenburg, …`) sind eingeebnet; Klammerzusätze fallen nur in einer
+   zweiten Stufe weg, weil sie im Feed eigenständige Halte trennen (`Rothensee (Schleife)`). Bleiben mehrere, trennt
+   `direction` über den Zielhalt der Fahrt — mit demselben Namensvergleich.
+   Probe am Bestand: 134 von 135 Haltnamen aus den Tracker-Laufwegen finden ihren Halt im Feed (vorher 116); offen
+   bleibt „Flugplatz/Technisches Hilfswerk (Lindenhof)" — den löst die gelernte HAFAS-ID, sobald dort eine Sichtung
+   zugeordnet ist.
 4. Genau eine Fahrt mit Kurs → `found: true`. Sonst `reason`: `no-trip-match` | `ambiguous` | `no-course-assigned`.
 
 **Response 200 (gefunden):**

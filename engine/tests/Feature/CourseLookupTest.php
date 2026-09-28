@@ -259,4 +259,23 @@ final class CourseLookupTest extends TestCase
             ->assertJsonPath('data.course_number', '03')
             ->assertJsonPath('data.stop_resolved_via', 'name+direction');
     }
+
+    /**
+     * Der Feed kürzt ab („S-Bhf."), HAFAS hängt Zusätze an („(Tram/Bus)") — Eichenweiler und
+     * Barleber See aus dem ersten produktiven Lauf.
+     */
+    public function test_lookup_matches_abbreviated_feed_names(): void
+    {
+        $version = $this->version();
+        $hin = $this->f->fahrt($version, ['Rothensee', 'S-Bhf. Eichenweiler', 'Barleber See'], ['06:00:00', '06:10:00', '06:20:00']);
+        $rueck = $this->f->fahrt($version, ['Barleber See', 'S-Bhf. Eichenweiler ', 'Rothensee'], ['06:00:00', '06:10:00', '06:20:00']);
+        $this->kurs($hin, '03');
+        $this->kurs($rueck, '04');
+        $query = ['hafas_stop' => 'x', 'line' => '1', 'time' => '2026-09-01T04:10:00Z', 'stop_name' => 'Magdeburg, S-Bahnhof Eichenweiler'];
+
+        $this->frage($query)->assertJsonPath('data.reason', 'ambiguous');
+        $this->frage($query + ['direction' => 'Magdeburg, Barleber See (Tram/Bus)'])
+            ->assertJsonPath('data.course_number', '03')
+            ->assertJsonPath('data.stop_resolved_via', 'name+direction');
+    }
 }

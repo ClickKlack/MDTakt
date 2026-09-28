@@ -22,7 +22,8 @@ use Illuminate\Support\Facades\Log;
  * 1. **Der HAFAS-Halt aus den Sichtungen.** Jede zugeordnete Sichtung verrät, welcher Konsolidat-Halt
  *    zu ihrer HAFAS-ID gehört — der Halt ihrer Fahrt zu ihrer Uhrzeit. Die Zuordnung wächst mit jeder
  *    Sichtung, ohne eigene Tabelle.
- * 2. **Der Haltname**, normalisiert wie bei der Konsolidierung ({@see StopNameNormalizer}).
+ * 2. **Der Haltname**, verglichen mit {@see StopNameMatcher} — Abkürzungen des Feeds und Zusätze
+ *    von HAFAS eingeebnet.
  *
  * Es wird nichts geraten: Bleiben zwei Fahrten übrig, lautet die Antwort `ambiguous`.
  */
@@ -40,7 +41,7 @@ final class DepartureCourseLookupService
         private readonly OperatingDayResolver $operatingDay,
         private readonly ConsolidatedTripTimeResolver $tripTimes,
         private readonly ConsolidatedStopNameResolver $stopNames,
-        private readonly StopNameNormalizer $normalizer,
+        private readonly StopNameMatcher $names,
         private readonly CourseLookup $courses,
     ) {}
 
@@ -213,14 +214,9 @@ final class DepartureCourseLookupService
         }
 
         if ($stopName !== null && $stopName !== '') {
-            $gesucht = $this->normalizer->normalize($stopName);
             $namen = $this->stopNames->namesFor(array_column($kandidaten, 'stop_id'));
-            $amHalt = array_values(array_filter(
-                $kandidaten,
-                fn (array $k): bool => isset($namen[$k['stop_id']]) && $this->normalizer->normalize($namen[$k['stop_id']]) === $gesucht,
-            ));
 
-            return [$amHalt, 'name'];
+            return [$this->byName($kandidaten, static fn (array $k): ?string => $namen[$k['stop_id']] ?? null, $stopName), 'name'];
         }
 
         return [$kandidaten, 'time-only'];
@@ -239,13 +235,37 @@ final class DepartureCourseLookupService
             ->whereIn('id', array_column($kandidaten, 'trip_id'))
             ->pluck('last_stop_id', 'id');
         $namen = $this->stopNames->namesFor($ziele->filter()->map(static fn ($id): int => (int) $id)->values()->all());
-        $gesucht = $this->normalizer->normalize($richtung);
 
-        return array_values(array_filter($kandidaten, function (array $k) use ($ziele, $namen, $gesucht): bool {
-            $ziel = $namen[(int) ($ziele[$k['trip_id']] ?? 0)] ?? null;
+        return $this->byName(
+            $kandidaten,
+            static fn (array $k): ?string => $namen[(int) ($ziele[$k['trip_id']] ?? 0)] ?? null,
+            $richtung,
+        );
+    }
 
-            return $ziel !== null && $this->normalizer->normalize($ziel) === $gesucht;
-        }));
+    /**
+     * Kandidaten, deren Halt so heißt wie gesucht — erst streng, dann ohne Klammerzusätze
+     * ({@see StopNameMatcher}).
+     *
+     * @param  array<int, array{trip_id: int, stop_id: int, line_version_id: int, time: string}>  $kandidaten
+     * @param  callable(array{trip_id: int, stop_id: int, line_version_id: int, time: string}): ?string  $nameOf
+     * @return array<int, array{trip_id: int, stop_id: int, line_version_id: int, time: string}>
+     */
+    private function byName(array $kandidaten, callable $nameOf, string $gesucht): array
+    {
+        foreach ([false, true] as $locker) {
+            $treffer = array_values(array_filter($kandidaten, function (array $k) use ($nameOf, $gesucht, $locker): bool {
+                $name = $nameOf($k);
+
+                return $name !== null && $this->names->matches($gesucht, $name, $locker);
+            }));
+
+            if ($treffer !== []) {
+                return $treffer;
+            }
+        }
+
+        return [];
     }
 
     /**

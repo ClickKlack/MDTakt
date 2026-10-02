@@ -47,7 +47,8 @@ body:json {
         "service_date": "2026-09-01",
         "observed_at": "2026-09-01T04:09:30Z",
         "departure_planned": "2026-09-01T04:10:00Z",
-        "departure_actual": null
+        "departure_actual": null,
+        "comment": "Kursschild schlecht lesbar"
       }
     ]
   }
@@ -64,7 +65,8 @@ docs {
   # Sichtungen einliefern
 
   Eigener Token `mdkurstrackerToken` (env `MDKURSTRACKER_API_TOKEN`) — der Collector-Token gilt hier nicht.
-  Idempotent: erneutes Senden liefert `outcome: unchanged`.
+  Idempotent: erneutes Senden liefert `outcome: unchanged`. Ändert sich nur `comment`, antwortet die Engine
+  `updated` und eine Entscheidung bleibt bestehen; fehlt `comment` oder ist es `null`, wird die Notiz gelöscht.
 
   Beispiel-Response (Beispieldaten ohne passende Fahrt → `waiting`):
 

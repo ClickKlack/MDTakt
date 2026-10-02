@@ -116,6 +116,30 @@ final class CourseLookupTest extends TestCase
     }
 
     /**
+     * Die Notiz des Erfassers kann Personenbezug haben — die Kursauskunft gibt sie nie aus.
+     */
+    public function test_lookup_never_returns_the_sighting_comment(): void
+    {
+        [$hin] = $this->zweiFahrtenZurSelbenMinute();
+        $this->kurs($hin, '03');
+        Sighting::factory()->create([
+            'hafas_stop_id' => '900002',
+            'course_number' => '3',
+            'consolidated_trip_id' => $hin->id,
+            'match' => SightingMatch::Matched,
+            'status' => SightingStatus::Accepted,
+            'departure_planned' => '2026-08-20T04:10:00Z',
+            'comment' => 'Fahrerin Erika Musterfrau',
+        ]);
+
+        $this->frage(['hafas_stop' => '900002', 'line' => '1', 'time' => '2026-09-01T04:10:00Z'])
+            ->assertOk()
+            ->assertJsonPath('data.found', true)
+            ->assertDontSee('Musterfrau')
+            ->assertJsonMissingPath('data.comment');
+    }
+
+    /**
      * Die HAFAS-ID lernt die Engine aus den Sichtungen: Der Halt der zugeordneten Fahrt zur Soll-Zeit
      * der Sichtung. Danach braucht es keinen Namen mehr.
      */

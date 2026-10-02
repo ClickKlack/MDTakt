@@ -121,7 +121,8 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
       "service_date": "2026-06-18",
       "observed_at": "2026-06-18T16:42:35Z",
       "departure_planned": "2026-06-18T16:43:00Z",
-      "departure_actual":  "2026-06-18T16:42:00Z"   // nullable
+      "departure_actual":  "2026-06-18T16:42:00Z",  // nullable
+      "comment": "Umleitung über Südring"              // optional, nullable, ≤ 500 Zeichen (recordings.comment)
     }
   ]
 }
@@ -129,6 +130,9 @@ in beide Richtungen der aktive Client.** MD-Takt hält die DB-Verbindung niemals
 
 - **Alle Zeitstempel ISO-8601 UTC** (`…Z`). `service_date` = Berlin-Betriebstag (`YYYY-MM-DD`).
 - **Idempotenz:** Wiederholtes Senden derselben `mdkt_recording_id` erzeugt **kein** Duplikat (Upsert).
+- **Notiz (`comment`):** `recordings.comment` mitsenden, sonst weglassen oder `null` (= keine Notiz; eine früher
+  übertragene wird gelöscht). Ändert sich nur die Notiz, die Sichtung erneut senden — MD-Takt antwortet `updated`,
+  eine Entscheidung bleibt bestehen. Die Notiz ist nur im MD-Takt-Admin sichtbar.
 - **Zeitformat streng:** genau `YYYY-MM-DDTHH:MM:SSZ`. `+02:00` oder Zeiten ohne Zone werden mit 422 abgewiesen.
 - **Response 200:**
 ```jsonc

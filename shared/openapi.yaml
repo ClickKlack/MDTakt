@@ -231,6 +231,16 @@ components:
         observed_at: { type: string, format: date-time, example: '2026-09-01T04:09:30Z' }
         departure_planned: { type: string, format: date-time, example: '2026-09-01T04:10:00Z' }
         departure_actual: { type: string, format: date-time, nullable: true }
+        comment:
+          type: string
+          nullable: true
+          maxLength: 500
+          example: 'Umleitung über Südring'
+          description: >-
+            Notiz des Erfassers (recordings.comment), Freitext, höchstens 500 Zeichen. Fehlt das Feld oder ist es
+            null, gibt es keine Notiz — auch eine früher übertragene wird dann gelöscht. Ändert sich nur die Notiz,
+            antwortet die Engine updated, eine Entscheidung bleibt bestehen. Nur im Admin sichtbar, nie in
+            öffentlichen Ausgaben (auch nicht in course-lookup).
     SightingIngestRequest:
       type: object
       required: [trips, sightings]
@@ -311,6 +321,7 @@ components:
         status_label: { type: string }
         decided_at: { type: string, format: date-time, nullable: true }
         decision_note: { type: string, nullable: true }
+        comment: { type: string, nullable: true, description: 'Notiz des Erfassers aus MDKursTracker' }
         trip:
           type: object
           nullable: true

@@ -36,6 +36,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property SightingStatus $status
  * @property CarbonImmutable|null $decided_at
  * @property string|null $decision_note
+ * @property string|null $comment Notiz des Erfassers — nur im Admin ausgeben
  */
 final class Sighting extends Model
 {
@@ -46,7 +47,7 @@ final class Sighting extends Model
         'mdkt_recording_id', 'mdkt_route_id', 'line', 'course_number', 'hafas_stop_id', 'stop_name',
         'service_date', 'observed_at', 'departure_planned', 'departure_actual',
         'trip_signature', 'consolidated_trip_id', 'match', 'match_attempts',
-        'status', 'decided_at', 'decision_note',
+        'status', 'decided_at', 'decision_note', 'comment',
     ];
 
     /**

@@ -33,6 +33,7 @@ final class SightingFactory extends Factory
             'observed_at' => '2026-09-01T04:09:30Z',
             'departure_planned' => '2026-09-01T04:10:00Z',
             'departure_actual' => null,
+            'comment' => null,
             'trip_signature' => null,
             'consolidated_trip_id' => null,
             'match' => SightingMatch::Waiting,

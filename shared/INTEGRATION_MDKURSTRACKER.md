@@ -194,7 +194,8 @@ fürs Matching + Stop-Lernen) und `sightings` (die einzelnen neuen Beobachtungen
       "service_date": "2026-06-18",
       "observed_at": "2026-06-18T16:42:35Z",
       "departure_planned": "2026-06-18T16:43:00Z",
-      "departure_actual":  "2026-06-18T16:42:00Z"  // nullable
+      "departure_actual":  "2026-06-18T16:42:00Z", // nullable
+      "comment": "Umleitung über Südring"             // optional, nullable, ≤ 500 Zeichen (recordings.comment)
     }
   ]
 }
@@ -204,6 +205,12 @@ fürs Matching + Stop-Lernen) und `sightings` (die einzelnen neuen Beobachtungen
 `sightings[]` → Upsert auf `mdkt_recording_id`, dann Zuordnung (§8.1) und Status (§8.2). Ein schon bekannter
 Fingerprint darf in `trips[]` fehlen. `day_type` ist informativ — die Engine bestimmt den Fahrplantyp selbst.
 Die Stop-Map (§4.3) ist **nicht** umgesetzt; die Zuordnung braucht sie nicht.
+
+**Notiz (`comment`, 02.10.2026):** Freitext des Erfassers, höchstens 500 Zeichen. Fehlt das Feld oder ist es `null`,
+gibt es keine Notiz — eine früher übertragene wird gelöscht (der Tracker sendet immer den ganzen Stand). Ändert sich
+**nur** die Notiz, sendet der Tracker die Sichtung mit derselben `mdkt_recording_id` erneut; die Engine speichert die
+Notiz, antwortet `updated` und lässt eine Entscheidung (`accepted`/`rejected`/`confirmed`) stehen. Die Notiz kann
+Personenbezug haben: Sie ist nur in der Admin-Prüfliste sichtbar, nie in öffentlichen Ausgaben, nie in Logs.
 
 **Response 200:**
 ```jsonc
@@ -223,7 +230,7 @@ Die Stop-Map (§4.3) ist **nicht** umgesetzt; die Zuordnung braucht sie nicht.
 **Zweck:** Kursauskunft je Abfahrt der Tafel. **Auth:** derselbe Tracker-Token wie Fluss 1 (entschieden 26.09.2026,
 vorher „öffentlich") — die Umlaufdaten sollen nicht massenhaft abziehbar sein. Eigenes Limit 600/min.
 `GET` für eine Abfahrt, `POST` mit `departures[]` für bis zu 100 (je mit `ref`, das zurückkommt).
-**Maßgeblich ist `openapi.yaml`.**
+**Maßgeblich ist `openapi.yaml`.** Notizen der Sichtungen (`comment`) gibt die Kursauskunft nie aus.
 
 | Param | Pflicht | Bedeutung |
 |---|---|---|
@@ -352,14 +359,16 @@ Die Engine bildet aus dem Laufweg genau die Signatur nach, die der Import je Fah
 
 `status`: `pending` → `accepted` / `rejected` von Hand; **`confirmed` setzt die Engine selbst**, wenn der gesichtete
 Kurs schon an der Fahrt hängt („03" = „3"; der Tracker sendet ohne führende Null). Auch beim Annehmen zählt die Null
-nicht: Eine Sichtung „3" schließt sich dem vorhandenen Kurs „03" an, statt einen zweiten anzulegen. Ändert der Tracker eine entschiedene Sichtung, wird sie wieder `pending`.
+nicht: Eine Sichtung „3" schließt sich dem vorhandenen Kurs „03" an, statt einen zweiten anzulegen. Ändert der Tracker eine entschiedene Sichtung (Kursnummer, Linie, Halt, Betriebstag, Soll-Abfahrt oder Laufweg), wird
+sie wieder `pending`. Eine geänderte Notiz (`comment`) oder eine nachgereichte Ist-Abfahrt allein öffnet sie nicht.
 Löschungen im Tracker werden **dauerhaft nicht** übertragen (Festlegung des Trackers) — die Karenzzeit fängt sie ab,
 eine später gelöschte Sichtung wird in MD-Takt abgelehnt.
 
 ### 8.3 Prüfen und Entscheiden (Admin)
 - **Prüfliste** (`/sichtungen`): Standard ist die Warteschlange (offen und entscheidbar); „wartet auf Fahrplan" und
   Entschiedenes über den Filter. Filter nach Linie, Betriebstag, „nur Abweichungen". Der Vergleich mit dem lokalen Kurs
-  (`same`/`differs`/`none`/`no_trip`) wird bei jeder Abfrage berechnet, nicht gespeichert.
+  (`same`/`differs`/`none`/`no_trip`) wird bei jeder Abfrage berechnet, nicht gespeichert. Die Notiz des Erfassers
+  steht gekürzt unter „Gesichtet" (voller Text als Tooltip, per Klick aufklappbar).
 - **Fahrplan:** Zeile „Sichtungen" über der Kurszeile, je Spalte die meistgenannte Nummer mit ✓/✗ — hier lässt sich die
   Richtigkeit am besten beurteilen.
 - **Kursnummer eingefärbt** (Fahrplan und Anschlüsse, 26.09.2026): **grün** = an genau dieser Fahrt gesichtet

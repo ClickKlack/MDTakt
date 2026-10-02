@@ -28,6 +28,14 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref<string | null>(null)
 const hinweis = ref<string | null>(null)
+// Aufgeklappte Notizen des Erfassers (Sichtungs-IDs)
+const offeneNotizen = ref(new Set<number>())
+
+function toggleNotiz(id: number): void {
+  const offen = new Set(offeneNotizen.value)
+  if (!offen.delete(id)) offen.add(id)
+  offeneNotizen.value = offen
+}
 
 // Filter aus der URL, damit eine gefilterte Liste verlinkbar bleibt.
 const state = ref<SightingState>((route.query.state as SightingState) ?? 'open')
@@ -282,6 +290,16 @@ function kannAnnehmen(s: Sighting): boolean {
                 >
                   {{ s.display }}
                 </span>
+                <button
+                  v-if="s.comment"
+                  type="button"
+                  class="mt-1 block max-w-48 text-left text-xs text-slate-500 hover:text-slate-800"
+                  :class="offeneNotizen.has(s.id) ? 'whitespace-pre-line break-words' : 'truncate'"
+                  :title="offeneNotizen.has(s.id) ? 'Notiz zuklappen' : s.comment"
+                  @click="toggleNotiz(s.id)"
+                >
+                  <span aria-hidden="true">✎</span> {{ s.comment }}
+                </button>
               </td>
               <td class="px-3 py-2 tabular-nums">
                 <span v-if="s.local_course" :class="s.comparison === 'differs' ? 'font-semibold text-red-700 line-through' : ''">

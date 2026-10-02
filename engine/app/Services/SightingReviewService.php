@@ -247,6 +247,8 @@ final class SightingReviewService
                 'status_label' => $s->status->label(),
                 'decided_at' => $s->decided_at?->utc()->toIso8601ZuluString(),
                 'decision_note' => $s->decision_note,
+                // Notiz des Erfassers — nur hier im Admin, nie in öffentlichen Ausgaben.
+                'comment' => $s->comment,
                 'trip' => $fahrt === null ? null : [
                     'id' => $fahrt['id'],
                     'line' => $fahrt['line'],

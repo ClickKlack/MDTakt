@@ -39,6 +39,7 @@ final class SightingResource extends JsonResource
             'status_label' => $this->resource['status_label'],
             'decided_at' => $this->resource['decided_at'],
             'decision_note' => $this->resource['decision_note'],
+            'comment' => $this->resource['comment'],
             'trip' => $this->resource['trip'],
             'local_course' => $this->resource['local_course'],
             'comparison' => $this->resource['comparison'],

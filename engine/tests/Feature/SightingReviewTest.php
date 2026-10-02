@@ -134,6 +134,18 @@ final class SightingReviewTest extends TestCase
         $this->assertSame('mo_fr', $jeFahrt[$ohne->id]['trip']['day_type']);
     }
 
+    public function test_list_shows_the_comment(): void
+    {
+        $mit = $this->sichtung($this->fahrt(), werte: ['comment' => 'Umleitung über Südring']);
+        $ohne = $this->sichtung($this->fahrt('07:00:00', '07:30:00'));
+
+        $notizen = array_column($this->liste(), 'comment', 'id');
+
+        $this->assertSame('Umleitung über Südring', $notizen[$mit->id]);
+        $this->assertArrayHasKey($ohne->id, $notizen);
+        $this->assertNull($notizen[$ohne->id]);
+    }
+
     public function test_list_differs_only(): void
     {
         $anders = $this->fahrt();

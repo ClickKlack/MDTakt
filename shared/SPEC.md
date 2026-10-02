@@ -52,6 +52,9 @@ Eine Sichtung enthält:
 - `departure_planned` — Soll-Abfahrt am Halt (UTC); `departure_actual` optional
 - `observed_at` — Zeitpunkt der Erfassung (UTC)
 - der **Laufweg** der Fahrt (Soll-Zeiten + Linie je Halt), per `schedule_fingerprint` einmal gespeichert
+- `comment` — optionale Notiz des Erfassers (Freitext, ≤ 500 Zeichen, seit 02.10.2026), z. B. „Umleitung über
+  Südring". Hilft beim Prüfen, ändert weder Zuordnung noch Entscheidung. **Datenschutz:** kann Personenbezug haben —
+  nur im Admin sichtbar, nie in öffentlichen Ausgaben (auch nicht in der Kursauskunft), nie in Logs
 
 **Schnittstelle MDKursTracker → MD-Takt (umgesetzt 26.09.2026):** HTTP-API, `POST /api/v1/collector/sightings`
 mit eigenem Token. Ein Cron im Tracker schickt Sichtungen nach einer Karenzzeit; Löschungen werden nicht übertragen. Details:
@@ -251,7 +254,8 @@ sightings (
     match_attempts       SMALLINT,      -- Importe ohne Treffer
     status               VARCHAR(16),   -- pending | confirmed | accepted | rejected
     decided_at           TIMESTAMPTZ,
-    decision_note        VARCHAR
+    decision_note        VARCHAR,
+    comment              VARCHAR(500)                   -- Notiz des Erfassers, nur Admin
 )
 
 -- Umlauf-Ebene (I-14, siehe KURSE.md). Haengt am Konsolidat, nicht am Roh-Bestand:

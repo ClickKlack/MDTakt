@@ -324,12 +324,29 @@ final class SightingIngestService
             'observed_at' => CarbonImmutable::parse((string) $daten['observed_at']),
             'departure_planned' => CarbonImmutable::parse((string) $daten['departure_planned']),
             'departure_actual' => isset($daten['departure_actual']) ? CarbonImmutable::parse((string) $daten['departure_actual']) : null,
+            // Fehlt die Notiz, gibt es keine — der Tracker sendet immer den ganzen Stand.
+            'comment' => self::normalizeComment($daten['comment'] ?? null),
         ];
 
         $sichtung = Sighting::query()->where('mdkt_recording_id', (int) $daten['mdkt_recording_id'])->first();
 
         if ($sichtung !== null && ! $this->changesMatter($sichtung, $werte)) {
-            return [$sichtung, 'unchanged'];
+            if ($sichtung->comment === $werte['comment']) {
+                return [$sichtung, 'unchanged'];
+            }
+
+            // Nur die Notiz hat sich geändert — die Aussage ist dieselbe, die Entscheidung gilt weiter.
+            $sichtung->comment = $werte['comment'];
+            $sichtung->save();
+
+            // Den Text nicht loggen: Freitext, kann Personenbezug haben.
+            Log::info('Sighting comment updated', [
+                'sighting_id' => $sichtung->id,
+                'mdkt_recording_id' => $sichtung->mdkt_recording_id,
+                'has_comment' => $sichtung->comment !== null,
+            ]);
+
+            return [$sichtung, 'updated'];
         }
 
         $ausgang = $sichtung === null ? 'created' : 'updated';
@@ -348,6 +365,16 @@ final class SightingIngestService
         $sichtung->save();
 
         return [$sichtung, $ausgang];
+    }
+
+    /**
+     * Notiz des Erfassers: Leerraum an den Rändern weg, eine leere Notiz ist keine.
+     */
+    private static function normalizeComment(mixed $kommentar): ?string
+    {
+        $text = trim((string) $kommentar);
+
+        return $text === '' ? null : $text;
     }
 
     /**

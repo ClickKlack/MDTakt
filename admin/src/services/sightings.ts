@@ -56,6 +56,8 @@ export interface Sighting {
   status_label: string
   decided_at: string | null
   decision_note: string | null
+  /** Notiz des Erfassers aus MDKursTracker — nur im Admin */
+  comment: string | null
   trip: SightingTrip | null
   local_course: { id: number; number: string; display: string } | null
   comparison: SightingComparison

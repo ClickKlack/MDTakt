@@ -208,6 +208,12 @@ Admin angenommen oder abgelehnt — in einer Prüfliste und direkt im Fahrplan.
 - [x] `SightingLookup`: offene Sichtungen je Fahrt, nach Nummer gruppiert, in der Fahrplan-Matrix
 - [x] Zeile „Sichtungen" über der Kurszeile mit ✓/✗, Detail-Dialog, Hervorheben der Fahrt aus der Prüfliste
 
+### Nachtrag — Notiz des Erfassers (02.10.2026)
+- [x] `sightings[].comment` (optional, ≤ 500 Zeichen) im Eingang; Spalte `sightings.comment`
+- [x] Nur die Notiz geändert → `updated`, Entscheidung bleibt; fehlt sie oder `null` → gelöscht
+- [x] Prüfliste zeigt die Notiz unter „Gesichtet" (Tooltip, aufklappbar); nie öffentlich, nie im Log
+- [ ] Tracker sendet `recordings.comment` mit (MDKURSTRACKER_REQUIREMENTS §3.1)
+
 ### Offen (bewusst nicht in I-04)
 - [ ] Entscheidung zurücknehmen (Rückgängig) — bisher nur über die Kurs-Pflege im Fahrplan
 - [ ] Echte Tracker-Daten per `--dry-run` prüfen, sobald ein Export vorliegt

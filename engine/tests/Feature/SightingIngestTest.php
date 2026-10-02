@@ -78,9 +78,9 @@ final class SightingIngestTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    private function body(int $recordingId = 1935, string $kurs = '03', string $tag = '2026-09-01'): array
+    private function body(int $recordingId = 1935, string $kurs = '03', string $tag = '2026-09-01', ?string $notiz = null): array
     {
-        return [
+        $body = [
             'sync' => ['since' => null, 'generated_at' => '2026-09-01T04:11:00Z'],
             'trips' => [[
                 'mdkt_trip_id' => 776,
@@ -107,6 +107,13 @@ final class SightingIngestTest extends TestCase
                 'departure_actual' => null,
             ]],
         ];
+
+        // Ohne Notiz fehlt das Feld ganz — so sendet der Tracker heute.
+        if ($notiz !== null) {
+            $body['sightings'][0]['comment'] = $notiz;
+        }
+
+        return $body;
     }
 
     /**
@@ -248,6 +255,95 @@ final class SightingIngestTest extends TestCase
         $this->assertSame(SightingStatus::Pending, $sichtung->status);
         $this->assertSame('07', $sichtung->course_number);
         $this->assertNull($sichtung->decided_at);
+    }
+
+    public function test_ingest_stores_the_comment(): void
+    {
+        $this->sende($this->body(notiz: '  Umleitung über Südring  '))
+            ->assertOk()
+            ->assertJsonPath('data.results.0.outcome', 'created');
+
+        $this->assertSame('Umleitung über Südring', Sighting::query()->sole()->comment);
+    }
+
+    /**
+     * Nur die Notiz geändert: Die Aussage ist dieselbe, die Entscheidung bleibt stehen.
+     */
+    public function test_ingest_comment_change_keeps_the_decision(): void
+    {
+        $fahrt = $this->fahrt();
+        $this->sende($this->body(notiz: 'Ersatzfahrzeug'))->assertOk();
+        $entschieden = now()->subHour()->startOfSecond();
+        Sighting::query()->update([
+            'status' => SightingStatus::Rejected->value,
+            'decided_at' => $entschieden,
+            'decision_note' => 'Schild falsch gelesen',
+        ]);
+
+        $this->sende($this->body(notiz: 'Kursschild schlecht lesbar'))
+            ->assertOk()
+            ->assertJsonPath('data.results.0.outcome', 'updated')
+            ->assertJsonPath('data.results.0.status', 'rejected');
+
+        $sichtung = Sighting::query()->sole();
+        $this->assertSame('Kursschild schlecht lesbar', $sichtung->comment);
+        $this->assertSame(SightingStatus::Rejected, $sichtung->status);
+        $this->assertTrue($sichtung->decided_at?->equalTo($entschieden));
+        $this->assertSame('Schild falsch gelesen', $sichtung->decision_note);
+        $this->assertSame($fahrt->id, $sichtung->consolidated_trip_id);
+    }
+
+    public function test_ingest_comment_with_course_change_reopens(): void
+    {
+        $this->fahrt();
+        $this->sende($this->body(notiz: 'Ersatzfahrzeug'))->assertOk();
+        Sighting::query()->update(['status' => SightingStatus::Accepted->value, 'decided_at' => now()]);
+
+        $this->sende($this->body(kurs: '07', notiz: 'Kurs nachgetragen'))
+            ->assertOk()
+            ->assertJsonPath('data.results.0.outcome', 'updated');
+
+        $sichtung = Sighting::query()->sole();
+        $this->assertSame(SightingStatus::Pending, $sichtung->status);
+        $this->assertSame('Kurs nachgetragen', $sichtung->comment);
+    }
+
+    public function test_ingest_unchanged_comment_is_unchanged(): void
+    {
+        $this->sende($this->body(notiz: 'Ersatzfahrzeug'))->assertOk();
+
+        $this->sende($this->body(notiz: 'Ersatzfahrzeug'))
+            ->assertOk()
+            ->assertJsonPath('data.results.0.outcome', 'unchanged');
+    }
+
+    /**
+     * Fehlt die Notiz oder ist sie null, gibt es keine — eine früher übertragene wird gelöscht.
+     */
+    public function test_ingest_missing_comment_clears_it(): void
+    {
+        $this->sende($this->body(notiz: 'Ersatzfahrzeug'))->assertOk();
+
+        $this->sende($this->body())->assertOk()->assertJsonPath('data.results.0.outcome', 'updated');
+        $this->assertNull(Sighting::query()->sole()->comment);
+
+        $this->sende($this->body(notiz: 'Ersatzfahrzeug'))->assertOk();
+        $body = $this->body();
+        $body['sightings'][0]['comment'] = null;
+
+        $this->sende($body)->assertOk()->assertJsonPath('data.results.0.outcome', 'updated');
+        $this->assertNull(Sighting::query()->sole()->comment);
+    }
+
+    /**
+     * Höchstens 500 Zeichen — gezählt werden Zeichen, nicht Bytes.
+     */
+    public function test_ingest_rejects_too_long_comment(): void
+    {
+        $this->sende($this->body(notiz: str_repeat('a', 501)))->assertStatus(422)->assertJsonPath('error.code', 422);
+
+        $this->sende($this->body(notiz: str_repeat('ä', 500)))->assertOk();
+        $this->assertSame(500, mb_strlen((string) Sighting::query()->sole()->comment));
     }
 
     public function test_ingest_rejects_too_many_sightings(): void

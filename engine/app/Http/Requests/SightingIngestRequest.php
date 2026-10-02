@@ -71,6 +71,7 @@ final class SightingIngestRequest extends ApiFormRequest
             'sightings.*.observed_at' => ['required', self::UTC],
             'sightings.*.departure_planned' => ['required', self::UTC],
             'sightings.*.departure_actual' => ['nullable', self::UTC],
+            'sightings.*.comment' => ['nullable', 'string', 'max:500'],
         ];
     }
 }

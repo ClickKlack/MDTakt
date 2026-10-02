@@ -23,7 +23,8 @@ export interface Course {
   /**
    * Ein anderer Umlauf trägt dieselbe Nummer **auf einer gemeinsamen Linie**. Die Kursnummer ist
    * je Linie bzw. Linienkombination eindeutig, nicht netzweit (KURSE §2 K3): Die „2" der Linie 8
-   * ist ein anderer Umlauf als die „2" der Linie 6 und keine Dublette.
+   * ist ein anderer Umlauf als die „2" der Linie 6 und keine Dublette. Ein Umlauf ohne Fahrten
+   * zählt nicht — er hängt an keiner Linie und steht in der Kurs-Übersicht gesondert.
    */
   duplicate: boolean
 }

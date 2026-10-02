@@ -504,8 +504,8 @@ final class CourseSequenceService
         return [[
             'code' => 'course_empty_after',
             'message' => sprintf(
-                '%d %s bleiben danach ohne Fahrten (%s). Die Nummern sind wieder frei; die leeren Umläufe melden '
-                .'sich bis dahin als Dublette und lassen sich unter „Kurse" löschen.',
+                '%d %s bleiben danach ohne Fahrten (%s). Die Nummern sind wieder frei; die leeren Umläufe stehen '
+                .'unter „Kurse" gesondert und lassen sich dort löschen.',
                 count($leer),
                 count($leer) === 1 ? 'Umlauf' : 'Umläufe',
                 implode(', ', $leer),

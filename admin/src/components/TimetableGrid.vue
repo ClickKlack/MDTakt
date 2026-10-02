@@ -122,6 +122,13 @@ async function feldBereit(vnode: VNode): Promise<void> {
 }
 
 function uebernimm(trip: TimetableTrip): void {
+  // Nur einmal uebernehmen: Enter schliesst das Feld, und das Entfernen loest danach noch
+  // `blur` aus (auf dem Smartphone verlaesslich). Ohne diese Sperre ging die Nummer zweimal
+  // raus, und die Engine legte zwei Kurse an.
+  if (bearbeitet.value !== trip.id) {
+    return
+  }
+
   const wert = eingabe.value.trim()
   bearbeitet.value = null
 

@@ -905,8 +905,8 @@ components:
             Ein anderer Umlauf im selben (Periode, Fahrplantyp) traegt dieselbe Nummer **auf einer
             gemeinsamen Linie**. Die Kursnummer ist je Linie bzw. Linienkombination eindeutig, nicht
             netzweit (KURSE §2 K3): Die „2" der Linie 8 ist ein anderer Umlauf als die „2" der Linie
-            6 und wird hier nicht gemeldet. Gemeldet wird auch ein Kurs ohne Fahrten — er haengt an
-            keiner Linie und kollidiert deshalb mit jeder.
+            6 und wird hier nicht gemeldet. Ein Kurs ohne Fahrten zaehlt nicht — er haengt an keiner
+            Linie und widerspricht damit keinem (geaendert 02.10.2026); er ist selbst nie `duplicate`.
 
     CourseListResponse:
       type: object
@@ -1483,9 +1483,8 @@ components:
                       `number_style_mismatch`: Die Version traegt bereits Kurse mit anderer
                       Nullpolsterung (`03` gegen `3`) — es entstuenden zwei Kurse, die fuer den
                       Menschen derselbe sind. `course_empty_after`: Nach `clear` bleibt ein Kurs
-                      ohne jede Fahrt zurueck; er meldet sich dann in beiden Uebersichten als
-                      `duplicate`. Geloescht wird er **nicht** — dafuer gibt es
-                      `DELETE /api/v1/admin/courses/{course}`.
+                      ohne jede Fahrt zurueck (`trip_count: 0`). Geloescht wird er **nicht** —
+                      dafuer gibt es `DELETE /api/v1/admin/courses/{course}`.
                   message: { type: string }
 
     StopGroupStop:

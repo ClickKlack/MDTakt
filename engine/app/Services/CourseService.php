@@ -154,33 +154,66 @@ final class CourseService
      * mit derselben Nummer.
      *
      * Ein Kurs ohne Fahrten ist noch an keine Linie gebunden und nimmt jede auf.
+     *
+     * **Suchen und Anlegen laufen unter einer Sperre je Strang.** Zwei gleichzeitige Anfragen
+     * für dieselbe Nummer — etwa Enter und Blur vom Smartphone — fanden sonst beide nichts,
+     * legten je einen Kurs an, und der zweite `assign()` ließ den ersten leer zurück (am
+     * 02.10.2026 so geschehen: Kurs 113/114 auf der 51). Mit der Sperre wartet die zweite
+     * Anfrage und findet den Kurs der ersten — leer oder schon mit Fahrten, beides passt.
      */
     public function findOrCreateForChain(ConsolidatedTrip $trip, string $number): Course
     {
         $version = $trip->lineVersion;
         $eigeneLinien = $this->linesOfTrips($this->links->chainFor($trip));
 
-        // Führende Nullen zählen nicht: Eine Sichtung „3" landet auf dem vorhandenen Kurs „03".
-        $kandidaten = Course::query()
-            ->where('period_id', $version->period_id)
-            ->where('day_type', $version->day_type->value)
-            ->orderBy('id')
-            ->get()
-            ->filter(static fn (Course $kurs): bool => Course::sameNumber($kurs->number, $number));
+        return DB::transaction(function () use ($version, $eigeneLinien, $number): Course {
+            $this->lockStrand($version->period_id, $version->day_type->value);
 
-        foreach ($kandidaten as $kurs) {
-            $kursLinien = $this->linesOfCourse($kurs->id);
+            // Führende Nullen zählen nicht: Eine Sichtung „3" landet auf dem vorhandenen Kurs „03".
+            $kandidaten = Course::query()
+                ->where('period_id', $version->period_id)
+                ->where('day_type', $version->day_type->value)
+                ->orderBy('id')
+                ->get()
+                ->filter(static fn (Course $kurs): bool => Course::sameNumber($kurs->number, $number));
 
-            if ($kursLinien === [] || array_intersect($kursLinien, $eigeneLinien) !== []) {
-                return $kurs;
+            foreach ($kandidaten as $kurs) {
+                $kursLinien = $this->linesOfCourse($kurs->id);
+
+                if ($kursLinien === [] || array_intersect($kursLinien, $eigeneLinien) !== []) {
+                    return $kurs;
+                }
             }
+
+            $kurs = Course::query()->create([
+                'period_id' => $version->period_id,
+                'day_type' => $version->day_type->value,
+                'number' => $number,
+            ]);
+
+            Log::debug('Course created for chain', [
+                'course_id' => $kurs->id,
+                'course_number' => $number,
+                'period_id' => $version->period_id,
+                'day_type' => $version->day_type->value,
+            ]);
+
+            return $kurs;
+        });
+    }
+
+    /**
+     * Sperrt den Strang (Periode + Fahrplantyp) bis zum Ende der laufenden Transaktion.
+     *
+     * Nur auf PostgreSQL: SQLite schreibt ohnehin seriell, und die Tests laufen dort.
+     */
+    private function lockStrand(int $periodId, string $dayType): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
         }
 
-        return Course::query()->create([
-            'period_id' => $version->period_id,
-            'day_type' => $version->day_type->value,
-            'number' => $number,
-        ]);
+        DB::select('SELECT pg_advisory_xact_lock(?::bigint)', [crc32("courses:{$periodId}:{$dayType}")]);
     }
 
     /**
@@ -313,7 +346,9 @@ final class CourseService
             $a = $linienJeKurs[$kurs->id] ?? [];
             $b = $linienJeKurs[$anderer->id] ?? [];
 
-            if ($a === [] || $b === [] || array_intersect($a, $b) !== []) {
+            // Ein Kurs ohne Fahrten haengt an keiner Linie und widerspricht damit keinem.
+            // Er erscheint in der Liste der leeren Umlaeufe, nicht als Dublette.
+            if ($a !== [] && $b !== [] && array_intersect($a, $b) !== []) {
                 return true;
             }
         }

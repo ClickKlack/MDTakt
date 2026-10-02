@@ -5,8 +5,11 @@ import AppHeader from '../components/AppHeader.vue'
 import CourseGridTable from '../components/CourseGridTable.vue'
 import LineBadge from '../components/LineBadge.vue'
 import {
+  deleteCourse,
   fetchCourseGrid,
+  fetchCourses,
   fetchLineCourses,
+  type Course,
   type CourseChain,
   type CourseChainTrip,
   type CourseGrid,
@@ -47,6 +50,47 @@ const nurUnvollstaendige = ref(false)
 const ansicht = ref<'kette' | 'tabelle'>('kette')
 
 const grid = ref<CourseGrid | null>(null)
+
+/**
+ * Umlaeufe ohne jede Fahrt im gewaehlten Strang (Periode + Fahrplantyp). Sie haengen an keiner
+ * Linie und tauchen deshalb in keiner Linienansicht auf — sie entstehen beim Loesen oder Umhaengen
+ * einer Kette. Als Dublette zaehlen sie nicht; hier werden sie sichtbar und lassen sich loeschen.
+ */
+const leereKurse = ref<Course[]>([])
+const loeschtKurs = ref<number | null>(null)
+
+async function ladeLeereKurse(): Promise<void> {
+  if (gewaehltePeriode.value === null) {
+    leereKurse.value = []
+    return
+  }
+
+  try {
+    const kurse = await fetchCourses(gewaehltePeriode.value, dayType.value)
+    leereKurse.value = kurse.filter((k) => k.trip_count === 0)
+  } catch {
+    // Nur eine Zusatzauskunft — die Linienansicht bleibt davon unberuehrt.
+    leereKurse.value = []
+  }
+}
+
+async function loescheLeerenKurs(kurs: Course): Promise<void> {
+  if (!confirm(`Leeren Umlauf „${kurs.number}" löschen?`)) {
+    return
+  }
+
+  loeschtKurs.value = kurs.id
+  error.value = null
+
+  try {
+    await deleteCourse(kurs.id)
+    leereKurse.value = leereKurse.value.filter((k) => k.id !== kurs.id)
+  } catch {
+    error.value = `Der Umlauf „${kurs.number}" konnte nicht gelöscht werden.`
+  } finally {
+    loeschtKurs.value = null
+  }
+}
 
 /**
  * Der Name einer Tabelle, wenn die Linie mehrere Laufwege fährt: die beiden häufigsten
@@ -129,7 +173,9 @@ async function lade(): Promise<void> {
   try {
     // Die Kennzahlen und die Fahrten ohne Kurs kommen immer aus der Uebersicht; die Tabelle
     // liegt auf einem eigenen Endpunkt und wird nur geholt, wenn sie gerade gezeigt wird.
-    const [u, g] = await Promise.all([
+    const [, u, g] = await Promise.all([
+      // Haengt nur am Strang, nicht an der Linie — mitgeladen, weil es billig ist.
+      ladeLeereKurse(),
       fetchLineCourses(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value, gewaehlterStand.value),
       ansicht.value === 'tabelle'
         ? fetchCourseGrid(gewaehlteLinie.value, gewaehltePeriode.value, dayType.value, gewaehlterStand.value)
@@ -321,6 +367,37 @@ watch(gewaehlterStand, (neu, alt) => {
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- Leere Umläufe: gehören zum Strang, nicht zur Linie — deshalb hier über der Linienansicht. -->
+        <div v-if="leereKurse.length > 0" class="mt-4 rounded-lg bg-amber-50 px-4 py-3">
+          <p class="text-sm text-amber-900">
+            <strong>{{ leereKurse.length }}</strong>
+            {{ leereKurse.length === 1 ? 'Umlauf ohne Fahrten' : 'Umläufe ohne Fahrten' }} in diesem Fahrplantyp — sie
+            bleiben beim Lösen oder Umhängen einer Kette zurück und hängen an keiner Linie.
+          </p>
+          <ul class="mt-2 flex flex-wrap gap-2">
+            <li
+              v-for="kurs in leereKurse"
+              :key="kurs.id"
+              class="flex items-center gap-2 rounded-md bg-white px-2 py-1 text-sm shadow-sm"
+            >
+              <span class="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-white">
+                {{ kurs.number }}
+              </span>
+              <span v-if="kurs.note" class="max-w-48 truncate text-xs text-slate-600" :title="kurs.note">
+                {{ kurs.note }}
+              </span>
+              <button
+                type="button"
+                class="rounded px-1.5 py-0.5 text-xs text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                :disabled="loeschtKurs === kurs.id"
+                @click="loescheLeerenKurs(kurs)"
+              >
+                Löschen
+              </button>
+            </li>
+          </ul>
         </div>
 
         <!-- Versionsstände: nur nötig, wenn eine der beteiligten Linien in dieser Periode

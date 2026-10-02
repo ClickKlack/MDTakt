@@ -94,9 +94,10 @@ Ein Unique-Index bleibt aus, weil die tragfähige Bedingung („dieselbe Nummer 
 berührenden Linien") keine Spaltenkombination ist — die Linienmenge eines Kurses steht in
 `course_trips` und ändert sich mit jeder Verknüpfung. Die Prüfung gehört deshalb in den Service.
 Als **Dublette** gemeldet wird entsprechend nur, was sich wirklich widerspricht: dieselbe Nummer
-auf überschneidenden Linien (oder ein Kurs ohne Fahrten, der an keine Linie gebunden ist und
-deshalb mit jedem kollidiert). Zwei Nummern „2" auf 6 und 8 sind der Normalfall und lösen keine
-Warnung mehr aus.
+auf überschneidenden Linien. Zwei Nummern „2" auf 6 und 8 sind der Normalfall und lösen keine
+Warnung mehr aus. Ein Kurs **ohne Fahrten** zählt nicht (geändert 02.10.2026): Er hängt an keiner
+Linie, widerspricht also keinem Kurs — vorher markierte ein einziger leerer „1" sämtliche Umläufe
+„1" des Strangs. Leere Kurse zeigt die Kurs-Übersicht stattdessen gesondert, mit Löschknopf.
 
 Dies **korrigiert die Annahme E2** in `MDKURSTRACKER_REQUIREMENTS.md` („Umlauf =
 `(line, course_number, service_date)`"). Ein Umlauf kann mehrere Linien umfassen; das Tripel
@@ -390,8 +391,8 @@ Zuordnung wird bewahrt und nicht geraten. Das Entfernen lässt die Kette stehen,
 Zwei Folgen, die sichtbar gemacht werden müssen: Das Entfernen wirkt über die ganze Kette — vier
 markierte Spalten können zwölf Fahrten treffen, und der Bedienknopf trägt deshalb die Zahl der
 Fahrten, nicht der Spalten. Und bleibt ein Kurs danach ohne jede Fahrt, ist seine Nummer zwar frei,
-die leere Hülle meldet sich aber als Dublette (sie hängt an keiner Linie und kollidiert mit jeder).
-Gelöscht wird sie **nicht** — das bleibt eine ausdrückliche Entscheidung über den Kurs-Endpunkt.
+die leere Hülle bleibt stehen und erscheint in der Kurs-Übersicht unter „Leere Umläufe".
+Gelöscht wird sie **nicht** von selbst — das bleibt eine ausdrückliche Entscheidung, dort per Knopf.
 
 Betriebshof-Fahrten bleiben beim Auflösen stehen, solange man sie nicht ausdrücklich einschließt:
 „Verbindungen auflösen" meint die Anschlüsse, und eine Betriebsfahrt ist eine eigenständige Aussage,

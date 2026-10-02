@@ -342,9 +342,34 @@ final class CourseTest extends TestCase
     }
 
     /**
-     * K3: Zwei Umläufe mit derselben Nummer sind kein Fehler — aber sie fallen auf.
+     * Die zweite von zwei gleichzeitigen Anfragen wartet auf die Sperre und findet dann den
+     * Kurs, den die erste gerade angelegt, aber noch nicht befüllt hat. Den muss sie nehmen —
+     * sonst bleibt einer leer zurück und meldet sich als Dublette (02.10.2026, Linie 51).
      */
-    public function test_a_duplicate_number_is_reported_not_rejected(): void
+    public function test_an_empty_course_with_the_number_is_reused(): void
+    {
+        $version = $this->version('51');
+        $fahrt = $this->f->fahrt($version, ['A', 'B'], ['06:00:00', '06:30:00']);
+
+        $leer = Course::query()->create([
+            'period_id' => $version->period_id,
+            'day_type' => 'mo_fr',
+            'number' => '1',
+        ]);
+
+        $this->setzeKurs($fahrt, ['number' => '1'])
+            ->assertOk()
+            ->assertJsonPath('data.course.id', $leer->id)
+            ->assertJsonPath('data.course.duplicate', false);
+
+        $this->assertSame(1, Course::query()->where('number', '1')->count());
+    }
+
+    /**
+     * K3: Zwei Umläufe mit derselben Nummer sind kein Fehler — sie werden angelegt, nicht
+     * abgewiesen. Solange beide leer sind, widersprechen sie sich auch nicht.
+     */
+    public function test_a_duplicate_number_is_not_rejected(): void
     {
         $version = $this->version();
         $periode = $version->period_id;
@@ -354,9 +379,32 @@ final class CourseTest extends TestCase
             'period_id' => $periode,
             'day_type' => 'mo_fr',
             'number' => '03',
-        ])->assertCreated()->assertJsonPath('data.duplicate', true);
+        ])->assertCreated()->assertJsonPath('data.duplicate', false);
 
         $this->assertSame(2, Course::query()->where('number', '03')->count());
+    }
+
+    /**
+     * Ein leerer Kurs hängt an keiner Linie — er markiert die gefüllten Kurse seiner Nummer
+     * nicht als Dublette und ist selbst keine. Er steht in der Liste der leeren Umläufe
+     * (02.10.2026: ein leerer „1" markierte alle sechs Mo–Fr-Umläufe „1").
+     */
+    public function test_an_empty_course_is_no_duplicate(): void
+    {
+        $version = $this->version('6');
+        $fahrt = $this->f->fahrt($version, ['A', 'B'], ['06:00:00', '06:30:00']);
+
+        $kursId = $this->setzeKurs($fahrt, ['number' => '1'])->assertOk()->json('data.course.id');
+        $leer = Course::query()->create(['period_id' => $version->period_id, 'day_type' => 'mo_fr', 'number' => '1']);
+
+        $kurse = collect($this->withToken($this->token())
+            ->getJson("/api/v1/admin/courses?period={$version->period_id}&day_type=mo_fr")
+            ->assertOk()
+            ->json('data'))->keyBy('id');
+
+        $this->assertFalse($kurse[$kursId]['duplicate']);
+        $this->assertFalse($kurse[$leer->id]['duplicate']);
+        $this->assertSame(0, $kurse[$leer->id]['trip_count']);
     }
 
     /**

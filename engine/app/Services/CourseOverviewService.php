@@ -189,8 +189,9 @@ final class CourseOverviewService
     /**
      * Trägt ein anderer Umlauf dieselbe Nummer auf einer gemeinsamen Linie?
      *
-     * Ein Kurs ohne Fahrten ist an keine Linie gebunden und kollidiert deshalb mit jeder —
-     * eine leere Hülle mit vergebener Nummer ist genau das, was hier auffallen soll.
+     * Ein Kurs ohne Fahrten zählt nicht: Er hängt an keiner Linie und würde sonst jeden Kurs
+     * seiner Nummer als Dublette markieren (geändert 02.10.2026). Leere Kurse zeigt die
+     * Kurs-Übersicht gesondert an.
      *
      * @param  Collection<int, Course>  $alle
      * @param  array<int, array<int, string>>  $linienJeKurs
@@ -205,7 +206,9 @@ final class CourseOverviewService
             $a = $linienJeKurs[$kurs->id] ?? [];
             $b = $linienJeKurs[$anderer->id] ?? [];
 
-            if ($a === [] || $b === [] || array_intersect($a, $b) !== []) {
+            // Ein Kurs ohne Fahrten haengt an keiner Linie und widerspricht damit keinem.
+            // Er erscheint in der Liste der leeren Umlaeufe, nicht als Dublette.
+            if ($a !== [] && $b !== [] && array_intersect($a, $b) !== []) {
                 return true;
             }
         }

@@ -74,8 +74,10 @@ const eingaben = computed<AutoLinkParams | null>(() => {
     ? {
         ...props.params,
         action: 'link',
-        min_turnaround_minutes: mindestwende.value,
-        max_turnaround_minutes: hoechstwende.value,
+        // Unberuehrt geht nichts mit — dann rechnet die Engine mit ihren Vorgaben, und die
+        // Felder uebernehmen genau die nach der Vorschau.
+        min_turnaround_minutes: beruehrt.value ? mindestwende.value : undefined,
+        max_turnaround_minutes: beruehrt.value ? hoechstwende.value : undefined,
         through_stop: tauschpunkt.value,
       }
     : { ...props.params, action: 'unlink', include_terminals: auchBetriebsfahrten.value }
@@ -103,12 +105,16 @@ async function hole(): Promise<void> {
   try {
     vorschau.value = await previewAutoLinks(eingabe)
 
-    // Die Engine kennt die konfigurierten Vorgaben — das Feld uebernimmt sie beim ersten Mal,
-    // damit die Schwelle nur an einer Stelle steht.
+    // Die Engine kennt die konfigurierten Vorgaben — das Feld uebernimmt sie, solange niemand
+    // es angefasst hat, damit die Schwelle nur an einer Stelle steht. Uebernommen wird, womit
+    // die Vorschau **gerechnet** hat (`filter`), nicht die Vorgabe: Frueher ueberschrieb dieser
+    // Schritt eine vor der ersten Vorschau eingetippte 0 mit der Vorgabe 3 — die Vorschau
+    // zeigte die Paare zu 0, der Knopf legte die zu 3 an.
     if (!beruehrt.value) {
-      mindestwende.value = Math.round(vorschau.value.defaults.min_turnaround_seconds / 60)
-      hoechstwende.value = Math.round(vorschau.value.defaults.max_turnaround_seconds / 60)
-      beruehrt.value = true
+      uebernimmt = true
+      mindestwende.value = Math.round(vorschau.value.filter.min_turnaround_seconds / 60)
+      hoechstwende.value = Math.round(vorschau.value.filter.max_turnaround_seconds / 60)
+      uebernimmt = false
     }
   } catch (e: unknown) {
     vorschau.value = null
@@ -118,7 +124,28 @@ async function hole(): Promise<void> {
   }
 }
 
+/** Hat der Pflegende eine der beiden Wendezeiten selbst gesetzt? */
 const beruehrt = ref(false)
+/** Die Vorschau schreibt gerade die Vorgaben in die Felder — das ist keine Eingabe. */
+let uebernimmt = false
+
+/**
+ * Eine geaenderte Wendezeit macht die Vorschau ungueltig — sonst stuenden Paare zur alten
+ * Schwelle ueber einem Knopf, der mit der neuen rechnet. `sync`, damit die Uebernahme der
+ * Vorgaben in {@link hole} sich per Schalter ausnehmen kann.
+ */
+watch(
+  [mindestwende, hoechstwende],
+  () => {
+    if (uebernimmt) {
+      return
+    }
+
+    beruehrt.value = true
+    vorschau.value = null
+  },
+  { flush: 'sync' },
+)
 
 async function fuehreAus(): Promise<void> {
   const eingabe = eingaben.value

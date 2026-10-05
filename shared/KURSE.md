@@ -401,6 +401,43 @@ direkt an der Fahrt — die Marke trägt dafür ein „Lösen" wie jeder Anschlu
 die sich setzen lässt, muss sich auch zurücknehmen lassen; sonst bliebe ein Fehlgriff für immer
 stehen.
 
+### K10 — Ein Durchlauf ist ein Anschluss mit eigener Gewissheit
+
+**Entschieden 05.10.2026, noch nicht umgesetzt (ROADMAP I-16).** An einem Tauschpunkt (K7) verlässt
+das Fahrzeug den Halt nicht, nur die Liniennummer wechselt: Am City Carré wird aus der 1 die 5. Das
+ist eine andere Aussage als ein Anschluss an einer Wendestelle, und zwar nicht in der Physik, sondern
+in der **Gewissheit**:
+
+| | Wende | Durchlauf |
+|---|---|---|
+| Fahrzeug fährt weiter | laut Pflege | laut Pflege |
+| Woher der Anschluss kommt | rekonstruiert aus Wendezeit und Fahrplanlogik | fast zwingend — der Fahrgast bleibt sitzen |
+| Sichtung davor sagt etwas über danach | nein | ja, als abgeleitete Aussage |
+
+**Ein Merkmal am Anschluss, keine neue Art.** `trip_links.through_run` (boolean, Vorgabe `false`),
+nur bei `kind = link`. Start und Ende bleiben, was sie sind; ein Durchlauf ist ein Anschluss.
+
+**Gesetzt, nicht berechnet** — aus demselben Grund wie der Tauschpunkt-Schalter selbst: Halt-Gleichheit
+allein trennt nicht, eine Wendeschleife mit nur einem Halt sieht genauso aus.
+
+- Der **Mengen-Lauf** setzt das Merkmal, wenn der Haken *Tauschpunkt* gesetzt ist.
+- Beim **Einzelklick** steht eine Checkbox; vorbelegt ist sie, wenn die Ankunft am selben Halt endet,
+  an dem die Abfahrt beginnt.
+- **Bestand:** Die vor K10 angelegten Anschlüsse am City Carré und an der Listemannstraße tragen das
+  Merkmal nicht. Ein Nachtrag je Haltestelle — mit Vorschau, nach demselben Halt-Kriterium — holt es nach.
+
+**Die Sichtung wirkt über den Durchlauf, nicht über die Wende.** Eine Sichtung an einer Fahrt färbt die
+über Durchläufe verbundenen Fahrten in einer **eigenen, schwächeren Stufe** („über Durchlauf
+bestätigt"), nicht grün. Die Weitergabe endet an der ersten Wende. Schwächer deshalb, weil auch ein
+Durchlauf brechen kann — Störung, Fahrzeugtausch.
+
+**Was K10 nicht berührt:**
+
+- Den **Matching-Algorithmus** (SPEC §3.2/§3.3): Eine Sichtung gehört weiter zu genau einer Fahrt. Die
+  Weitergabe ist eine abgeleitete Anzeige, keine zweite Zuordnung.
+- Die **Kursauskunft** (Fluss 2): bewusst in einem ersten Schritt nicht — sie ist der Vertrag mit dem
+  Tracker. Ob sie den Durchlauf nutzt, ist eine eigene Entscheidung.
+
 ---
 
 ## 3. Datenmodell
@@ -699,7 +736,8 @@ löst oder entfernt es erst — dafür gibt es K9.
   Nacht von Sonntag auf Montag eine Sonntagsnacht ist. Der `mo_fr`-Strang fasst für Nachtlinien
   zwei Fahrpläne zusammen; der Editor erbt diese Unschärfe.
 - **Zufluss aus Sichtungen** (I-04/I-05) — wie eine beobachtete Kursnummer auf eine gepflegte Kette
-  trifft und was bei Widerspruch gilt, ist noch nicht festgelegt.
+  trifft und was bei Widerspruch gilt, ist noch nicht festgelegt. Ein erster Baustein steht mit K10:
+  Über einen Durchlauf wirkt eine Sichtung als abgeleitete Aussage weiter, über eine Wende nicht.
 - **Umläufe über Mitternacht hinaus** — eine Kette, die um 25:30 endet, gehört zum Betriebstag des
   Vortags. Das Modell trägt es (GTFS-Wallclock bleibt erhalten); ob die Anzeige es deutlich genug
   macht, zeigt die Pflege.

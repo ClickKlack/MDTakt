@@ -117,7 +117,7 @@ final class TripLinkAutoService
         [$paare, $uebersprungen] = $this->planLinks($bereich, $endend, $beginnend, $scope);
 
         if ($anwenden) {
-            [$paare, $weitere] = $this->writeLinks($paare);
+            [$paare, $weitere] = $this->writeLinks($paare, $scope->throughStop);
             $uebersprungen = [...$uebersprungen, ...$weitere];
         }
 
@@ -488,9 +488,10 @@ final class TripLinkAutoService
 
     /**
      * @param  array<int, array<string, mixed>>  $paare
+     * @param  bool  $durchlauf  Lauf am Tauschpunkt — jedes Paar ist dann ein Durchlauf
      * @return array{0: array<int, array<string, mixed>>, 1: array<int, array<string, mixed>>}
      */
-    private function writeLinks(array $paare): array
+    private function writeLinks(array $paare, bool $durchlauf): array
     {
         $geschrieben = [];
         $uebersprungen = [];
@@ -518,7 +519,9 @@ final class TripLinkAutoService
                 continue;
             }
 
-            $this->links->create(TripLinkKind::Link, $von, $nach);
+            // Am Tauschpunkt ist jedes Paar ein Durchlauf: Gepaart wurde nur, was am selben Halt
+            // weiterfährt (KURSE §2 K10).
+            $this->links->create(TripLinkKind::Link, $von, $nach, throughRun: $durchlauf);
 
             // Zwei verknüpfte Fahrten sind dasselbe Fahrzeug, also derselbe Kurs (KURSE §2 K2).
             // Gleiche Nummer auf beiden Seiten wird zusammengeführt; verschiedene Nummern

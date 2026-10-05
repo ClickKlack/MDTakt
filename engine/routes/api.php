@@ -98,6 +98,9 @@ Route::prefix('v1')->group(function (): void {
             // kommt dazu, sobald er feststeht (KURSE §3.2).
             Route::put('trip-links/{tripLink}/depot', [TripLinkController::class, 'depot'])
                 ->name('admin.trip-links.depot');
+            // Wende oder Durchlauf (KURSE §2 K10) — nachtragbar, ohne den Anschluss zu loesen.
+            Route::put('trip-links/{tripLink}/through-run', [TripLinkController::class, 'throughRun'])
+                ->name('admin.trip-links.through-run');
             Route::delete('trip-links/{tripLink}', [TripLinkController::class, 'destroy'])->name('admin.trip-links.destroy');
 
             // Betriebshoefe — das Verzeichnis hinter Aus- und Einruecken (KURSE §3.2).

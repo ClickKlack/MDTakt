@@ -38,6 +38,8 @@ const emit = defineEmits<{
   link: [fromTripId: number, toTripId: number]
   mark: [tripId: number, kind: 'start' | 'end']
   unlink: [linkId: number]
+  /** Wende oder Durchlauf umschalten — der Anschluss bleibt stehen (KURSE §2 K10). */
+  throughRun: [linkId: number, throughRun: boolean]
   assignCourse: [tripId: number, number: string]
   detachCourse: [tripId: number]
   rangePick: [tripId: number]
@@ -689,6 +691,26 @@ function aufEscape(e: KeyboardEvent): void {
           <span v-if="zeile.ending.line !== zeile.starting.line" class="rounded-full bg-violet-100 px-2 py-0.5 text-violet-900">
             Linienwechsel
           </span>
+          <!-- Wende oder Durchlauf: gesetzt, nicht berechnet (KURSE §2 K10). Ein Klick schaltet
+               um, ohne den Anschluss — und damit die Kursnummer — anzufassen. -->
+          <button
+            type="button"
+            class="rounded-full px-2 py-0.5 transition disabled:opacity-50"
+            :class="
+              zeile.ending.decision.through_run
+                ? 'bg-sky-600 text-white hover:bg-sky-700'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            "
+            :disabled="busy"
+            :title="
+              zeile.ending.decision.through_run
+                ? 'Durchlauf: Das Fahrzeug fährt am selben Halt weiter, eine Sichtung gilt auch danach. Klicken für Wende.'
+                : 'Wende: Eine Sichtung davor sagt nichts über danach. Klicken, wenn das Fahrzeug hier nur durchfährt.'
+            "
+            @click="emit('throughRun', zeile.ending.decision.id, !zeile.ending.decision.through_run)"
+          >
+            {{ zeile.ending.decision.through_run ? 'Durchlauf' : 'Wende' }}
+          </button>
           <button
             type="button"
             class="text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:opacity-50"

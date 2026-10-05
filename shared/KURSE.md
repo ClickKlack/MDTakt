@@ -403,7 +403,7 @@ stehen.
 
 ### K10 — Ein Durchlauf ist ein Anschluss mit eigener Gewissheit
 
-**Entschieden 05.10.2026, noch nicht umgesetzt (ROADMAP I-16).** An einem Tauschpunkt (K7) verlässt
+**Entschieden und umgesetzt 05.10.2026 (ROADMAP I-16).** An einem Tauschpunkt (K7) verlässt
 das Fahrzeug den Halt nicht, nur die Liniennummer wechselt: Am City Carré wird aus der 1 die 5. Das
 ist eine andere Aussage als ein Anschluss an einer Wendestelle, und zwar nicht in der Physik, sondern
 in der **Gewissheit**:
@@ -420,15 +420,24 @@ nur bei `kind = link`. Start und Ende bleiben, was sie sind; ein Durchlauf ist e
 **Gesetzt, nicht berechnet** — aus demselben Grund wie der Tauschpunkt-Schalter selbst: Halt-Gleichheit
 allein trennt nicht, eine Wendeschleife mit nur einem Halt sieht genauso aus.
 
-- Der **Mengen-Lauf** setzt das Merkmal, wenn der Haken *Tauschpunkt* gesetzt ist.
-- Beim **Einzelklick** steht eine Checkbox; vorbelegt ist sie, wenn die Ankunft am selben Halt endet,
-  an dem die Abfahrt beginnt.
+- Der **Mengen-Lauf** setzt das Merkmal, wenn der Haken *Tauschpunkt* gesetzt ist. Der Haken stellt
+  zugleich die Mindestwende auf 0 — am Tauschpunkt liegen Ankunft und Abfahrt oft auf derselben
+  Minute; ohne Haken gilt wieder der vorige Wert.
+- Beim **Einzelklick** wählt ein Schalter über dem Board, als was der nächste Anschluss entsteht:
+  **Wende** (Vorgabe) oder **Durchlauf**. Er gilt für jeden weiteren Klick an dieser Haltestelle und
+  springt beim Haltestellenwechsel auf Wende zurück. Statt einer Checkbox je Anschluss, wie
+  ursprünglich geplant — an einem Tauschpunkt hieße das, jeden Anschluss einzeln umzustellen.
+- **Nachträglich** schaltet ein Chip **Wende ⇄ Durchlauf** am angelegten Anschluss um, ohne den
+  Anschluss und damit die Kursnummer anzufassen.
 - **Bestand:** Die vor K10 angelegten Anschlüsse am City Carré und an der Listemannstraße tragen das
-  Merkmal nicht. Ein Nachtrag je Haltestelle — mit Vorschau, nach demselben Halt-Kriterium — holt es nach.
+  Merkmal nicht. `php artisan trip-links:mark-through-runs <Haltestelle> [--apply]` holt es je
+  Haltestelle nach — ohne `--apply` nur Vorschau, nach demselben Halt-Kriterium.
 
 **Die Sichtung wirkt über den Durchlauf, nicht über die Wende.** Eine Sichtung an einer Fahrt färbt die
 über Durchläufe verbundenen Fahrten in einer **eigenen, schwächeren Stufe** („über Durchlauf
-bestätigt"), nicht grün. Die Weitergabe endet an der ersten Wende. Schwächer deshalb, weil auch ein
+bestätigt", `seen_through`, hellgrün mit Rand), nicht grün. Sie geht in beide Richtungen, nur von
+bestätigten oder angenommenen Sichtungen aus, und nur mit derselben Nummer; eine eigene Markierung
+der Fahrt (`seen`, `disputed`) geht vor. Die Weitergabe endet an der ersten Wende. Schwächer deshalb, weil auch ein
 Durchlauf brechen kann — Störung, Fahrzeugtausch.
 
 **Was K10 nicht berührt:**

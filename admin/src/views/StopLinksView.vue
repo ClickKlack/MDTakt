@@ -13,6 +13,7 @@ import {
   createTripLink,
   deleteTripLink,
   fetchStopLinkBoard,
+  setTripLinkThroughRun,
   type AutoLinkParams,
   type AutoLinkResult,
   type StopLinkBoard as Board,
@@ -250,7 +251,12 @@ async function verknuepfe(fromTripId: number, toTripId: number): Promise<void> {
   erfolg.value = null
 
   try {
-    const ergebnis = await createTripLink({ kind: 'link', from_trip_id: fromTripId, to_trip_id: toTripId })
+    const ergebnis = await createTripLink({
+      kind: 'link',
+      from_trip_id: fromTripId,
+      to_trip_id: toTripId,
+      through_run: neuerAnschluss.value === 'durchlauf',
+    })
     hinweise.value = ergebnis.warnings
 
     // Zwei verknuepfte Fahrten sind dasselbe Fahrzeug, also derselbe Kurs. Wurde er dabei
@@ -368,6 +374,26 @@ async function loese(linkId: number): Promise<void> {
 }
 
 /**
+ * Wende oder Durchlauf umschalten (KURSE §2 K10). Der Anschluss bleibt stehen — und mit ihm
+ * die Kursnummer —, nur seine Gewissheit aendert sich.
+ */
+async function schalteDurchlauf(linkId: number, throughRun: boolean): Promise<void> {
+  busy.value = true
+  error.value = null
+  hinweise.value = []
+  erfolg.value = null
+
+  try {
+    await setTripLinkThroughRun(linkId, throughRun)
+    await ladeBoard()
+  } catch (e: unknown) {
+    error.value = meldung(e, 'Wende oder Durchlauf konnte nicht gesetzt werden.')
+  } finally {
+    busy.value = false
+  }
+}
+
+/**
  * Den Betriebshof einer Betriebsfahrt setzen — `null` laesst ihn wieder offen.
  *
  * Getrennt vom Markieren, weil es die uebliche Reihenfolge ist: Erst wird markiert — das ist
@@ -400,6 +426,18 @@ function schalteLinie(linie: string): void {
 }
 
 // ---------------------------------------------------------------- Bereichsmodus
+
+/**
+ * Als was ein Einzelklick den Anschluss anlegt (KURSE §2 K10). Wende ist die Vorgabe — sie ist
+ * netzweit der Normalfall. An einem Tauschpunkt einmal umgestellt, gilt es fuer jeden weiteren
+ * Klick, statt jeden Anschluss einzeln umzuschalten.
+ */
+const neuerAnschluss = ref<'wende' | 'durchlauf'>('wende')
+
+// Eine andere Haltestelle ist meist eine Endstelle — der Durchlauf soll nicht mitwandern.
+watch(gewaehlteHaltestelle, () => {
+  neuerAnschluss.value = 'wende'
+})
 
 const autoModus = ref(false)
 const bereichVon = ref<number | null>(null)
@@ -859,6 +897,37 @@ watch(gewaehlterStand, (neu, alt) => {
             </p>
           </div>
 
+          <!-- Einzelklick: als Wende oder als Durchlauf anlegen. Nachtraeglich schaltet der Chip am
+               Anschluss um. -->
+          <div v-if="!autoModus" class="mt-3 flex flex-wrap items-center gap-3">
+            <span class="text-xs font-medium uppercase tracking-wide text-slate-500">Neuer Anschluss als</span>
+            <div class="flex gap-1 rounded-lg bg-slate-200/60 p-1">
+              <button
+                v-for="art in [
+                  { wert: 'wende', label: 'Wende' },
+                  { wert: 'durchlauf', label: 'Durchlauf' },
+                ] as const"
+                :key="art.wert"
+                type="button"
+                class="rounded-md px-3 py-1 text-sm transition"
+                :class="
+                  neuerAnschluss === art.wert
+                    ? art.wert === 'durchlauf'
+                      ? 'bg-sky-600 font-medium text-white shadow-sm'
+                      : 'bg-white font-medium text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:bg-white/60'
+                "
+                @click="neuerAnschluss = art.wert"
+              >
+                {{ art.label }}
+              </button>
+            </div>
+            <p class="max-w-xl text-xs text-slate-500">
+              Durchlauf, wo die Bahn nur kurz hält und am selben Halt weiterfährt (City Carré, Listemannstraße) —
+              eine Sichtung davor gilt dann auch danach.
+            </p>
+          </div>
+
           <AutoLinkPanel
             v-if="autoModus"
             :params="autoParams"
@@ -885,6 +954,7 @@ watch(gewaehlterStand, (neu, alt) => {
             @link="verknuepfe"
             @mark="markiere"
             @unlink="loese"
+            @through-run="schalteDurchlauf"
             @assign-course="setzeKurs"
             @detach-course="loeseKurs"
           />

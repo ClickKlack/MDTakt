@@ -110,15 +110,25 @@ function anschlussTitel(link: TimetableLink, seite: 'before' | 'after'): string 
     seite === 'before' ? `an ${formatClock(t.arrival_time)}` : `ab ${formatClock(t.departure_time)}`
   const kurs = t.course ? ` · Kurs ${t.course}` : ''
   const wende = link.turnaround_seconds !== null ? ` · Wende ${formatDuration(link.turnaround_seconds)}` : ''
-  const richtung = seite === 'before' ? 'Kommt von' : 'Fährt weiter als'
+  const richtung =
+    seite === 'before'
+      ? link.through_run
+        ? 'Durchlauf von'
+        : 'Kommt nach Wende von'
+      : link.through_run
+        ? 'Durchlauf als'
+        : 'Wendet und fährt weiter als'
 
   return `${richtung} Linie ${t.line} (${lauf}), ${zeit}${wende}${kurs} — klicken zum Springen`
 }
 
+/** Durchlauf kräftig, Wende hell, Aus-/Einrücken grau — dieselben Farben wie im Board. */
 function anschlussKlasse(link: TimetableLink): string {
-  return link.kind === 'link'
-    ? 'bg-sky-100 text-sky-900 hover:bg-sky-200'
-    : 'bg-slate-200 text-slate-700'
+  if (link.kind !== 'link') {
+    return 'bg-slate-200 text-slate-700'
+  }
+
+  return link.through_run ? 'bg-sky-600 text-white hover:bg-sky-700' : 'bg-sky-100 text-sky-900 hover:bg-sky-200'
 }
 
 /**

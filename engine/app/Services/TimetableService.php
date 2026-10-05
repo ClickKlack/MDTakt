@@ -336,7 +336,7 @@ final class TimetableService
                 $q->whereIn('tl.from_trip_id', $tripIds)->orWhereIn('tl.to_trip_id', $tripIds);
             })
             ->orderBy('tl.id')
-            ->get(['tl.from_trip_id', 'tl.to_trip_id', 'tl.kind', 'd.name as depot_name', 'd.short_name as depot_short_name']);
+            ->get(['tl.from_trip_id', 'tl.to_trip_id', 'tl.kind', 'tl.through_run', 'd.name as depot_name', 'd.short_name as depot_short_name']);
 
         if ($zeilen->isEmpty()) {
             return [];
@@ -401,6 +401,7 @@ final class TimetableService
             if ($von !== null && isset($eigene[$von])) {
                 $ergebnis[$von]['after'][] = [
                     'kind' => $kind->value,
+                    'through_run' => (bool) $z->through_run,
                     'trip' => $partner($nach),
                     'turnaround_seconds' => $wendezeit,
                     'depot' => $hof,
@@ -410,6 +411,7 @@ final class TimetableService
             if ($nach !== null && isset($eigene[$nach])) {
                 $ergebnis[$nach]['before'][] = [
                     'kind' => $kind->value,
+                    'through_run' => (bool) $z->through_run,
                     'trip' => $partner($von),
                     'turnaround_seconds' => $wendezeit,
                     'depot' => $hof,

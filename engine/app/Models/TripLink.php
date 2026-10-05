@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $to_trip_id
  * @property int $stop_id
  * @property TripLinkKind $kind
+ * @property bool $through_run
  * @property int|null $depot_id
  * @property string|null $note
  */
@@ -30,14 +31,14 @@ final class TripLink extends Model
     /** @use HasFactory<TripLinkFactory> */
     use HasFactory;
 
-    protected $fillable = ['from_trip_id', 'to_trip_id', 'stop_id', 'kind', 'depot_id', 'note'];
+    protected $fillable = ['from_trip_id', 'to_trip_id', 'stop_id', 'kind', 'through_run', 'depot_id', 'note'];
 
     /**
      * @return array<string, string>
      */
     protected function casts(): array
     {
-        return ['kind' => TripLinkKind::class];
+        return ['kind' => TripLinkKind::class, 'through_run' => 'boolean'];
     }
 
     /**

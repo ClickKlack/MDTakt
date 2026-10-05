@@ -25,6 +25,8 @@ final class TripLinkResource extends JsonResource
         return [
             'id' => $this->resource['id'],
             'kind' => $this->resource['kind'],
+            // Durchlauf am Tauschpunkt statt Wende (KURSE §2 K10) — nur bei `link` je `true`.
+            'through_run' => $this->resource['through_run'] ?? false,
             'stop_id' => $this->resource['stop_id'],
             'from_trip' => $this->resource['from_trip'],
             'to_trip' => $this->resource['to_trip'],

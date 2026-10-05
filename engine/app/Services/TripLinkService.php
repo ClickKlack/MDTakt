@@ -9,6 +9,7 @@ use App\Enums\TripLinkKind;
 use App\Http\Requests\TripLinkRequest;
 use App\Models\ConsolidatedTrip;
 use App\Models\Depot;
+use App\Models\StopGroup;
 use App\Models\TripLink;
 use App\Support\DayRange;
 use App\Support\TripChainGraph;
@@ -78,6 +79,7 @@ final class TripLinkService
         return [
             'id' => $link->id,
             'kind' => $link->kind->value,
+            'through_run' => $link->through_run,
             'stop_id' => $link->stop_id,
             'from_trip' => $von,
             'to_trip' => $nach,
@@ -99,6 +101,7 @@ final class TripLinkService
         ?string $note = null,
         ?int $depotId = null,
         bool $depotAngegeben = false,
+        bool $throughRun = false,
     ): TripLink {
         $stopId = $kind === TripLinkKind::Start
             ? $to?->first_stop_id
@@ -111,6 +114,8 @@ final class TripLinkService
             'to_trip_id' => $to?->id,
             'stop_id' => $stopId,
             'kind' => $kind,
+            // Nur ein Anschluss kann ein Durchlauf sein (KURSE §2 K10).
+            'through_run' => $kind === TripLinkKind::Link && $throughRun,
             'depot_id' => $hof,
             'note' => $note,
         ]);
@@ -121,6 +126,7 @@ final class TripLinkService
             'from_trip_id' => $from?->id,
             'to_trip_id' => $to?->id,
             'stop_id' => $stopId,
+            'through_run' => $link->through_run,
             'depot_id' => $link->depot_id,
             'depot_auto' => $hof !== null && ! $depotAngegeben,
         ]);
@@ -183,6 +189,69 @@ final class TripLinkService
         ]);
 
         return $link->refresh();
+    }
+
+    /**
+     * Wende oder Durchlauf — nachträglich umschaltbar, weil der Bestand vor K10 als Wende
+     * angelegt wurde und ein Fehlgriff sich zurücknehmen lassen muss.
+     */
+    public function setThroughRun(TripLink $link, bool $throughRun): TripLink
+    {
+        $link->update(['through_run' => $throughRun]);
+
+        Log::info('Trip link through run set', [
+            'trip_link_id' => $link->id,
+            'through_run' => $throughRun,
+        ]);
+
+        return $link->refresh();
+    }
+
+    /**
+     * Anschlüsse an dieser Haltestelle, die nach dem Halt-Kriterium ein Durchlauf wären, aber
+     * noch als Wende gelten — der Bestand vor K10 (KURSE §2 K10).
+     *
+     * Das Kriterium ist dasselbe wie beim Tauschpunkt-Lauf: Die Abfahrt beginnt an dem Halt, an
+     * dem die Ankunft endet. Es ist kein Urteil, sondern eine Gleichheit — und genau deshalb nur
+     * an einer Haltestelle anzuwenden, die der Pflegende als Tauschpunkt kennt. An einer
+     * Wendeschleife mit nur einem Halt träfe es auch jede echte Wende.
+     *
+     * @return array<int, int> Ids der Anschlüsse
+     */
+    public function throughRunCandidates(StopGroup $gruppe): array
+    {
+        return DB::table('trip_links as tl')
+            ->join('consolidated_trips as nach', 'nach.id', '=', 'tl.to_trip_id')
+            ->join('stop_group_members as m', 'm.consolidated_stop_id', '=', 'tl.stop_id')
+            ->where('m.stop_group_id', $gruppe->id)
+            ->where('tl.kind', TripLinkKind::Link->value)
+            ->where('tl.through_run', false)
+            ->whereColumn('nach.first_stop_id', 'tl.stop_id')
+            ->orderBy('tl.id')
+            ->pluck('tl.id')
+            ->map(static fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    /**
+     * Kennzeichnet die Anschlüsse als Durchlauf. Idempotent — ein zweiter Lauf findet nichts.
+     *
+     * @param  array<int, int>  $linkIds
+     */
+    public function markThroughRuns(array $linkIds): int
+    {
+        if ($linkIds === []) {
+            return 0;
+        }
+
+        $anzahl = DB::table('trip_links')
+            ->whereIn('id', $linkIds)
+            ->where('kind', TripLinkKind::Link->value)
+            ->update(['through_run' => true, 'updated_at' => now()]);
+
+        Log::info('Trip links marked as through runs', ['count' => $anzahl]);
+
+        return $anzahl;
     }
 
     /**

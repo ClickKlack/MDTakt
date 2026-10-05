@@ -629,6 +629,26 @@ final class AutoTripLinkTest extends TestCase
         $this->assertSame($abSued->id, $paare[$anSued->id] ?? null);
     }
 
+    /** Am Tauschpunkt angelegt heisst: Durchlauf, nicht Wende (KURSE §2 K10). */
+    public function test_a_through_stop_run_marks_its_links_as_through_runs(): void
+    {
+        [$anNord, $anSued] = $this->tauschpunkt();
+
+        $this->anwenden($this->tauschRumpf($anNord, $anSued, ['through_stop' => true]));
+
+        $this->assertSame(2, TripLink::query()->where('through_run', true)->count());
+    }
+
+    public function test_a_run_without_the_switch_creates_turnarounds(): void
+    {
+        [$anNord, $anSued] = $this->tauschpunkt();
+
+        $this->anwenden($this->tauschRumpf($anNord, $anSued));
+
+        $this->assertSame(0, TripLink::query()->where('through_run', true)->count());
+        $this->assertSame(2, TripLink::query()->count());
+    }
+
     /** Ohne den Schalter bleibt es beim Heute: Die Zeit fuehrt, der Halt zaehlt nicht. */
     public function test_without_the_switch_the_platform_is_ignored(): void
     {

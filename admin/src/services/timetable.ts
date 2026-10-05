@@ -52,6 +52,8 @@ export interface TimetableLinkTrip {
 /** Was vor oder nach einer Fahrt kommt: Anschluss, Ausrücken (`start`) oder Einrücken (`end`). */
 export interface TimetableLink {
   kind: 'link' | 'start' | 'end'
+  /** Durchlauf am Tauschpunkt statt Wende (KURSE §2 K10) */
+  through_run: boolean
   /** `null` bei Aus-/Einrücken */
   trip: TimetableLinkTrip | null
   turnaround_seconds: number | null

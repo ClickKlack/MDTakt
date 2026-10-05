@@ -27,6 +27,7 @@ final class TripLinkFactory extends Factory
             'to_trip_id' => null,
             'stop_id' => ConsolidatedStop::factory(),
             'kind' => TripLinkKind::Link,
+            'through_run' => false,
             'depot_id' => null,
             'note' => null,
         ];
@@ -36,6 +37,12 @@ final class TripLinkFactory extends Factory
     public function atDepot(Depot $depot): self
     {
         return $this->state(fn (): array => ['depot_id' => $depot->id]);
+    }
+
+    /** Durchlauf am Tauschpunkt: Das Fahrzeug fährt weiter, nur die Linie wechselt (KURSE K10). */
+    public function throughRun(): self
+    {
+        return $this->state(fn (): array => ['kind' => TripLinkKind::Link, 'through_run' => true]);
     }
 
     /** Ausrücken: Die Kette beginnt hier, bewusst ohne Vorgänger. */

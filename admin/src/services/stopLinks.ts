@@ -47,6 +47,11 @@ export type TripLinkKind = 'link' | 'start' | 'end'
 export interface StopLinkDecision {
   id: number
   kind: TripLinkKind
+  /**
+   * Durchlauf am Tauschpunkt statt Wende (KURSE §2 K10): Das Fahrzeug verlässt den Halt nicht,
+   * nur die Linie wechselt. Eine Sichtung wirkt über einen Durchlauf weiter, über eine Wende nicht.
+   */
+  through_run: boolean
   partner: StopLinkTrip | null
   /** Nur bei `kind: 'link'`. In Betriebstag-Sekunden — 24:50 → 25:10 ergibt 1200. */
   turnaround_seconds: number | null
@@ -108,6 +113,7 @@ export interface TripLinkWarning {
 export interface TripLinkResult {
   id: number
   kind: TripLinkKind
+  through_run: boolean
   stop_id: number
   from_trip: StopLinkTrip | null
   to_trip: StopLinkTrip | null
@@ -134,6 +140,8 @@ export interface TripLinkInput {
   /** Nur bei `start`/`end`. Meist wird erst markiert und der Hof danach nachgetragen. */
   depot_id?: number | null
   note?: string | null
+  /** Nur bei `link`: Durchlauf statt Wende. */
+  through_run?: boolean
 }
 
 export async function fetchStopLinkBoard(
@@ -150,6 +158,12 @@ export async function fetchStopLinkBoard(
 
 export async function createTripLink(input: TripLinkInput): Promise<TripLinkResult> {
   const { data } = await api.post('/api/v1/admin/trip-links', input)
+  return data.data
+}
+
+/** Einen bestehenden Anschluss als Durchlauf oder Wende kennzeichnen — ohne ihn zu lösen. */
+export async function setTripLinkThroughRun(id: number, throughRun: boolean): Promise<TripLinkResult> {
+  const { data } = await api.put(`/api/v1/admin/trip-links/${id}/through-run`, { through_run: throughRun })
   return data.data
 }
 

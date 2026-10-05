@@ -23,7 +23,7 @@
 | **I-13** | **Fahrplan-Konsolidat** | Engine + Admin | Dauerhafter Fahrplan-Bestand mit allen Änderungen — aus vielen Importen zusammengeführt | ✅ |
 | **I-14** | **Kurse & Umläufe** | Engine + Admin | Umlauf-Ebene manuell pflegbar: Fahrten verketten, Kursnummern vergeben | ✅ |
 | **I-15** | **Mengen-Pflege** | Engine + Admin | Wiederkehrende Muster über einen Zeitraum setzen und wieder lösen | ✅ |
-| **I-16** | **Durchläufe** | Engine + Admin | Anschluss am Tauschpunkt als Durchlauf markieren; Sichtung wirkt über ihn weiter | ⬜ |
+| **I-16** | **Durchläufe** | Engine + Admin | Anschluss am Tauschpunkt als Durchlauf markieren; Sichtung wirkt über ihn weiter | ✅ |
 
 > **Stand am 26.09.2026.** Der Sichtungs-Pfad ist auf Engine- und Admin-Seite fertig: **I-04** (mit I-05, I-06 und
 > I-12 b) — Eingang aus MDKursTracker, Zuordnung, Prüfliste und Entscheidung im Fahrplan.
@@ -781,7 +781,7 @@ wieder lösen, und ein zweiter Lauf ist jeweils folgenlos.
 
 ---
 
-## I-16 — Durchläufe (Anschluss am Tauschpunkt)
+## I-16 — Durchläufe (Anschluss am Tauschpunkt) ✅
 
 **Ziel:** Ein Anschluss, an dem das Fahrzeug nur die Liniennummer wechselt, ist als **Durchlauf** gekennzeichnet —
 und eine Sichtung färbt die über Durchläufe verbundenen Fahrten mit, an einer Wende aber nicht.
@@ -791,17 +791,19 @@ und eine Sichtung färbt die über Durchläufe verbundenen Fahrten mit, an einer
 > **Entschieden 05.10.2026 (Stopp-Regel — DB-Änderung):** Spalte `trip_links.through_run`. Matching und
 > Kursauskunft bleiben unberührt; die Weitergabe ist nur Anzeige im Admin.
 
-### Aufgaben
-- [ ] Migration: `trip_links.through_run` (boolean, Vorgabe `false`); nur bei `kind = link` zulässig
-- [ ] `TripLinkAutoService`: setzt `through_run`, wenn der Lauf mit `through_stop` angelegt wird
-- [ ] Einzelklick (`TripLinkRequest`/`TripLinkService`): optionales Feld `through_run`; im Board eine Checkbox,
-      vorbelegt bei Halt-Gleichheit (Ankunft endet am Halt, an dem die Abfahrt beginnt)
-- [ ] Anzeige: Durchlauf-Anschlüsse im Board und in der Kurs-Ansicht erkennbar anders als Wenden
-- [ ] `CourseLookup`: Sichtungs-Markierung über Durchläufe weitergeben (Kette nur über `through_run`-Kanten
-      gehen, an der ersten Wende stoppen) — eigene Stufe, schwächer als „gesichtet"; Rot bei Widerspruch geht vor
-- [ ] Nachtrag für den Bestand: je Haltestelle mit Vorschau, nach dem Halt-Kriterium
-- [ ] `openapi.yaml` + Bruno; Tests: Weitergabe über mehrere Durchläufe, Stopp an der Wende, Widerspruch,
-      Nachtrag folgenlos in der Vorschau und idempotent
+### Umgesetzt (05.10.2026)
+- [x] Migration: `trip_links.through_run` (boolean, Vorgabe `false`); nur bei `kind = link` zulässig
+- [x] `TripLinkAutoService`: setzt `through_run`, wenn der Lauf mit `through_stop` angelegt wird
+- [x] Einzelklick: optionales Feld `through_run` an `POST /trip-links`; umschalten über
+      `PUT /trip-links/{id}/through-run`. Im Board ein Schalter **Neuer Anschluss als Wende | Durchlauf** für
+      Einzelklicks und ein Chip am Anschluss zum Umschalten (statt der geplanten Checkbox, siehe K10)
+- [x] Mengen-Lauf: Der Haken *Tauschpunkt* legt Durchläufe an und setzt die Mindestwende auf 0
+- [x] Anzeige: Durchlauf kräftig blau, Wende hell — im Board und in den Zeilen Davor/Danach des Fahrplans
+- [x] `CourseLookup`: `seen_through` über Durchläufe in beide Richtungen, Stopp an der ersten Wende; eigene
+      Markierung der Fahrt geht vor
+- [x] Nachtrag: `php artisan trip-links:mark-through-runs <Haltestelle> [--apply]`
+- [x] `openapi.yaml` + Bruno (`trip-links-through-run.bru`); Tests: `ThroughRunTest` (16) und zwei Fälle in
+      `AutoTripLinkTest`
 
 ### Abnahmekriterium
 Am City Carré angelegte Anschlüsse 1 → 5 sind als Durchlauf erkennbar. Eine Sichtung an der 1 färbt die

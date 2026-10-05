@@ -1827,6 +1827,11 @@ components:
           allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }]
           nullable: true
           description: Nur bei `kind=link` gesetzt — die angeschlossene Gegenfahrt.
+        through_run:
+          type: boolean
+          description: >
+            Durchlauf am Tauschpunkt statt Wende (KURSE §2 K10): Das Fahrzeug verlaesst den Halt
+            nicht, nur die Linie wechselt. Nur bei `kind=link` je `true`.
         turnaround_seconds:
           type: integer
           nullable: true
@@ -1878,12 +1883,15 @@ components:
             display: { type: string, example: '13/03' }
             sighting:
               type: string
-              enum: [seen, disputed]
+              enum: [seen, disputed, seen_through]
               nullable: true
               description: >
                 Beleg durch Sichtungen, nur fuer **diese** Fahrt (nicht die Kette): `seen` = eine
                 bestaetigte oder angenommene Sichtung nennt diese Nummer; `disputed` = eine offene
                 Sichtung nennt eine andere (geht vor `seen`). Abgelehnte zaehlen nicht.
+                `seen_through` = nicht diese Fahrt, aber eine ueber **Durchlaeufe** verbundene
+                wurde mit dieser Nummer gesichtet (KURSE §2 K10); endet an der ersten Wende,
+                schwaecher als `seen`.
         decision:
           allOf: [{ $ref: '#/components/schemas/StopLinkDecision' }]
           nullable: true
@@ -1968,6 +1976,12 @@ components:
             genau ein passender Hof muss es sein, sonst bleibt die Angabe offen. Ein
             ausdrueckliches `null` heisst dagegen „bewusst offen" und unterdrueckt das.
         note: { type: string, nullable: true, maxLength: 255 }
+        through_run:
+          type: boolean
+          default: false
+          description: >
+            Durchlauf am Tauschpunkt statt Wende (KURSE §2 K10). Nur bei `kind=link`, sonst 422.
+            Nachtraeglich umschaltbar ueber `PUT /trip-links/{id}/through-run`.
 
     TripLinkResponse:
       type: object
@@ -1979,6 +1993,7 @@ components:
           properties:
             id: { type: integer }
             kind: { type: string, enum: [link, start, end] }
+            through_run: { type: boolean, description: 'Durchlauf statt Wende (KURSE §2 K10)' }
             stop_id: { type: integer }
             from_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
             to_trip: { allOf: [{ $ref: '#/components/schemas/StopLinkTrip' }], nullable: true }
@@ -2254,12 +2269,15 @@ components:
             display: { type: string, example: '1/03' }
             sighting:
               type: string
-              enum: [seen, disputed]
+              enum: [seen, disputed, seen_through]
               nullable: true
               description: >
                 Beleg durch Sichtungen, nur fuer **diese** Fahrt (nicht die Kette): `seen` = eine
                 bestaetigte oder angenommene Sichtung nennt diese Nummer; `disputed` = eine offene
                 Sichtung nennt eine andere (geht vor `seen`). Abgelehnte zaehlen nicht.
+                `seen_through` = nicht diese Fahrt, aber eine ueber **Durchlaeufe** verbundene
+                wurde mit dieser Nummer gesichtet (KURSE §2 K10); endet an der ersten Wende,
+                schwaecher als `seen`.
         sightings:
           type: array
           description: >
@@ -2299,12 +2317,13 @@ components:
 
     TimetableLink:
       type: object
-      required: [kind, trip, turnaround_seconds, depot]
+      required: [kind, through_run, trip, turnaround_seconds, depot]
       properties:
         kind:
           type: string
           enum: [link, start, end]
           description: '`link` = Anschluss, `start` = aus dem Betriebshof, `end` = in den Betriebshof'
+        through_run: { type: boolean, description: 'Durchlauf am Tauschpunkt statt Wende (KURSE §2 K10)' }
         turnaround_seconds:
           type: integer
           nullable: true
@@ -3999,6 +4018,8 @@ paths:
           description: >
             **Tauschpunkt statt Wendestelle.** Nur bei `action=link`. Gepaart wird dann
             ausschliesslich, was an **demselben Halt** weiterfaehrt, an dem die Ankunft endet.
+            Beim Anwenden werden die Anschluesse als **Durchlauf** (`through_run`) angelegt
+            (KURSE §2 K10).
 
 
             An einer Haltestelle, an der die Bahn nur kurz haelt und weiterfaehrt (City Carre,
@@ -4219,6 +4240,60 @@ paths:
           description: >
             Unbekannter Hof, stillgelegter Hof, falsches Verkehrsmittel, oder die Entscheidung
             ist ein Anschluss
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/trip-links/{tripLink}/through-run:
+    parameters:
+      - name: tripLink
+        in: path
+        required: true
+        description: '`trip_links.id` — muss `kind=link` tragen.'
+        schema: { type: integer }
+    put:
+      operationId: setTripLinkThroughRun
+      summary: Anschluss als Durchlauf oder Wende kennzeichnen
+      description: >
+        Ein **Durchlauf** ist ein Anschluss, an dem das Fahrzeug den Halt nicht verlaesst — nur
+        die Liniennummer wechselt, etwa am City Carré von der 1 auf die 5 (KURSE §2 K10). Eine
+        Sichtung wirkt ueber Durchlaeufe weiter (`course.sighting = seen_through`), ueber eine
+        Wende nicht.
+
+
+        **Gesetzt, nicht berechnet:** Halt-Gleichheit allein trennt nicht, eine Wendeschleife mit
+        nur einem Halt sieht genauso aus. Der Tauschpunkt-Lauf setzt das Merkmal von selbst;
+        hier wird es fuer den Bestand nachgetragen oder ein Fehlgriff zurueckgenommen, ohne den
+        Anschluss — und damit die Kursnummer — anzufassen.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [through_run]
+              properties:
+                through_run: { type: boolean }
+      responses:
+        '200':
+          description: Gesetzt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TripLinkResponse' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannte Verknuepfung
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Die Entscheidung ist kein Anschluss (`start`/`end`), oder `through_run` fehlt
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

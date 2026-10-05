@@ -53,7 +53,21 @@ watch(aktion, () => {
 
 // Der Tauschpunkt aendert die Paarung, nicht nur ihre Zahl — eine stehengebliebene Vorschau
 // zeigte danach andere Paare, als der Knopf daneben anlegt.
-watch(tauschpunkt, () => {
+//
+// Und er setzt die Mindestwende auf 0: Am Tauschpunkt haelt die Bahn nur kurz, Ankunft und
+// Abfahrt liegen oft auf derselben Minute. Wer den Haken wieder herausnimmt, bekommt seinen
+// vorigen Wert zurueck.
+let wendeVorTausch: number | null = null
+
+watch(tauschpunkt, (an) => {
+  if (an) {
+    wendeVorTausch = mindestwende.value
+    mindestwende.value = 0
+  } else if (wendeVorTausch !== null) {
+    mindestwende.value = wendeVorTausch
+    wendeVorTausch = null
+  }
+
   vorschau.value = null
 })
 
@@ -379,6 +393,8 @@ const uebersprungen = computed(() => {
           ohne diesen Schalter entscheidet der Zufall. Mit ihm zählt nur, was an
           <strong>demselben Halt</strong> weiterfährt, an dem die Ankunft endet. An einer Wendestelle, wo das
           Fahrzeug die Seite wechselt, findet der Lauf damit nichts — dort gehört der Haken heraus.
+          Mit Haken werden die Anschlüsse als <strong>Durchlauf</strong> angelegt, und die Mindestwende steht
+          auf 0.
         </span>
       </span>
     </label>

@@ -329,7 +329,7 @@ final class StopLinkBoardService
                 }
             })
             ->select(
-                'tl.id', 'tl.from_trip_id', 'tl.to_trip_id', 'tl.kind', 'tl.note', 'tl.depot_id',
+                'tl.id', 'tl.from_trip_id', 'tl.to_trip_id', 'tl.kind', 'tl.through_run', 'tl.note', 'tl.depot_id',
                 'd.name as depot_name', 'd.short_name as depot_short_name', 'd.active as depot_active',
             )
             ->get();
@@ -412,6 +412,7 @@ final class StopLinkBoardService
         return [
             'id' => (int) $link->id,
             'kind' => $kind->value,
+            'through_run' => (bool) $link->through_run,
             'partner' => $partnerId === null ? null : ($partner[$partnerId] ?? null),
             'turnaround_seconds' => $wendezeit,
             'depot' => $this->describeDepot($link),

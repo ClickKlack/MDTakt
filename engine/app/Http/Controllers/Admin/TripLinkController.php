@@ -8,6 +8,7 @@ use App\Enums\TripLinkKind;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\TripLinkDepotRequest;
 use App\Http\Requests\TripLinkRequest;
+use App\Http\Requests\TripLinkThroughRunRequest;
 use App\Http\Resources\TripLinkResource;
 use App\Models\TripLink;
 use App\Services\CourseService;
@@ -64,6 +65,7 @@ final class TripLinkController extends Controller
             $request->note(),
             $request->depotId(),
             $request->has('depot_id'),
+            $request->throughRun(),
         );
 
         // Zwei verknuepfte Fahrten sind dasselbe Fahrzeug — also derselbe Kurs. Traegt eine
@@ -98,6 +100,17 @@ final class TripLinkController extends Controller
     public function depot(TripLinkDepotRequest $request, TripLink $tripLink): TripLinkResource
     {
         $link = $this->links->setDepot($tripLink, $request->depotId());
+
+        return TripLinkResource::make($this->links->describe($link) + [
+            'course' => null,
+            'course_trips_assigned' => 0,
+        ]);
+    }
+
+    /** PUT /api/v1/admin/trip-links/{tripLink}/through-run — Wende oder Durchlauf */
+    public function throughRun(TripLinkThroughRunRequest $request, TripLink $tripLink): TripLinkResource
+    {
+        $link = $this->links->setThroughRun($tripLink, $request->throughRun());
 
         return TripLinkResource::make($this->links->describe($link) + [
             'course' => null,

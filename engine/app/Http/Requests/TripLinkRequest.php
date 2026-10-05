@@ -38,6 +38,8 @@ final class TripLinkRequest extends ApiFormRequest
             'to_trip_id' => ['nullable', 'integer', 'exists:consolidated_trips,id'],
             'depot_id' => ['nullable', 'integer', 'exists:depots,id'],
             'note' => ['nullable', 'string', 'max:255'],
+            // Durchlauf am Tauschpunkt (KURSE §2 K10) — nur bei einem Anschluss.
+            'through_run' => ['nullable', 'boolean'],
         ];
     }
 
@@ -74,6 +76,15 @@ final class TripLinkRequest extends ApiFormRequest
 
             if (! $kind->hasTo() && $nach !== null) {
                 $validator->errors()->add('to_trip_id', 'Eine Fahrt, die den Umlauf beendet, hat keine Nachfolgefahrt.');
+
+                return;
+            }
+
+            if ($kind !== TripLinkKind::Link && $this->throughRun()) {
+                $validator->errors()->add(
+                    'through_run',
+                    'Nur ein Anschluss kann ein Durchlauf sein — beim Aus- oder Einrücken fährt das Fahrzeug nicht weiter.',
+                );
 
                 return;
             }
@@ -175,6 +186,11 @@ final class TripLinkRequest extends ApiFormRequest
         $id = $this->input('to_trip_id');
 
         return $id === null ? null : ConsolidatedTrip::query()->with('lineVersion')->findOrFail($id);
+    }
+
+    public function throughRun(): bool
+    {
+        return $this->boolean('through_run');
     }
 
     public function note(): ?string

@@ -1,0 +1,75 @@
+meta {
+  name: Anschluss als Durchlauf kennzeichnen
+  type: http
+  seq: 35
+}
+
+put {
+  url: {{baseUrl}}/api/v1/admin/trip-links/1/through-run
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "through_run": true
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.kind: eq link
+  res.body.data.through_run: eq true
+}
+
+docs {
+  # Wende oder Durchlauf
+
+  Kennzeichnet einen bestehenden Anschluss als **Durchlauf** (`true`) oder als **Wende**
+  (`false`). Ein Durchlauf ist ein Anschluss, an dem das Fahrzeug den Halt nicht verlaesst —
+  nur die Liniennummer wechselt, etwa am City Carré von der 1 auf die 5 (KURSE §2 K10).
+
+  Beispiel-Response (gekuerzt):
+
+  ```json
+  {
+    "data": {
+      "id": 1, "kind": "link", "through_run": true, "stop_id": 268,
+      "from_trip": { "id": 9835, "line": "1", "end_stop": "City Carré" },
+      "to_trip": { "id": 10412, "line": "5", "start_stop": "City Carré" },
+      "turnaround_seconds": 120, "depot": null, "note": null,
+      "warnings": [{ "code": "line_change", "message": "Die Kette wechselt von Linie 1 auf Linie 5." }],
+      "course": null, "course_trips_assigned": 0
+    }
+  }
+  ```
+
+  ## Warum es zaehlt
+
+  **Eine Sichtung wirkt ueber den Durchlauf weiter**, ueber eine Wende nicht. Die ueber
+  Durchlaeufe verbundenen Fahrten tragen dann `course.sighting = "seen_through"` — schwaecher
+  als `seen`, weil auch ein Durchlauf brechen kann.
+
+  ## Wozu der eigene Endpunkt
+
+  Der Tauschpunkt-Lauf (`POST /stop-links/auto` mit `through_stop`) setzt das Merkmal von
+  selbst. Hier wird der **Bestand vor K10** nachgetragen oder ein Fehlgriff zurueckgenommen —
+  ohne den Anschluss zu loesen, an dem die Kursnummer haengt. Fuer ganze Haltestellen gibt es
+  `php artisan trip-links:mark-through-runs <Haltestelle> [--apply]`.
+
+  ## 422-Faelle
+
+  | Fall | Grund |
+  |---|---|
+  | `kind=start`/`end` | Beim Aus- oder Einruecken faehrt das Fahrzeug nicht weiter |
+  | `through_run` fehlt | Pflichtfeld |
+}

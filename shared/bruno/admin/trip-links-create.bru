@@ -31,6 +31,7 @@ assert {
   res.status: eq 201
   res.body.data.kind: eq link
   res.body.data.warnings: isArray
+  res.body.data.through_run: isBoolean
 }
 
 script:post-response {

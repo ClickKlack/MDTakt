@@ -31,6 +31,9 @@ final class CourseResource extends JsonResource
             'first_departure' => $this->resource['first_departure'],
             'last_arrival' => $this->resource['last_arrival'],
             'duplicate' => $this->resource['duplicate'],
+            // Die Zwillinge selbst — damit die Oberflaeche sagen kann, **mit wem** die Nummer
+            // kollidiert, und sie zusammenfuehren kann.
+            'duplicates' => $this->resource['duplicates'] ?? [],
         ];
     }
 }

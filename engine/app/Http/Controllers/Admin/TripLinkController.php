@@ -71,7 +71,7 @@ final class TripLinkController extends Controller
         // nachzutragen waere Arbeit, die aus der Verknuepfung schon folgt (KURSE §2 K2).
         $kurs = $kind === TripLinkKind::Link && $von !== null
             ? $this->courses->unifyChain($von)
-            : ['course' => null, 'trips_assigned' => 0, 'conflict' => false];
+            : ['course' => null, 'trips_assigned' => 0, 'conflict' => false, 'merged' => []];
 
         $daten = $this->links->describe($link->refresh());
 
@@ -88,6 +88,8 @@ final class TripLinkController extends Controller
 
         $daten['course'] = $kurs['course'] === null ? null : $this->courses->describe($kurs['course']);
         $daten['course_trips_assigned'] = $kurs['trips_assigned'];
+        // Zwei Umlaeufe mit derselben Nummer, die sich als derselbe herausstellten.
+        $daten['course_merged'] = $kurs['merged'];
 
         return TripLinkResource::make($daten)->response()->setStatusCode(Response::HTTP_CREATED);
     }

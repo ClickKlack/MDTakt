@@ -117,6 +117,7 @@ Route::prefix('v1')->group(function (): void {
             Route::post('courses', [CourseController::class, 'store'])->name('admin.courses.store');
             Route::put('courses/{course}', [CourseController::class, 'update'])->name('admin.courses.update');
             Route::delete('courses/{course}', [CourseController::class, 'destroy'])->name('admin.courses.destroy');
+            Route::post('courses/{course}/merge', [CourseController::class, 'merge'])->name('admin.courses.merge');
             Route::put('consolidated-trips/{consolidatedTrip}/course', [TripCourseController::class, 'update'])
                 ->name('admin.trips.course.update');
             Route::delete('consolidated-trips/{consolidatedTrip}/course', [TripCourseController::class, 'destroy'])

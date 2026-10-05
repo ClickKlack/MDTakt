@@ -907,6 +907,24 @@ components:
             netzweit (KURSE §2 K3): Die „2" der Linie 8 ist ein anderer Umlauf als die „2" der Linie
             6 und wird hier nicht gemeldet. Ein Kurs ohne Fahrten zaehlt nicht — er haengt an keiner
             Linie und widerspricht damit keinem (geaendert 02.10.2026); er ist selbst nie `duplicate`.
+            Fuehrende Nullen zaehlen nicht („3" = „03").
+        duplicates:
+          type: array
+          description: >
+            Die Zwillinge selbst — mit wem die Nummer kollidiert. Leer, wenn `duplicate` falsch ist.
+            Zusammenfuehren: `POST /api/v1/admin/courses/{course}/merge`.
+          items: { $ref: '#/components/schemas/CourseTwin' }
+
+    CourseTwin:
+      type: object
+      required: [id, number, trip_count, lines]
+      properties:
+        id: { type: integer }
+        number: { type: string }
+        trip_count: { type: integer }
+        lines:
+          type: array
+          items: { type: string }
 
     CourseListResponse:
       type: object
@@ -963,6 +981,19 @@ components:
             `gap_before_seconds` zu lesen:** Ein grosser Abstand *mit* Anschluss ist eine lange
             Wende, ein Abstand *ohne* Anschluss eine gerissene Kette. Ein Umlauf muss keine
             durchgehende Kette sein — loest man einen Anschluss, bleibt der Kurs an beiden Teilen.
+        previous_continues_in:
+          type: object
+          nullable: true
+          description: >
+            Nur an einer Luecke (`linked_to_previous: false`) belegt: Die Vorfahrt faehrt per
+            Anschluss in einen **anderen** Umlauf weiter. Die Kette ist dann nicht gerissen, sie
+            traegt zwei Kurse — meist ein Fall fuer „Zusammenfuehren". `course_id: null` heisst,
+            die Folgefahrt hat noch keinen Kurs. `null`: wirklich kein Anschluss (seit 05.10.2026).
+          required: [trip_id, course_id, course_number]
+          properties:
+            trip_id: { type: integer }
+            course_id: { type: integer, nullable: true }
+            course_number: { type: string, nullable: true }
 
     LineCourseOverviewResponse:
       type: object
@@ -991,6 +1022,9 @@ components:
                   number: { type: string }
                   note: { type: string, nullable: true }
                   duplicate: { type: boolean }
+                  duplicates:
+                    type: array
+                    items: { $ref: '#/components/schemas/CourseTwin' }
                   trip_count: { type: integer }
                   lines:
                     type: array
@@ -1958,10 +1992,23 @@ components:
                 Der Kurs der Kette **nach** dem Anschluss. Zwei verknuepfte Fahrten sind dasselbe
                 Fahrzeug, also derselbe Kurs: Trug eine Seite bereits eine Nummer, gilt sie jetzt
                 fuer die ganze Kette (KURSE §2 K2). `null`, wenn keine Seite einen Kurs trug oder
-                beide verschiedene tragen.
+                beide verschiedene Nummern tragen.
             course_trips_assigned:
               type: integer
               description: Auf wie viele Fahrten der Kurs dabei uebertragen wurde. 0 = nichts zu uebertragen.
+            course_merged:
+              type: array
+              description: >
+                Umlaeufe, die dabei in `course` aufgegangen und geloescht sind. Tragen beide Seiten
+                Kurse mit **derselben** Nummer (fuehrende Nullen zaehlen nicht), ist das derselbe
+                Umlauf, der zweimal angelegt wurde — zusammengefuehrt wird in den aeltesten
+                (seit 05.10.2026; vorher `course_conflict`).
+              items:
+                type: object
+                required: [id, number]
+                properties:
+                  id: { type: integer }
+                  number: { type: string }
             warnings:
               type: array
               description: >
@@ -2085,6 +2132,11 @@ components:
                     Anschluesse, bei denen beide Ketten bereits **verschiedene** Nummern trugen.
                     Es wird nichts ueberschrieben, der Anschluss bleibt trotzdem bestehen — er ist
                     eine Aussage ueber das Fahrzeug, der Kurs nur sein Etikett.
+                courses_merged:
+                  type: integer
+                  description: >
+                    Umlaeufe, die zusammengefuehrt wurden, weil beide Ketten dieselbe Nummer
+                    trugen (siehe `course_merged` beim einzelnen Anschluss).
                 applied: { type: boolean, description: '`false` bei der Vorschau — sie ist garantiert folgenlos.' }
             pairs:
               type: array
@@ -2108,6 +2160,13 @@ components:
                     nullable: true
                   course_trips_assigned: { type: integer }
                   course_conflict: { type: boolean }
+                  course_merged:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        number: { type: string }
             removals:
               type: array
               description: Nur bei `action=unlink`.
@@ -3353,6 +3412,57 @@ paths:
           description: Geloescht
         '401':
           description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/courses/{course}/merge:
+    parameters:
+      - name: course
+        in: path
+        required: true
+        description: Das Ziel — dieser Umlauf bleibt bestehen.
+        schema: { type: integer }
+    post:
+      operationId: mergeCourse
+      summary: Zwei Umlaeufe zusammenfuehren
+      description: >
+        Fuer zwei Umlaeufe, die sich als derselbe herausstellen — typisch eine Dublette
+        (`duplicates`). Alle Fahrten der Quelle wandern in `{course}`, die Quelle wird geloescht.
+        Eine Notiz der Quelle wird an die des Ziels angehaengt. Beide muessen zur selben Periode
+        und zum selben Fahrplantyp gehoeren; die Nummern muessen nicht gleich sein.
+      tags: [Admin]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_id]
+              properties:
+                source_id: { type: integer, description: Der Umlauf, der aufgeht und geloescht wird. }
+      responses:
+        '200':
+          description: Zusammengefuehrt — der Ziel-Umlauf in seinem neuen Stand
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Course' }
+        '401':
+          description: Nicht authentifiziert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unbekannter Ziel-Umlauf
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Quelle unbekannt, gleich dem Ziel oder aus einem anderen Strang
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

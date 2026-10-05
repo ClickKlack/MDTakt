@@ -12,6 +12,7 @@ use App\Models\SchedulePeriod;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 
 /**
  * Die Kursnummer als **Etikett am Umlauf** (KURSE §2 K2).
@@ -91,11 +92,14 @@ final class CourseService
      * jetzt für beide. Das von Hand nachzutragen wäre Arbeit, die aus der Verknüpfung schon
      * folgt.
      *
-     * Tragen **beide** Seiten einen Kurs, und zwar verschiedene, wird nichts überschrieben:
+     * Tragen **beide** Seiten Kurse mit verschiedenen Nummern, wird nichts überschrieben:
      * Welcher der richtige ist, weiß nur der Pflegende. Der Widerspruch wird gemeldet
      * (`conflict`), damit er nicht unbemerkt stehen bleibt.
      *
-     * @return array{course: Course|null, trips_assigned: int, conflict: bool}
+     * Tragen beide Seiten Kurse mit **derselben** Nummer, ist das derselbe Umlauf: Sie werden
+     * zusammengeführt (`merged`), geändert 05.10.2026.
+     *
+     * @return array{course: Course|null, trips_assigned: int, conflict: bool, merged: array<int, array{id: int, number: string}>}
      */
     public function unifyChain(ConsolidatedTrip $trip): array
     {
@@ -105,28 +109,51 @@ final class CourseService
         $ids = array_values(array_unique(array_column($vorhandene, 'id')));
 
         if ($ids === []) {
-            return ['course' => null, 'trips_assigned' => 0, 'conflict' => false];
+            return ['course' => null, 'trips_assigned' => 0, 'conflict' => false, 'merged' => []];
         }
 
-        if (count($ids) > 1) {
-            Log::warning('Chain carries conflicting courses', [
-                'trip_id' => $trip->id,
-                'course_ids' => $ids,
-                'chain_length' => count($kette),
-            ]);
+        $zusammengefuehrt = [];
 
-            return ['course' => null, 'trips_assigned' => 0, 'conflict' => true];
+        if (count($ids) > 1) {
+            $kurse = Course::query()->whereIn('id', $ids)->orderBy('id')->get();
+            $ziel = $kurse->first();
+
+            // Dieselbe Nummer auf beiden Seiten ist kein Widerspruch, sondern derselbe Umlauf,
+            // der zweimal angelegt wurde — typisch, wenn zwei Teilstücke ihre Nummer bekamen,
+            // bevor sie verknüpft waren (Kurs 40/47 auf der 1/13, 23.09.2026). Zusammengeführt
+            // wird in den ältesten. Erst verschiedene Nummern sind eine Frage an den Pflegenden.
+            $gleich = $ziel !== null && $kurse->every(
+                static fn (Course $k): bool => Course::sameNumber($k->number, $ziel->number),
+            );
+
+            if (! $gleich) {
+                Log::warning('Chain carries conflicting courses', [
+                    'trip_id' => $trip->id,
+                    'course_ids' => $ids,
+                    'chain_length' => count($kette),
+                ]);
+
+                return ['course' => null, 'trips_assigned' => 0, 'conflict' => true, 'merged' => []];
+            }
+
+            foreach ($kurse->slice(1) as $quelle) {
+                $this->merge($ziel, $quelle);
+                $zusammengefuehrt[] = ['id' => $quelle->id, 'number' => $quelle->number];
+            }
+
+            $vorhandene = $this->lookup->forTrips($kette);
+            $ids = [$ziel->id];
         }
 
         $kurs = Course::query()->find($ids[0]);
 
         if ($kurs === null) {
-            return ['course' => null, 'trips_assigned' => 0, 'conflict' => false];
+            return ['course' => null, 'trips_assigned' => 0, 'conflict' => false, 'merged' => $zusammengefuehrt];
         }
 
         // Schon vollständig belegt: nichts zu tun, und die Meldung bliebe sonst irreführend.
         if (count($vorhandene) === count($kette)) {
-            return ['course' => $kurs, 'trips_assigned' => 0, 'conflict' => false];
+            return ['course' => $kurs, 'trips_assigned' => 0, 'conflict' => false, 'merged' => $zusammengefuehrt];
         }
 
         $this->assign($trip, $kurs);
@@ -135,7 +162,54 @@ final class CourseService
             'course' => $kurs,
             'trips_assigned' => count($kette) - count($vorhandene),
             'conflict' => false,
+            'merged' => $zusammengefuehrt,
         ];
+    }
+
+    /**
+     * Führt `$source` in `$target` über: Alle Fahrten wandern, die Quelle wird gelöscht.
+     *
+     * Für zwei Umläufe, die sich als derselbe herausstellen. Eine Notiz der Quelle geht nicht
+     * verloren, sie wird an die des Ziels angehängt.
+     *
+     * @return int Zahl der umgehängten Fahrten
+     */
+    public function merge(Course $target, Course $source): int
+    {
+        if ($target->id === $source->id) {
+            throw new InvalidArgumentException('Ein Umlauf kann nicht mit sich selbst zusammengeführt werden.');
+        }
+
+        if ($target->period_id !== $source->period_id || $target->day_type !== $source->day_type) {
+            throw new InvalidArgumentException(
+                'Die Umläufe gehören zu verschiedenen Perioden oder Fahrplantypen.'
+            );
+        }
+
+        return DB::transaction(function () use ($target, $source): int {
+            $umgehaengt = CourseTrip::query()
+                ->where('course_id', $source->id)
+                ->update(['course_id' => $target->id]);
+
+            $notiz = trim((string) $source->note);
+
+            if ($notiz !== '' && ! str_contains((string) $target->note, $notiz)) {
+                $bisher = trim((string) $target->note);
+                $target->note = mb_substr($bisher === '' ? $notiz : $bisher.' / '.$notiz, 0, 255);
+                $target->save();
+            }
+
+            $source->delete();
+
+            Log::info('Courses merged', [
+                'target_course_id' => $target->id,
+                'source_course_id' => $source->id,
+                'course_number' => $target->number,
+                'trips_moved' => $umgehaengt,
+            ]);
+
+            return $umgehaengt;
+        });
     }
 
     /**
@@ -287,6 +361,7 @@ final class CourseService
         $linienJeKurs = $fahrten
             ->map(static fn ($zeilen): array => $zeilen->pluck('line')->unique()->values()->all())
             ->all();
+        $fahrtenJeKurs = $fahrten->map(static fn ($zeilen): int => $zeilen->count())->all();
 
         $ergebnis = [];
 
@@ -309,6 +384,7 @@ final class CourseService
                 ->values();
 
             $linienListe = $linien->sort(SORT_NATURAL)->values()->all();
+            $zwillinge = $this->overlappingTwins($kurs, $kurse, $linienJeKurs, $fahrtenJeKurs);
 
             $ergebnis[] = [
                 'id' => $kurs->id,
@@ -321,7 +397,8 @@ final class CourseService
                 'lines' => $linienListe,
                 'first_departure' => $sortiert->first()['departure'] ?? null,
                 'last_arrival' => $sortiert->last()['arrival'] ?? null,
-                'duplicate' => $this->hasOverlappingTwin($kurs, $kurse, $linienJeKurs),
+                'duplicate' => $zwillinge !== [],
+                'duplicates' => $zwillinge,
             ];
         }
 
@@ -331,29 +408,50 @@ final class CourseService
     }
 
     /**
-     * Trägt ein anderer Umlauf dieselbe Nummer auf einer gemeinsamen Linie?
+     * Die anderen Umläufe mit derselben Nummer auf einer gemeinsamen Linie — die Zwillinge.
+     *
+     * Führende Nullen zählen nicht („3" = „03"), wie überall bei Kursnummern.
+     *
+     * Ein Kurs ohne Fahrten zählt nicht: Er hängt an keiner Linie und würde sonst jeden Kurs
+     * seiner Nummer als Dublette markieren (geändert 02.10.2026). Leere Kurse zeigt die
+     * Kurs-Übersicht gesondert an.
      *
      * @param  Collection<int, Course>  $alle
      * @param  array<int, array<int, string>>  $linienJeKurs
+     * @param  array<int, int>  $fahrtenJeKurs
+     * @return array<int, array{id: int, number: string, trip_count: int, lines: array<int, string>}>
      */
-    private function hasOverlappingTwin(Course $kurs, $alle, array $linienJeKurs): bool
+    private function overlappingTwins(Course $kurs, $alle, array $linienJeKurs, array $fahrtenJeKurs): array
     {
+        $a = $linienJeKurs[$kurs->id] ?? [];
+
+        if ($a === []) {
+            return [];
+        }
+
+        $zwillinge = [];
+
         foreach ($alle as $anderer) {
-            if ($anderer->id === $kurs->id || $anderer->number !== $kurs->number) {
+            if ($anderer->id === $kurs->id || ! Course::sameNumber($anderer->number, $kurs->number)) {
                 continue;
             }
 
-            $a = $linienJeKurs[$kurs->id] ?? [];
             $b = $linienJeKurs[$anderer->id] ?? [];
 
-            // Ein Kurs ohne Fahrten haengt an keiner Linie und widerspricht damit keinem.
-            // Er erscheint in der Liste der leeren Umlaeufe, nicht als Dublette.
-            if ($a !== [] && $b !== [] && array_intersect($a, $b) !== []) {
-                return true;
+            if ($b !== [] && array_intersect($a, $b) !== []) {
+                $linien = $b;
+                sort($linien, SORT_NATURAL);
+
+                $zwillinge[] = [
+                    'id' => $anderer->id,
+                    'number' => $anderer->number,
+                    'trip_count' => $fahrtenJeKurs[$anderer->id] ?? 0,
+                    'lines' => $linien,
+                ];
             }
         }
 
-        return false;
+        return $zwillinge;
     }
 
     /**
@@ -387,36 +485,10 @@ final class CourseService
             'lines' => [],
             'first_departure' => null,
             'last_arrival' => null,
-            'duplicate' => $this->hasOverlappingTwin(
-                $course,
-                Course::query()
-                    ->where('period_id', $course->period_id)
-                    ->where('day_type', $course->day_type->value)
-                    ->where('number', $course->number)
-                    ->get(),
-                $this->linesPerCourseFor($course),
-            ),
+            // Ohne Fahrten hängt er an keiner Linie und ist damit nie eine Dublette.
+            'duplicate' => false,
+            'duplicates' => [],
         ];
-    }
-
-    /**
-     * @return array<int, array<int, string>>
-     */
-    private function linesPerCourseFor(Course $course): array
-    {
-        $ids = Course::query()
-            ->where('period_id', $course->period_id)
-            ->where('day_type', $course->day_type->value)
-            ->where('number', $course->number)
-            ->pluck('id');
-
-        $ergebnis = [];
-
-        foreach ($ids as $id) {
-            $ergebnis[(int) $id] = $this->linesOfCourse((int) $id);
-        }
-
-        return $ergebnis;
     }
 
     /**

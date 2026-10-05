@@ -27,6 +27,16 @@ export interface Course {
    * zählt nicht — er hängt an keiner Linie und steht in der Kurs-Übersicht gesondert.
    */
   duplicate: boolean
+  /** Die Zwillinge selbst — mit wem die Nummer kollidiert. Leer, wenn `duplicate` falsch ist. */
+  duplicates: CourseTwin[]
+}
+
+/** Ein anderer Umlauf mit derselben Nummer auf einer gemeinsamen Linie. */
+export interface CourseTwin {
+  id: number
+  number: string
+  trip_count: number
+  lines: string[]
 }
 
 export interface CourseAssignment {
@@ -54,6 +64,15 @@ export async function renameCourse(id: number, number: string, note?: string | n
 
 export async function deleteCourse(id: number): Promise<void> {
   await api.delete(`/api/v1/admin/courses/${id}`)
+}
+
+/**
+ * Führt `sourceId` in `targetId` über: Alle Fahrten wandern, die Quelle wird gelöscht. Für zwei
+ * Umläufe, die sich als derselbe herausstellen.
+ */
+export async function mergeCourse(targetId: number, sourceId: number): Promise<Course> {
+  const { data } = await api.post(`/api/v1/admin/courses/${targetId}/merge`, { source_id: sourceId })
+  return data.data
 }
 
 /**
@@ -91,6 +110,12 @@ export interface CourseChainTrip {
    * Anschluss eine gerissene Kette.
    */
   linked_to_previous: boolean
+  /**
+   * Nur an einer Lücke (`linked_to_previous: false`): Die Vorfahrt fährt per Anschluss in einen
+   * **anderen** Umlauf weiter — die Kette ist dann nicht gerissen, sie trägt zwei Kurse.
+   * `course_id: null` = die Folgefahrt hat noch keinen Kurs. `null` = wirklich kein Anschluss.
+   */
+  previous_continues_in: { trip_id: number; course_id: number | null; course_number: string | null } | null
 }
 
 export interface CourseChain {
@@ -98,6 +123,7 @@ export interface CourseChain {
   number: string
   note: string | null
   duplicate: boolean
+  duplicates: CourseTwin[]
   trip_count: number
   /** Mehr als eine ist der Normalfall — ein Umlauf läuft über Linien hinweg. */
   lines: string[]

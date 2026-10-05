@@ -6,12 +6,14 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CourseFilterRequest;
+use App\Http\Requests\CourseMergeRequest;
 use App\Http\Requests\CourseRequest;
 use App\Http\Resources\CourseResource;
 use App\Models\Course;
 use App\Services\CourseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -47,6 +49,24 @@ final class CourseController extends Controller
         $course->update($request->validated());
 
         Log::info('Course updated', ['course_id' => $course->id, 'number' => $course->number]);
+
+        return CourseResource::make($this->courses->describe($course->refresh()));
+    }
+
+    /**
+     * POST /api/v1/admin/courses/{course}/merge — die Quelle wandert in diesen Umlauf.
+     *
+     * Alle Fahrten der Quelle gehören danach zu `{course}`, die Quelle wird gelöscht.
+     */
+    public function merge(CourseMergeRequest $request, Course $course): CourseResource|JsonResponse
+    {
+        try {
+            $this->courses->merge($course, $request->source());
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'error' => ['code' => Response::HTTP_UNPROCESSABLE_ENTITY, 'message' => $e->getMessage()],
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         return CourseResource::make($this->courses->describe($course->refresh()));
     }

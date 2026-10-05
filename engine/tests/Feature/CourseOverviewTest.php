@@ -378,4 +378,54 @@ final class CourseOverviewTest extends TestCase
         // Kettenansicht gar nicht braucht. Wer sie will, nimmt die Tabelle.
         $this->assertArrayNotHasKey('stops', $this->hole('1')['courses'][0]['trips'][0]);
     }
+
+    // ------------------------------------------- Risse, die keine sind (05.10.2026)
+
+    /**
+     * Fährt die Vorfahrt an einer Lücke per Anschluss in einen **anderen** Umlauf weiter, ist die
+     * Kette nicht gerissen — sie trägt zwei Kurse. Die Ansicht muss das sagen, statt „kein
+     * Anschluss" zu behaupten (Kurs 40/47 auf der 1/13).
+     */
+    public function test_a_break_names_the_course_the_link_leads_into(): void
+    {
+        $eins = $this->version('1');
+        $dreizehn = $this->version('13');
+
+        $hin = $this->f->fahrt($eins, ['Kannenstieg', 'Sudenburg'], ['06:14:00', '06:48:00']);
+        $weiter = $this->f->fahrt($dreizehn, ['Sudenburg', 'Westerhüsen'], ['06:52:00', '07:24:00']);
+        $spaeter = $this->f->fahrt($eins, ['Kannenstieg', 'Sudenburg'], ['09:14:00', '09:48:00']);
+
+        $this->setzeKurs($hin, '3');
+        $this->setzeKurs($spaeter, '3');
+        $this->setzeKurs($weiter, '5');
+
+        // Verschiedene Nummern: Der Anschluss bleibt, beide Kurse auch.
+        $this->verknuepfe($hin, $weiter);
+
+        $kurs = collect($this->hole('1')['courses'])->firstWhere('number', '3');
+        $zweite = $kurs['trips'][1];
+
+        $this->assertSame($spaeter->id, $zweite['id']);
+        $this->assertFalse($zweite['linked_to_previous']);
+        $this->assertSame($weiter->id, $zweite['previous_continues_in']['trip_id']);
+        $this->assertSame('5', $zweite['previous_continues_in']['course_number']);
+        $this->assertSame(1, $kurs['breaks'], 'Im Umlauf selbst bleibt es eine Lücke.');
+    }
+
+    /** Ohne Anschluss bleibt es ein echter Riss — keine Fortsetzung. */
+    public function test_a_real_break_has_no_continuation(): void
+    {
+        $eins = $this->version('1');
+
+        $a = $this->f->fahrt($eins, ['A', 'B'], ['06:00:00', '06:30:00']);
+        $b = $this->f->fahrt($eins, ['B', 'A'], ['08:00:00', '08:30:00']);
+
+        $this->setzeKurs($a, '3');
+        $this->setzeKurs($b, '3');
+
+        $fahrten = $this->hole('1')['courses'][0]['trips'];
+
+        $this->assertNull($fahrten[0]['previous_continues_in']);
+        $this->assertNull($fahrten[1]['previous_continues_in']);
+    }
 }

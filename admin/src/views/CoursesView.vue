@@ -9,8 +9,10 @@ import {
   fetchCourseGrid,
   fetchCourses,
   fetchLineCourses,
+  mergeCourse,
   type Course,
   type CourseChain,
+  type CourseTwin,
   type CourseChainTrip,
   type CourseGrid,
   type CourseGridSection,
@@ -57,6 +59,50 @@ const grid = ref<CourseGrid | null>(null)
  * einer Kette. Als Dublette zaehlen sie nicht; hier werden sie sichtbar und lassen sich loeschen.
  */
 const leereKurse = ref<Course[]>([])
+const fuehrtZusammen = ref(false)
+const erfolg = ref<string | null>(null)
+
+/**
+ * Den Zwilling in diesen Umlauf holen: Alle seine Fahrten wandern hierher, er selbst wird
+ * geloescht. Danach neu laden — Fahrtenzahl, Risse und Linien aendern sich.
+ */
+async function fuehreZusammen(kurs: CourseChain, zwilling: CourseTwin): Promise<void> {
+  const frage =
+    `Umlauf „${zwilling.number}" (${zwilling.trip_count} Fahrten, Linie ${zwilling.lines.join('/')}) ` +
+    `in diesen Umlauf „${kurs.number}" zusammenführen? Der andere Umlauf wird dabei gelöscht.`
+
+  if (!confirm(frage)) {
+    return
+  }
+
+  fuehrtZusammen.value = true
+  error.value = null
+  erfolg.value = null
+
+  try {
+    const ergebnis = await mergeCourse(kurs.id, zwilling.id)
+    erfolg.value = `Zusammengeführt — Umlauf „${ergebnis.number}" hat jetzt ${ergebnis.trip_count} Fahrten.`
+    grid.value = null
+    await lade()
+  } catch {
+    error.value = 'Die Umläufe konnten nicht zusammengeführt werden.'
+  } finally {
+    fuehrtZusammen.value = false
+  }
+}
+
+/** Die Beschriftung einer Lücke: echter Riss oder Anschluss in einen anderen Umlauf. */
+function rissText(trip: CourseChainTrip): string {
+  const weiter = trip.previous_continues_in
+
+  if (weiter === null) {
+    return 'Lücke — kein Anschluss'
+  }
+
+  return weiter.course_number === null
+    ? 'Lücke — Anschluss führt auf eine Fahrt ohne Kurs'
+    : `Lücke — Anschluss führt in Umlauf „${weiter.course_number}"`
+}
 const loeschtKurs = ref<number | null>(null)
 
 async function ladeLeereKurse(): Promise<void> {
@@ -318,6 +364,7 @@ watch(gewaehlterStand, (neu, alt) => {
       </p>
 
       <p v-if="error" class="mt-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</p>
+      <p v-if="erfolg" class="mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ erfolg }}</p>
       <p v-if="loading" class="mt-4 text-sm text-slate-500">Wird geladen …</p>
 
       <template v-else>
@@ -566,6 +613,28 @@ watch(gewaehlterStand, (neu, alt) => {
               </span>
             </header>
 
+            <!-- Mit wem die Nummer kollidiert — und der Weg, beide zu einem Umlauf zu machen. -->
+            <ul v-if="kurs.duplicates.length > 0" class="mt-2 space-y-1">
+              <li
+                v-for="zwilling in kurs.duplicates"
+                :key="zwilling.id"
+                class="flex flex-wrap items-center gap-2 rounded-md bg-rose-50 px-3 py-1.5 text-xs text-rose-900"
+              >
+                <span>
+                  Auch Umlauf „{{ zwilling.number }}" trägt diese Nummer — {{ zwilling.trip_count }}
+                  {{ zwilling.trip_count === 1 ? 'Fahrt' : 'Fahrten' }} auf Linie {{ zwilling.lines.join(', ') }}.
+                </span>
+                <button
+                  type="button"
+                  class="rounded border border-rose-300 bg-white px-2 py-0.5 font-medium text-rose-800 transition hover:bg-rose-100 disabled:opacity-50"
+                  :disabled="fuehrtZusammen"
+                  @click="fuehreZusammen(kurs, zwilling)"
+                >
+                  Hierher zusammenführen
+                </button>
+              </li>
+            </ul>
+
             <!-- Die Klammer um den Fahrzeugtag: Woher es kommt und wohin es abends geht. -->
             <p
               class="mt-3 rounded-md px-3 py-1 text-xs"
@@ -580,10 +649,16 @@ watch(gewaehlterStand, (neu, alt) => {
                 <p v-if="i > 0" class="flex items-center gap-2 py-0.5 pl-4 text-xs">
                   <span
                     class="rounded px-1.5 py-0.5 tabular-nums"
-                    :class="istRiss(trip, i) ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-600'"
+                    :class="
+                      !istRiss(trip, i)
+                        ? 'bg-slate-100 text-slate-600'
+                        : trip.previous_continues_in
+                          ? 'bg-rose-100 text-rose-900'
+                          : 'bg-amber-100 text-amber-900'
+                    "
                   >
                     {{ formatDuration(trip.gap_before_seconds) }}
-                    {{ istRiss(trip, i) ? 'Lücke — kein Anschluss' : 'Wende' }}
+                    {{ istRiss(trip, i) ? rissText(trip) : 'Wende' }}
                   </span>
                 </p>
 

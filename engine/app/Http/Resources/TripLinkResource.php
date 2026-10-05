@@ -38,6 +38,8 @@ final class TripLinkResource extends JsonResource
             // viele Fahrten er dabei uebertragen wurde — 0 heisst: es gab nichts zu uebertragen.
             'course' => $this->resource['course'] ?? null,
             'course_trips_assigned' => $this->resource['course_trips_assigned'] ?? 0,
+            // Umlaeufe derselben Nummer, die beim Verknuepfen in `course` aufgegangen sind.
+            'course_merged' => $this->resource['course_merged'] ?? [],
         ];
     }
 }

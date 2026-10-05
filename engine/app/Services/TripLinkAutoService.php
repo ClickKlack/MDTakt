@@ -241,6 +241,7 @@ final class TripLinkAutoService
                 'course' => null,
                 'course_trips_assigned' => 0,
                 'course_conflict' => false,
+                'course_merged' => [],
             ];
         }
 
@@ -520,13 +521,14 @@ final class TripLinkAutoService
             $this->links->create(TripLinkKind::Link, $von, $nach);
 
             // Zwei verknüpfte Fahrten sind dasselbe Fahrzeug, also derselbe Kurs (KURSE §2 K2).
-            // Tragen beide Ketten verschiedene Nummern, wird nichts überschrieben — der
-            // Widerspruch wird gemeldet, der Anschluss bleibt bestehen.
+            // Gleiche Nummer auf beiden Seiten wird zusammengeführt; verschiedene Nummern
+            // werden nicht überschrieben — der Widerspruch wird gemeldet, der Anschluss bleibt.
             $kurs = $this->courses->unifyChain($von);
 
             $paar['course'] = $kurs['course'] === null ? null : $this->courses->describe($kurs['course']);
             $paar['course_trips_assigned'] = $kurs['trips_assigned'];
             $paar['course_conflict'] = $kurs['conflict'];
+            $paar['course_merged'] = $kurs['merged'];
 
             $geschrieben[] = $paar;
         }
@@ -700,6 +702,10 @@ final class TripLinkAutoService
                 'skipped' => count($uebersprungen),
                 'courses_unified' => (int) array_sum(array_column($paare, 'course_trips_assigned')),
                 'course_conflicts' => count(array_filter($paare, static fn (array $p): bool => $p['course_conflict'])),
+                'courses_merged' => (int) array_sum(array_map(
+                    static fn (array $p): int => count($p['course_merged'] ?? []),
+                    $paare,
+                )),
                 'applied' => $anwenden,
             ],
             'pairs' => $paare,

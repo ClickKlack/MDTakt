@@ -108,6 +108,25 @@ final class CourseOverviewService
         // nicht weiterfährt.
         $anschluesse = $this->links($alleTripIds, $zeitraum);
 
+        // Fuer die Risse: Wohin faehrt eine Fahrt weiter, und zu welchem Umlauf gehoert das Ziel?
+        // Steht an einer Luecke ein Anschluss, der in einen **anderen** Umlauf fuehrt, ist die
+        // Kette nicht gerissen — sie traegt zwei Kurse (KURSE §2 K2).
+        $kursVonFahrt = [];
+
+        foreach ($zuordnungen as $kursId => $tripIds) {
+            foreach ($tripIds as $id) {
+                $kursVonFahrt[$id] = $kursId;
+            }
+        }
+
+        $nummern = $kurse->mapWithKeys(static fn (Course $k): array => [$k->id => $k->number])->all();
+        $weiter = [];
+
+        foreach (array_keys($anschluesse) as $schluessel) {
+            [$von, $nach] = array_map('intval', explode('>', $schluessel));
+            $weiter[$von][] = $nach;
+        }
+
         $ergebnis = [];
 
         foreach ($kurse as $kurs) {
@@ -141,11 +160,19 @@ final class CourseOverviewService
 
             usort($fahrten, static fn (array $a, array $b): int => $a['departure_sort'] <=> $b['departure_sort']);
 
+            $zwillinge = $this->overlappingTwins(
+                $kurs,
+                $kurse,
+                $linienJeKurs,
+                array_map('count', $zuordnungen),
+            );
+
             $ergebnis[] = [
                 'id' => $kurs->id,
                 'number' => $kurs->number,
                 'note' => $kurs->note,
-                'duplicate' => $this->hasOverlappingTwin($kurs, $kurse, $linienJeKurs),
+                'duplicate' => $zwillinge !== [],
+                'duplicates' => $zwillinge,
                 'trip_count' => count($fahrten),
                 'lines' => $this->sortiert($linien),
                 'first_departure' => $fahrten === [] ? null : $fahrten[0]['departure_time'],
@@ -159,7 +186,12 @@ final class CourseOverviewService
                     'end',
                     $fahrten === [] ? null : $fahrten[count($fahrten) - 1]['id'],
                 ),
-                'trips' => $this->withChainInfo($fahrten, $anschluesse, $halte),
+                'trips' => $this->withChainInfo(
+                    $fahrten,
+                    $anschluesse,
+                    $halte,
+                    fn (int $tripId): ?array => $this->continuation($tripId, $kurs->id, $weiter, $kursVonFahrt, $nummern),
+                ),
                 'breaks' => $this->countBreaks($fahrten, $anschluesse),
             ];
         }
@@ -187,7 +219,9 @@ final class CourseOverviewService
     }
 
     /**
-     * Trägt ein anderer Umlauf dieselbe Nummer auf einer gemeinsamen Linie?
+     * Die anderen Umläufe mit derselben Nummer auf einer gemeinsamen Linie — die Zwillinge.
+     *
+     * Führende Nullen zählen nicht („3" = „03"), wie überall bei Kursnummern.
      *
      * Ein Kurs ohne Fahrten zählt nicht: Er hängt an keiner Linie und würde sonst jeden Kurs
      * seiner Nummer als Dublette markieren (geändert 02.10.2026). Leere Kurse zeigt die
@@ -195,25 +229,40 @@ final class CourseOverviewService
      *
      * @param  Collection<int, Course>  $alle
      * @param  array<int, array<int, string>>  $linienJeKurs
+     * @param  array<int, int>  $fahrtenJeKurs
+     * @return array<int, array{id: int, number: string, trip_count: int, lines: array<int, string>}>
      */
-    private function hasOverlappingTwin(Course $kurs, $alle, array $linienJeKurs): bool
+    private function overlappingTwins(Course $kurs, $alle, array $linienJeKurs, array $fahrtenJeKurs): array
     {
+        $a = $linienJeKurs[$kurs->id] ?? [];
+
+        if ($a === []) {
+            return [];
+        }
+
+        $zwillinge = [];
+
         foreach ($alle as $anderer) {
-            if ($anderer->id === $kurs->id || $anderer->number !== $kurs->number) {
+            if ($anderer->id === $kurs->id || ! Course::sameNumber($anderer->number, $kurs->number)) {
                 continue;
             }
 
-            $a = $linienJeKurs[$kurs->id] ?? [];
             $b = $linienJeKurs[$anderer->id] ?? [];
 
-            // Ein Kurs ohne Fahrten haengt an keiner Linie und widerspricht damit keinem.
-            // Er erscheint in der Liste der leeren Umlaeufe, nicht als Dublette.
-            if ($a !== [] && $b !== [] && array_intersect($a, $b) !== []) {
-                return true;
+            if ($b !== [] && array_intersect($a, $b) !== []) {
+                $linien = $b;
+                sort($linien, SORT_NATURAL);
+
+                $zwillinge[] = [
+                    'id' => $anderer->id,
+                    'number' => $anderer->number,
+                    'trip_count' => $fahrtenJeKurs[$anderer->id] ?? 0,
+                    'lines' => $linien,
+                ];
             }
         }
 
-        return false;
+        return $zwillinge;
     }
 
     /**
@@ -222,10 +271,15 @@ final class CourseOverviewService
      * @param  array<int, array<string, mixed>>  $fahrten
      * @param  array<string, bool>  $anschluesse
      * @param  array<int, array<int, array<string, mixed>>>  $halte  leer, wenn nicht angefordert
+     * @param  (callable(int): (array<string, mixed>|null))|null  $fortsetzung  Ziel der Vorfahrt an einem Riss
      * @return array<int, array<string, mixed>>
      */
-    private function withChainInfo(array $fahrten, array $anschluesse, array $halte = []): array
-    {
+    private function withChainInfo(
+        array $fahrten,
+        array $anschluesse,
+        array $halte = [],
+        ?callable $fortsetzung = null,
+    ): array {
         $ergebnis = [];
 
         foreach ($fahrten as $i => $fahrt) {
@@ -245,10 +299,43 @@ final class CourseOverviewService
             $ergebnis[] = $fahrt + [
                 'gap_before_seconds' => $abstand,
                 'linked_to_previous' => $verknuepft,
+                'previous_continues_in' => $vorher === null || $verknuepft || $fortsetzung === null
+                    ? null
+                    : $fortsetzung($vorher['id']),
             ] + ($halte === [] ? [] : ['stops' => $halte[$fahrt['id']] ?? []]);
         }
 
         return $ergebnis;
+    }
+
+    /**
+     * Wohin eine Fahrt per Anschluss weiterfaehrt, wenn das **nicht** ihr eigener Umlauf ist.
+     *
+     * `null`: kein Anschluss — die Kette ist dort wirklich gerissen. Sonst die Folgefahrt und ihr
+     * Umlauf; `course_id: null` heisst, die Folgefahrt hat noch keinen Kurs.
+     *
+     * @param  array<int, array<int, int>>  $weiter
+     * @param  array<int, int>  $kursVonFahrt
+     * @param  array<int, string>  $nummern
+     * @return array{trip_id: int, course_id: int|null, course_number: string|null}|null
+     */
+    private function continuation(int $tripId, int $kursId, array $weiter, array $kursVonFahrt, array $nummern): ?array
+    {
+        foreach ($weiter[$tripId] ?? [] as $nach) {
+            $anderer = $kursVonFahrt[$nach] ?? null;
+
+            if ($anderer === $kursId) {
+                continue;
+            }
+
+            return [
+                'trip_id' => $nach,
+                'course_id' => $anderer,
+                'course_number' => $anderer === null ? null : ($nummern[$anderer] ?? null),
+            ];
+        }
+
+        return null;
     }
 
     /**

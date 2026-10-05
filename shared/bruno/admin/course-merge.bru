@@ -1,0 +1,68 @@
+meta {
+  name: Courses (Zusammenfuehren)
+  type: http
+  seq: 37
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/courses/{{courseId}}/merge
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "source_id": 0
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.id: isNumber
+  res.body.data.duplicate: eq false
+}
+
+docs {
+  # Zwei Umlaeufe zusammenfuehren
+
+  Fuer zwei Umlaeufe, die sich als derselbe herausstellen — typisch eine Dublette: dieselbe
+  Nummer auf einer gemeinsamen Linie. Alle Fahrten der Quelle wandern in den Umlauf im Pfad,
+  die Quelle wird geloescht. Eine Notiz der Quelle wird an die des Ziels angehaengt.
+
+  `source_id` ist vor dem Lauf auf die tatsaechliche Quelle zu setzen — die `0` oben ist ein
+  Platzhalter, damit die Datei nichts Echtes anfasst (sie antwortet dann mit 422). Kandidaten
+  liefert `GET /api/v1/admin/courses` im Feld `duplicates`.
+
+  Beispiel-Response:
+
+  ```json
+  {
+    "data": {
+      "id": 40, "period_id": 2, "day_type": "mo_fr", "day_type_label": "Mo-Fr",
+      "number": "3", "note": null,
+      "trip_count": 31, "lines": ["1", "2", "5", "13"],
+      "first_departure": "07:21:00", "last_arrival": "23:12:00",
+      "duplicate": false, "duplicates": []
+    }
+  }
+  ```
+
+  ## Worauf zu achten ist
+
+  **Beide Umlaeufe muessen im selben Strang liegen** (Periode + Fahrplantyp), sonst 422. Die
+  Nummern muessen nicht gleich sein — wer zwei Umlaeufe mit verschiedenen Nummern zusammenlegt,
+  behaelt die des Ziels.
+
+  **Beim Verknuepfen passiert das von selbst**, wenn beide Ketten dieselbe Nummer tragen
+  (`course_merged` in der Antwort von `POST /api/v1/admin/trip-links`). Dieser Endpunkt ist fuer
+  Altfaelle und fuer Dubletten ohne Anschluss dazwischen.
+}

@@ -94,7 +94,7 @@ Ein Unique-Index bleibt aus, weil die tragfähige Bedingung („dieselbe Nummer 
 berührenden Linien") keine Spaltenkombination ist — die Linienmenge eines Kurses steht in
 `course_trips` und ändert sich mit jeder Verknüpfung. Die Prüfung gehört deshalb in den Service.
 Als **Dublette** gemeldet wird entsprechend nur, was sich wirklich widerspricht: dieselbe Nummer
-auf überschneidenden Linien. Zwei Nummern „2" auf 6 und 8 sind der Normalfall und lösen keine
+auf überschneidenden Linien (führende Nullen zählen nicht, „3" = „03"). Zwei Nummern „2" auf 6 und 8 sind der Normalfall und lösen keine
 Warnung mehr aus. Ein Kurs **ohne Fahrten** zählt nicht (geändert 02.10.2026): Er hängt an keiner
 Linie, widerspricht also keinem Kurs — vorher markierte ein einziger leerer „1" sämtliche Umläufe
 „1" des Strangs. Leere Kurse zeigt die Kurs-Übersicht stattdessen gesondert, mit Löschknopf.
@@ -609,10 +609,23 @@ Fahrzeug. Dann kann es nur eine Kursnummer geben — trägt eine Seite bereits e
 diesem Moment für die ganze zusammengewachsene Kette. Das von Hand nachzutragen wäre Arbeit, die
 aus der Verknüpfung schon folgt.
 
-Tragen **beide** Seiten einen Kurs, und zwar verschiedene, wird nichts überschrieben: Welcher der
-richtige ist, weiß nur der Pflegende. Der Widerspruch erscheint als Warnung `course_conflict`, die
-Verknüpfung selbst bleibt bestehen — sie ist eine Aussage über das Fahrzeug, der Kurs nur sein
-Etikett.
+Tragen **beide** Seiten einen Kurs, und zwar mit verschiedenen Nummern, wird nichts
+überschrieben: Welcher der richtige ist, weiß nur der Pflegende. Der Widerspruch erscheint als
+Warnung `course_conflict`, die Verknüpfung selbst bleibt bestehen — sie ist eine Aussage über das
+Fahrzeug, der Kurs nur sein Etikett.
+
+**Gleiche Nummer auf beiden Seiten wird zusammengeführt** (entschieden 05.10.2026). Das ist kein
+Widerspruch, sondern derselbe Umlauf, der zweimal angelegt wurde: Zwei Teilstücke bekamen ihre
+Nummer, bevor sie verknüpft waren, und weil sich ihre Linien da noch nicht berührten, legte das
+linienbezogene Nachschlagen (K3) je einen Kurs an. Anlass war Kurs „3" auf 1/2/5/13: Umlauf 40 und
+47 hingen eine Woche lang an derselben Kette, jede Verknüpfung meldete nur `course_conflict`.
+Zusammengeführt wird in den ältesten Kurs (kleinste ID), der andere wird gelöscht und im Feld
+`course_merged` gemeldet; führende Nullen zählen dabei nicht.
+
+Für Altfälle nennt die Kurs-Übersicht an einer Dublette den Zwilling und bietet „Hierher
+zusammenführen" (`POST /api/v1/admin/courses/{course}/merge`). Und eine Lücke, an der die Vorfahrt
+per Anschluss in einen **anderen** Umlauf weiterfährt, heißt dort nicht mehr „kein Anschluss",
+sondern nennt diesen Umlauf (`previous_continues_in`) — sie war es, die den Fall verschleiert hatte.
 
 ### Warum an `consolidated_trips.id`
 
@@ -669,6 +682,7 @@ Die Zulässigkeitsprüfung liegt im `TripLinkRuleService` und wird von beiden We
 | Regelverstoß | 422, nichts geschieht | Zeile übersprungen, Grund gemeldet, Lauf läuft weiter |
 | Fahrt schon entschieden | 409 | Zeile übersprungen (`trip_decided`) |
 | Kurs-Widerspruch | Warnung, Anschluss bleibt | Warnung, Anschluss bleibt, gezählt in `course_conflicts` |
+| Gleiche Nummer auf beiden Seiten | zusammengeführt, `course_merged` | zusammengeführt, gezählt in `courses_merged` |
 
 Ein einzelner Zwischenfall darf einen Lauf über vierzig Übergänge nicht abbrechen. Gedoppelte
 Regeln liefen dagegen auseinander — und dann verknüpfte der Lauf, was der Einzelklick abweist.

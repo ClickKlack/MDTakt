@@ -123,6 +123,8 @@ export interface TripLinkResult {
   course: { id: number; number: string; lines: string[]; duplicate: boolean } | null
   /** Auf wie viele Fahrten der Kurs dabei übertragen wurde. 0 = es gab nichts zu übertragen. */
   course_trips_assigned: number
+  /** Umläufe derselben Nummer, die beim Verknüpfen in `course` aufgegangen sind. */
+  course_merged: { id: number; number: string }[]
 }
 
 export interface TripLinkInput {
@@ -169,6 +171,8 @@ export interface AutoLinkPair {
   course_trips_assigned: number
   /** Beide Ketten trugen bereits verschiedene Nummern — nichts wurde überschrieben. */
   course_conflict: boolean
+  /** Umläufe derselben Nummer, die dabei zusammengeführt wurden. */
+  course_merged: { id: number; number: string }[]
 }
 
 /** Eine Entscheidung, die aufgelöst wird. */
@@ -217,6 +221,8 @@ export interface AutoLinkResult {
     removed: number
     skipped: number
     courses_unified: number
+    /** Umläufe, die beim Verknüpfen wegen gleicher Nummer zusammengeführt wurden. */
+    courses_merged: number
     course_conflicts: number
     applied: boolean
   }

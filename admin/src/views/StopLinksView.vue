@@ -259,6 +259,15 @@ async function verknuepfe(fromTripId: number, toTripId: number): Promise<void> {
       erfolg.value = `Kurs ${ergebnis.course.number} auf ${ergebnis.course_trips_assigned} weitere Fahrten des Umlaufs übertragen.`
     }
 
+    // Beide Seiten trugen dieselbe Nummer in zwei Umlaeufen — jetzt einer. Sagen, sonst wirkt
+    // es, als waere ein Umlauf verschwunden.
+    if (ergebnis.course !== null && ergebnis.course_merged.length > 0) {
+      erfolg.value =
+        `Kurs ${ergebnis.course.number}: Beide Seiten trugen dieselbe Nummer — ` +
+        `${ergebnis.course_merged.length === 1 ? 'der zweite Umlauf wurde' : 'die weiteren Umläufe wurden'} ` +
+        'zu einem zusammengeführt.'
+    }
+
     await ladeBoard()
   } catch (e: unknown) {
     error.value = meldung(e, 'Der Anschluss konnte nicht angelegt werden.')
@@ -463,6 +472,9 @@ async function autoFertig(ergebnis: AutoLinkResult): Promise<void> {
       ? `${ergebnis.summary.created} Anschlüsse angelegt, ${ergebnis.summary.skipped} übersprungen.` +
         (ergebnis.summary.courses_unified > 0
           ? ` Dabei wurde die Kursnummer auf ${ergebnis.summary.courses_unified} weitere Fahrten übertragen.`
+          : '') +
+        (ergebnis.summary.courses_merged > 0
+          ? ` ${ergebnis.summary.courses_merged} Umläufe mit gleicher Nummer wurden zusammengeführt.`
           : '')
       : `${ergebnis.summary.removed} Anschlüsse aufgelöst. Die Kursnummern bleiben an beiden Kettenhälften stehen.`
 

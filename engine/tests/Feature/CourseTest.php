@@ -681,4 +681,146 @@ final class CourseTest extends TestCase
 
         $this->assertNull($daten['directions'][0]['trips'][0]['course']);
     }
+
+    // ------------------------------------------- Zusammenführen (05.10.2026)
+
+    /**
+     * Zwei Teilstücke bekamen dieselbe Nummer, bevor sie verknüpft waren — die Engine legte
+     * zwei Umläufe an, weil sich die Linien noch nicht berührten. Die Verknüpfung zeigt: Es ist
+     * derselbe. Kein Konflikt, sondern Zusammenführen in den älteren (Kurs 40/47, 23.09.2026).
+     */
+    public function test_linking_merges_courses_with_the_same_number(): void
+    {
+        $periode = $this->f->periode();
+        $eins = $this->version('1', $periode);
+        $dreizehn = $this->version('13', $periode);
+
+        $aufEins = $this->f->fahrt($eins, ['Kannenstieg', 'Sudenburg'], ['06:14:00', '06:48:00']);
+        $aufDreizehn = $this->f->fahrt($dreizehn, ['Sudenburg', 'Westerhüsen'], ['06:52:00', '07:24:00']);
+
+        $alt = $this->setzeKurs($aufEins, ['number' => '3'])->assertOk()->json('data.course.id');
+        $neu = $this->setzeKurs($aufDreizehn, ['number' => '03'])->assertOk()->json('data.course.id');
+        $this->assertNotSame($alt, $neu, 'Ohne Verknüpfung berühren sich 1 und 13 nicht.');
+
+        $daten = $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'link',
+            'from_trip_id' => $aufEins->id,
+            'to_trip_id' => $aufDreizehn->id,
+        ])->assertCreated()->json('data');
+
+        $this->assertSame($alt, $daten['course']['id']);
+        $this->assertSame(['1', '13'], $daten['course']['lines']);
+        $this->assertSame([['id' => $neu, 'number' => '03']], $daten['course_merged']);
+        $this->assertNotContains('course_conflict', array_column($daten['warnings'], 'code'));
+        $this->assertNull(Course::query()->find($neu));
+        $this->assertSame(2, CourseTrip::query()->where('course_id', $alt)->count());
+    }
+
+    /** Verschiedene Nummern bleiben ein Widerspruch — nichts wird zusammengeführt. */
+    public function test_linking_different_numbers_merges_nothing(): void
+    {
+        $periode = $this->f->periode();
+        $eins = $this->version('1', $periode);
+        $dreizehn = $this->version('13', $periode);
+
+        $aufEins = $this->f->fahrt($eins, ['Kannenstieg', 'Sudenburg'], ['06:14:00', '06:48:00']);
+        $aufDreizehn = $this->f->fahrt($dreizehn, ['Sudenburg', 'Westerhüsen'], ['06:52:00', '07:24:00']);
+
+        $this->setzeKurs($aufEins, ['number' => '3'])->assertOk();
+        $this->setzeKurs($aufDreizehn, ['number' => '5'])->assertOk();
+
+        $daten = $this->withToken($this->token())->postJson('/api/v1/admin/trip-links', [
+            'kind' => 'link',
+            'from_trip_id' => $aufEins->id,
+            'to_trip_id' => $aufDreizehn->id,
+        ])->assertCreated()->json('data');
+
+        $this->assertSame([], $daten['course_merged']);
+        $this->assertContains('course_conflict', array_column($daten['warnings'], 'code'));
+        $this->assertSame(2, Course::query()->count());
+    }
+
+    /** Die Dublette nennt ihren Zwilling — führende Nullen zählen dabei nicht. */
+    public function test_a_duplicate_names_its_twin(): void
+    {
+        $periode = $this->f->periode();
+        $sechs = $this->version('6', $periode);
+
+        $a = $this->f->fahrt($sechs, ['A', 'B'], ['06:00:00', '06:30:00']);
+        $b = $this->f->fahrt($sechs, ['C', 'D'], ['08:00:00', '08:30:00']);
+
+        $kursId = $this->setzeKurs($a, ['number' => '3'])->assertOk()->json('data.course.id');
+        $zweiter = Course::query()->create(['period_id' => $periode->id, 'day_type' => 'mo_fr', 'number' => '03']);
+        $this->setzeKurs($b, ['course_id' => $zweiter->id])->assertOk();
+
+        $kurse = collect($this->withToken($this->token())
+            ->getJson("/api/v1/admin/courses?period={$periode->id}&day_type=mo_fr")
+            ->assertOk()
+            ->json('data'))->keyBy('id');
+
+        $this->assertTrue($kurse[$kursId]['duplicate']);
+        $this->assertSame(
+            [['id' => $zweiter->id, 'number' => '03', 'trip_count' => 1, 'lines' => ['6']]],
+            $kurse[$kursId]['duplicates'],
+        );
+    }
+
+    public function test_merge_moves_all_trips_and_deletes_the_source(): void
+    {
+        $periode = $this->f->periode();
+        $sechs = $this->version('6', $periode);
+
+        $a = $this->f->fahrt($sechs, ['A', 'B'], ['06:00:00', '06:30:00']);
+        $b = $this->f->fahrt($sechs, ['C', 'D'], ['08:00:00', '08:30:00']);
+
+        $ziel = Course::query()->create(['period_id' => $periode->id, 'day_type' => 'mo_fr', 'number' => '3', 'note' => 'Frühdienst']);
+        $quelle = Course::query()->create(['period_id' => $periode->id, 'day_type' => 'mo_fr', 'number' => '3', 'note' => 'Wagen 1301']);
+        $this->setzeKurs($a, ['course_id' => $ziel->id])->assertOk();
+        $this->setzeKurs($b, ['course_id' => $quelle->id])->assertOk();
+
+        $this->withToken($this->token())
+            ->postJson("/api/v1/admin/courses/{$ziel->id}/merge", ['source_id' => $quelle->id])
+            ->assertOk()
+            ->assertJsonPath('data.id', $ziel->id)
+            ->assertJsonPath('data.trip_count', 2)
+            ->assertJsonPath('data.duplicate', false)
+            ->assertJsonPath('data.note', 'Frühdienst / Wagen 1301');
+
+        $this->assertNull(Course::query()->find($quelle->id));
+    }
+
+    public function test_merge_into_itself_is_rejected(): void
+    {
+        $version = $this->version();
+        $kurs = Course::query()->create(['period_id' => $version->period_id, 'day_type' => 'mo_fr', 'number' => '3']);
+
+        $this->withToken($this->token())
+            ->postJson("/api/v1/admin/courses/{$kurs->id}/merge", ['source_id' => $kurs->id])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 422);
+    }
+
+    public function test_merge_across_strands_is_rejected(): void
+    {
+        $version = $this->version();
+        $mofr = Course::query()->create(['period_id' => $version->period_id, 'day_type' => 'mo_fr', 'number' => '3']);
+        $sa = Course::query()->create(['period_id' => $version->period_id, 'day_type' => 'sa', 'number' => '3']);
+
+        $this->withToken($this->token())
+            ->postJson("/api/v1/admin/courses/{$mofr->id}/merge", ['source_id' => $sa->id])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 422);
+
+        $this->assertNotNull(Course::query()->find($sa->id));
+    }
+
+    public function test_merge_with_unknown_source_is_rejected(): void
+    {
+        $version = $this->version();
+        $kurs = Course::query()->create(['period_id' => $version->period_id, 'day_type' => 'mo_fr', 'number' => '3']);
+
+        $this->withToken($this->token())
+            ->postJson("/api/v1/admin/courses/{$kurs->id}/merge", ['source_id' => 999999])
+            ->assertStatus(422);
+    }
 }

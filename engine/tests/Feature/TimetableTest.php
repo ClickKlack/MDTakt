@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\FahrplanTyp;
+use App\Models\Depot;
 use App\Models\LineVersion;
+use App\Models\TripLink;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\ConsolidatedFixtures;
@@ -179,5 +181,95 @@ final class TimetableTest extends TestCase
         $this->assertSame('sa', $daten['line_version']['day_type']);
         $this->assertSame(3, $daten['line_version']['version_no']);
         $this->assertSame('current', $daten['period']['status']);
+    }
+
+    public function test_links_name_predecessor_and_successor_with_jump_target(): void
+    {
+        $eins = $this->f->version('1');
+        $fuenf = $this->f->version('5');
+        $zubringer = $this->f->fahrt($eins, ['Hbf', 'City Carré'], ['07:00:00', '07:10:00']);
+        $fahrt = $this->f->fahrt($fuenf, ['City Carré', 'Messe'], ['07:12:00', '07:30:00']);
+
+        TripLink::factory()->create([
+            'from_trip_id' => $zubringer->id,
+            'to_trip_id' => $fahrt->id,
+            'stop_id' => $zubringer->last_stop_id,
+        ]);
+
+        $spalte = $this->hole($fuenf)['directions'][0]['trips'][0];
+
+        $this->assertCount(1, $spalte['links']['before']);
+        $this->assertSame([], $spalte['links']['after']);
+
+        $davor = $spalte['links']['before'][0];
+        $this->assertSame('link', $davor['kind']);
+        $this->assertSame(120, $davor['turnaround_seconds']);
+        $this->assertSame($zubringer->id, $davor['trip']['id']);
+        $this->assertSame('1', $davor['trip']['line']);
+        $this->assertSame($eins->id, $davor['trip']['line_version_id']);
+        $this->assertSame('mo_fr', $davor['trip']['day_type']);
+        $this->assertSame($eins->period_id, $davor['trip']['period_id']);
+        $this->assertSame('Hbf', $davor['trip']['start_stop']);
+
+        // Dieselbe Kante aus Sicht des Vorgängers: dort steht sie danach.
+        $zurueck = $this->hole($eins)['directions'][0]['trips'][0]['links'];
+        $this->assertSame($fahrt->id, $zurueck['after'][0]['trip']['id']);
+        $this->assertSame([], $zurueck['before']);
+    }
+
+    public function test_links_show_depot_decisions_without_partner(): void
+    {
+        $version = $this->f->version('1');
+        $fahrt = $this->f->fahrt($version, ['Hof', 'Hbf'], ['05:00:00', '05:20:00']);
+        $hof = Depot::factory()->create(['name' => 'Betriebshof Testheide', 'short_name' => 'Testh.']);
+
+        TripLink::factory()->start()->atDepot($hof)->create([
+            'to_trip_id' => $fahrt->id,
+            'stop_id' => $fahrt->first_stop_id,
+        ]);
+        TripLink::factory()->end()->create([
+            'from_trip_id' => $fahrt->id,
+            'stop_id' => $fahrt->last_stop_id,
+        ]);
+
+        $links = $this->hole($version)['directions'][0]['trips'][0]['links'];
+
+        $this->assertSame('start', $links['before'][0]['kind']);
+        $this->assertNull($links['before'][0]['trip']);
+        $this->assertSame('Testh.', $links['before'][0]['depot']);
+        $this->assertSame('end', $links['after'][0]['kind']);
+        $this->assertNull($links['after'][0]['depot']);
+    }
+
+    public function test_links_list_every_predecessor_of_a_trip(): void
+    {
+        $eins = $this->f->version('1');
+        $alt = $this->f->version('13', FahrplanTyp::MoFrNormal, 1);
+        $neu = $this->f->version('13', FahrplanTyp::MoFrNormal, 2);
+        $fahrt = $this->f->fahrt($eins, ['City Carré', 'Hbf'], ['08:00:00', '08:20:00']);
+        $vorher = $this->f->fahrt($alt, ['Messe', 'City Carré'], ['07:40:00', '07:55:00']);
+        $nachher = $this->f->fahrt($neu, ['Messe', 'City Carré'], ['07:41:00', '07:56:00']);
+
+        foreach ([$vorher, $nachher] as $vorgaenger) {
+            TripLink::factory()->create([
+                'from_trip_id' => $vorgaenger->id,
+                'to_trip_id' => $fahrt->id,
+                'stop_id' => $fahrt->first_stop_id,
+            ]);
+        }
+
+        $davor = $this->hole($eins)['directions'][0]['trips'][0]['links']['before'];
+
+        $this->assertSame([$vorher->id, $nachher->id], array_column(array_column($davor, 'trip'), 'id'));
+    }
+
+    public function test_trip_without_decision_has_empty_links(): void
+    {
+        $version = $this->f->version('1');
+        $this->f->fahrt($version, ['A', 'B'], ['07:00:00', '07:10:00']);
+
+        $links = $this->hole($version)['directions'][0]['trips'][0]['links'];
+
+        $this->assertSame(['before' => [], 'after' => []], $links);
     }
 }

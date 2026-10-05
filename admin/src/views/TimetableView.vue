@@ -9,7 +9,13 @@ import { assignCourse, detachCourse, type CourseSequenceResult } from '../servic
 import { fetchLines, FAHRPLAN_TYPEN, type FahrplanTyp, type Line } from '../services/lines'
 import { fetchLineVersions, type LineVersion } from '../services/scheduleVersions'
 import { fetchSchedulePeriods, periodOptionLabel, type SchedulePeriod } from '../services/schedulePeriods'
-import { fetchTimetable, type Timetable, type TimetableSightingGroup, type TimetableTrip } from '../services/timetable'
+import {
+  fetchTimetable,
+  type Timetable,
+  type TimetableLinkTrip,
+  type TimetableSightingGroup,
+  type TimetableTrip,
+} from '../services/timetable'
 import { acceptQuestion, acceptSightings, rejectSightings } from '../services/sightings'
 import { formatClock, formatDate } from '../utils/timezone'
 import { lineSortKey, lineTypeOrder } from '../utils/lineStyle'
@@ -309,14 +315,103 @@ watch([selectedVersion, selectedLine, dayType, selectedPeriod], () => {
 
 // Die Hervorhebung gilt nur der Fahrt, mit der man hereinkam — nicht einer anderen Linie.
 watch([selectedLine, dayType], () => {
-  if (!loading.value) {
+  if (!loading.value && !springt) {
     hervorgehoben.value = null
   }
 })
 
 watch([selectedLine, dayType], () => {
-  if (!loading.value) {
+  if (!loading.value && !springt) {
     void loadVersions()
+  }
+})
+
+// ---------------------------------------------------------------- Anschlüsse: zur Partnerfahrt
+
+/**
+ * Ein Sprung setzt Linie, Typ und Periode auf einmal. Die Watcher oben duerfen dabei nicht
+ * mitlaufen — sie luden sonst die neueste Version statt der des Partners und loeschten die
+ * Hervorhebung, um derentwillen gesprungen wird.
+ */
+let springt = false
+
+/**
+ * Der Sprung geht ueber die URL (`push`, nicht `replace`): So fuehrt „Zurueck" im Browser zur
+ * Fahrt, von der man kam — beim Durchklicken einer Kette der natuerliche Rueckweg.
+ */
+function springeZu(ziel: TimetableLinkTrip): void {
+  void router.push({
+    name: 'timetable',
+    query: {
+      line: ziel.line,
+      day_type: ziel.day_type ?? dayType.value,
+      version: String(ziel.line_version_id),
+      period: ziel.period_id ? String(ziel.period_id) : undefined,
+      trip: String(ziel.id),
+    },
+  })
+}
+
+/**
+ * Die URL fuehrt, sobald sie von aussen wechselt — durch einen Sprung oder durch „Zurueck".
+ * Die eigenen `replace`-Aufrufe in {@link selectVersion} schreiben nur zurueck, was schon
+ * eingestellt ist; dann ist hier nichts zu tun.
+ */
+watch(
+  () => route.query,
+  async (q) => {
+    const version = Number(q.version) || null
+    const trip = Number(q.trip) || null
+
+    if (loading.value || version === null) {
+      return
+    }
+
+    if (version === selectedVersion.value) {
+      if (trip !== hervorgehoben.value) {
+        hervorgehoben.value = trip
+        await zeigeHervorgehobene()
+      }
+      return
+    }
+
+    springt = true
+    selectedLine.value = (q.line as string) ?? selectedLine.value
+    dayType.value = ((q.day_type as FahrplanTyp) ?? dayType.value) as FahrplanTyp
+    selectedPeriod.value = Number(q.period) || null
+    hervorgehoben.value = trip
+    // Die Watcher laufen vor dem naechsten Rendern — erst danach darf der Schalter fallen.
+    await nextTick()
+    springt = false
+
+    try {
+      await loadVersions(version)
+    } catch {
+      error.value = 'Der Fahrplan der Anschlussfahrt konnte nicht geladen werden.'
+    }
+  },
+)
+
+// ---------------------------------------------------------------- Nur Start und Ende
+
+const SCHLUESSEL_ENDPUNKTE = 'mdtakt.timetable.endpointsOnly'
+
+/** Lange Laufwege auf Start und Ende verkuerzen. Gemerkt je Browser — eine Lesegewohnheit. */
+const nurEndpunkte = ref(liesSchalter())
+
+function liesSchalter(): boolean {
+  try {
+    return localStorage.getItem(SCHLUESSEL_ENDPUNKTE) === '1'
+  } catch {
+    return false
+  }
+}
+
+watch(nurEndpunkte, (wert) => {
+  try {
+    localStorage.setItem(SCHLUESSEL_ENDPUNKTE, wert ? '1' : '0')
+  } catch {
+    // Ohne Speicher gilt der Schalter eben nur bis zum Neuladen.
   }
 })
 
@@ -444,6 +539,11 @@ function gueltigkeit(version: LineVersion): string {
               · aus einer eingefrorenen Periode
             </span>
           </p>
+
+          <label v-if="timetable" class="mt-3 flex items-center gap-2 text-sm text-slate-700">
+            <input v-model="nurEndpunkte" type="checkbox" />
+            Nur Start und Ende — Zwischenhalte ausblenden
+          </label>
         </template>
       </div>
 
@@ -466,6 +566,8 @@ function gueltigkeit(version: LineVersion): string {
         @assign="setzeKurs"
         @detach="loeseKurs"
         :highlight-trip="hervorgehoben"
+        :endpoints-only="nurEndpunkte"
+        @jump="springeZu"
         @range-pick="waehleSpalte"
         @sighting-accept="nimmSichtungAn"
         @sighting-reject="(_trip, gruppe) => lehneSichtungAb(gruppe)"

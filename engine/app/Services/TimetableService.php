@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\RouteType;
+use App\Enums\TripLinkKind;
 use App\Models\LineVersion;
 use App\Support\GtfsTime;
 use Illuminate\Support\Collection;
@@ -35,6 +36,7 @@ final class TimetableService
         private readonly OperatingDayResolver $operatingDay,
         private readonly CourseLookup $courses,
         private readonly SightingLookup $sightings,
+        private readonly ConsolidatedTripInfoResolver $tripInfo,
     ) {}
 
     /**
@@ -251,6 +253,8 @@ final class TimetableService
         // eine gesichtete Nummer zur Fahrt passt — Nachbarspalten und Kette stehen daneben.
         $sichtungen = $this->sightings->pendingForTrips($gruppe->pluck('id')->map(static fn ($x): int => (int) $x)->all(), $line);
 
+        $anschluesse = $this->links($gruppe->pluck('id')->map(static fn ($x): int => (int) $x)->all());
+
         foreach ($gruppe as $fahrt) {
             $id = (int) $fahrt->id;
 
@@ -285,6 +289,7 @@ final class TimetableService
                     'sighting' => $belege[$id] ?? null,
                 ] : null,
                 'sightings' => $sichtungen[$id] ?? [],
+                'links' => $anschluesse[$id] ?? ['before' => [], 'after' => []],
                 'cells' => $zellen,
             ];
         }
@@ -303,6 +308,121 @@ final class TimetableService
         });
 
         return $spalten;
+    }
+
+    /**
+     * Was vor und nach jeder Fahrt kommt — Anschluss, Ausrücken oder Einrücken.
+     *
+     * **Listen, keine Einzelwerte:** Seit eine Fahrt je Tag einen anderen Anschluss tragen darf
+     * (KURSE §3), kann sie über den Versionswechsel einer Nachbarlinie zwei Vorgänger haben.
+     * Gezeigt werden alle — jeder gilt an mindestens einem ihrer Tage, sonst gäbe es ihn nicht.
+     * Eine leere Liste heißt **offen**, nicht „Kettenende".
+     *
+     * Der Partner trägt Linie, Fahrplantyp, Periode und Version mit, damit der Fahrplan per
+     * Klick zu ihm springen kann — er liegt fast immer auf einer anderen Linie.
+     *
+     * @param  array<int, int>  $tripIds
+     * @return array<int, array{before: array<int, array<string, mixed>>, after: array<int, array<string, mixed>>}>
+     */
+    private function links(array $tripIds): array
+    {
+        if ($tripIds === []) {
+            return [];
+        }
+
+        $zeilen = DB::table('trip_links as tl')
+            ->leftJoin('depots as d', 'd.id', '=', 'tl.depot_id')
+            ->where(function ($q) use ($tripIds): void {
+                $q->whereIn('tl.from_trip_id', $tripIds)->orWhereIn('tl.to_trip_id', $tripIds);
+            })
+            ->orderBy('tl.id')
+            ->get(['tl.from_trip_id', 'tl.to_trip_id', 'tl.kind', 'd.name as depot_name', 'd.short_name as depot_short_name']);
+
+        if ($zeilen->isEmpty()) {
+            return [];
+        }
+
+        $info = $this->tripInfo->forIds(
+            $zeilen->flatMap(static fn (object $z): array => [$z->from_trip_id, $z->to_trip_id])
+                ->filter()
+                ->map(static fn ($id): int => (int) $id)
+                ->all()
+        );
+
+        $versionen = DB::table('line_versions')
+            ->whereIn('id', array_unique(array_column($info, 'line_version_id')))
+            ->get(['id', 'day_type', 'period_id'])
+            ->keyBy('id');
+
+        $partner = function (?int $id) use ($info, $versionen): ?array {
+            if ($id === null || ! isset($info[$id])) {
+                return null;
+            }
+
+            $fahrt = $info[$id];
+            $version = $versionen->get($fahrt['line_version_id']);
+
+            return [
+                'id' => $id,
+                'line' => $fahrt['line'],
+                'mode' => $fahrt['mode'],
+                'line_version_id' => $fahrt['line_version_id'],
+                'version_no' => $fahrt['version_no'],
+                'day_type' => $version?->day_type,
+                'period_id' => $version === null ? null : (int) $version->period_id,
+                'start_stop' => $fahrt['start_stop'],
+                'end_stop' => $fahrt['end_stop'],
+                'departure_time' => $fahrt['departure_time'],
+                'arrival_time' => $fahrt['arrival_time'],
+                'course' => $fahrt['course'] === null ? null : $fahrt['course']['number'],
+            ];
+        };
+
+        $eigene = array_flip($tripIds);
+        $ergebnis = [];
+
+        foreach ($zeilen as $z) {
+            $von = $z->from_trip_id === null ? null : (int) $z->from_trip_id;
+            $nach = $z->to_trip_id === null ? null : (int) $z->to_trip_id;
+            $kind = TripLinkKind::from($z->kind);
+
+            // Entlang des Betriebstags, nicht der Uhr — wie im Haltestellen-Editor.
+            $wendezeit = null;
+            if ($kind === TripLinkKind::Link && isset($info[(int) $von], $info[(int) $nach])) {
+                $ankunft = $info[$von]['arrival_sort'];
+                $abfahrt = $info[$nach]['departure_sort'];
+                $wendezeit = ($ankunft === PHP_INT_MAX || $abfahrt === PHP_INT_MAX) ? null : $abfahrt - $ankunft;
+            }
+
+            $kurz = $z->depot_short_name;
+            $hof = $z->depot_name === null ? null : ($kurz === null || $kurz === '' ? (string) $z->depot_name : (string) $kurz);
+
+            // Für die Fahrt `from` ist das, was danach kommt; für `to`, was davor war.
+            if ($von !== null && isset($eigene[$von])) {
+                $ergebnis[$von]['after'][] = [
+                    'kind' => $kind->value,
+                    'trip' => $partner($nach),
+                    'turnaround_seconds' => $wendezeit,
+                    'depot' => $hof,
+                ];
+            }
+
+            if ($nach !== null && isset($eigene[$nach])) {
+                $ergebnis[$nach]['before'][] = [
+                    'kind' => $kind->value,
+                    'trip' => $partner($von),
+                    'turnaround_seconds' => $wendezeit,
+                    'depot' => $hof,
+                ];
+            }
+        }
+
+        foreach ($ergebnis as &$seiten) {
+            $seiten += ['before' => [], 'after' => []];
+        }
+        unset($seiten);
+
+        return $ergebnis;
     }
 
     /**

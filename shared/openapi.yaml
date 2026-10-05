@@ -2278,6 +2278,16 @@ components:
               comparison: { type: string, enum: [same, differs, none] }
               next_version: { type: boolean, description: 'Mindestens eine Sichtung erst in der Folgeversion gefunden' }
               chain_trip_count: { type: integer, nullable: true, description: 'Kettenlänge bei differs' }
+        links:
+          type: object
+          required: [before, after]
+          description: >
+            Was vor und nach dieser Fahrt kommt. **Listen**, weil eine Fahrt je Tag einen anderen
+            Anschluss tragen darf (KURSE §3) — über den Versionswechsel einer Nachbarlinie hat sie
+            dann zwei Vorgänger. Eine leere Liste heißt **offen**, nicht Kettenende.
+          properties:
+            before: { type: array, items: { $ref: '#/components/schemas/TimetableLink' } }
+            after: { type: array, items: { $ref: '#/components/schemas/TimetableLink' } }
         cells:
           type: array
           description: >
@@ -2286,6 +2296,39 @@ components:
             (`25:10`) — GTFS-Zeiten sind Netz-Lokalzeit relativ zum Betriebstag und werden **nicht**
             in eine Zeitzone umgerechnet.
           items: { type: string, nullable: true }
+
+    TimetableLink:
+      type: object
+      required: [kind, trip, turnaround_seconds, depot]
+      properties:
+        kind:
+          type: string
+          enum: [link, start, end]
+          description: '`link` = Anschluss, `start` = aus dem Betriebshof, `end` = in den Betriebshof'
+        turnaround_seconds:
+          type: integer
+          nullable: true
+          description: Wendezeit entlang des Betriebstags; nur bei `link`.
+        depot: { type: string, nullable: true, description: 'Kurzname des Betriebshofs, nur bei start/end' }
+        trip:
+          type: object
+          nullable: true
+          description: >
+            Die Partnerfahrt, `null` bei start/end. Trägt Linie, Fahrplantyp, Periode und Version,
+            damit der Fahrplan zu ihr springen kann.
+          properties:
+            id: { type: integer }
+            line: { type: string, example: '1' }
+            mode: { type: string }
+            line_version_id: { type: integer }
+            version_no: { type: integer }
+            day_type: { type: string, nullable: true, example: mo_fr }
+            period_id: { type: integer, nullable: true }
+            start_stop: { type: string, nullable: true }
+            end_stop: { type: string, nullable: true }
+            departure_time: { type: string, nullable: true, example: '07:00:00' }
+            arrival_time: { type: string, nullable: true, example: '07:10:00' }
+            course: { type: string, nullable: true, example: '03' }
 
     TimetableDirection:
       type: object

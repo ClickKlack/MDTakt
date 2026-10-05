@@ -21,6 +21,8 @@ headers {
 assert {
   res.status: eq 200
   res.body.data.directions: isArray
+  res.body.data.directions[0].trips[0].links.before: isArray
+  res.body.data.directions[0].trips[0].links.after: isArray
 }
 
 docs {
@@ -54,6 +56,15 @@ docs {
           "trips": [
             { "id": 9835, "signature": "3f2a…", "mode": "tram",
               "departure_time": "04:42:00", "arrival_time": "05:00:00",
+              "links": {
+                "before": [{ "kind": "start", "trip": null, "turnaround_seconds": null, "depot": "Nord" }],
+                "after": [{ "kind": "link", "turnaround_seconds": 240, "depot": null,
+                            "trip": { "id": 10412, "line": "13", "mode": "tram", "line_version_id": 181,
+                                      "version_no": 1, "day_type": "mo_fr", "period_id": 1,
+                                      "start_stop": "Listemannstr.", "end_stop": "Neustädter See",
+                                      "departure_time": "05:04:00", "arrival_time": "05:31:00",
+                                      "course": "03" } }]
+              },
               "cells": ["04:42", "04:43"] }
           ]
         }
@@ -79,6 +90,11 @@ docs {
   Netzweit betrifft das 58 von 965 Richtungen (bis zu sieben Varianten). `alignment_warning`
   meldet, wenn die Achse dabei ueber das 1,5-fache der laengsten Einzelvariante waechst — am
   Produktivbestand tritt das derzeit nirgends auf (schlechtester Wert 1,29).
+
+  **`links` sind Listen.** Vorher und nachher je Fahrt: Anschluss (`link`, mit Partner und
+  Wendezeit), Aus-/Einruecken (`start`/`end`, ohne Partner). Ueber den Versionswechsel einer
+  Nachbarlinie kann eine Fahrt zwei Vorgaenger haben. Leer heisst offen. Der Partner traegt
+  `line_version_id`, `day_type` und `period_id` — genug, um im Fahrplan zu ihm zu springen.
 
   **Kein Periodenfilter:** Auch eingefrorene Perioden bleiben abrufbar; `period.status` sagt,
   ob es sich um Historie handelt.

@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, type VNode } from 'vue'
-import type { TimetableDirection, TimetableSightingGroup, TimetableTrip } from '../services/timetable'
+import type {
+  TimetableDirection,
+  TimetableLink,
+  TimetableLinkTrip,
+  TimetableSightingGroup,
+  TimetableTrip,
+} from '../services/timetable'
 import { courseMarkClass, courseMarkTitle } from '../utils/courseMark'
-import { formatClock } from '../utils/timezone'
+import { formatClock, formatDuration } from '../utils/timezone'
 
 const props = defineProps<{
   direction: TimetableDirection
@@ -17,6 +23,8 @@ const props = defineProps<{
   rangeTo?: number | null
   /** Fahrt, die hervorgehoben wird — der Einstieg aus der Prüfliste der Sichtungen. */
   highlightTrip?: number | null
+  /** Nur die Zeilen, an denen eine Fahrt beginnt oder endet — lange Laufwege werden lesbar. */
+  endpointsOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -26,7 +34,92 @@ const emit = defineEmits<{
   sightingAccept: [trip: TimetableTrip, group: TimetableSightingGroup]
   sightingReject: [trip: TimetableTrip, group: TimetableSightingGroup]
   sightingDetails: [trip: TimetableTrip]
+  /** Zur Partnerfahrt eines Anschlusses springen — meist auf einer anderen Linie. */
+  jump: [trip: TimetableLinkTrip]
 }>()
+
+/**
+ * Erste und letzte bediente Zeile je Fahrt. Daran haengt die verkuerzte Ansicht: Eine Zeile
+ * bleibt, wenn **irgendeine** Fahrt dort beginnt oder endet — sonst verloere ein Kurzlaeufer,
+ * der mitten auf der Achse wendet, seinen Endpunkt.
+ */
+const endpunkte = computed(() => {
+  const proFahrt = new Map<number, [number, number]>()
+
+  for (const trip of props.direction.trips) {
+    const erste = trip.cells.findIndex((c) => c !== null)
+    let letzte = trip.cells.length - 1
+    while (letzte > erste && trip.cells[letzte] === null) {
+      letzte--
+    }
+    proFahrt.set(trip.id, [erste, letzte])
+  }
+
+  return proFahrt
+})
+
+const sichtbareZeilen = computed(() => {
+  if (!props.endpointsOnly) {
+    return props.direction.rows
+  }
+
+  const behalten = new Set<number>()
+  for (const [erste, letzte] of endpunkte.value.values()) {
+    behalten.add(erste)
+    behalten.add(letzte)
+  }
+
+  return props.direction.rows.filter((zeile) => behalten.has(zeile.position))
+})
+
+/** In der verkuerzten Ansicht treten Durchfahrtszeiten zurueck — es geht um Start und Ende. */
+function istEndpunkt(trip: TimetableTrip, position: number): boolean {
+  const grenzen = endpunkte.value.get(trip.id)
+  return grenzen !== undefined && (grenzen[0] === position || grenzen[1] === position)
+}
+
+/**
+ * Kurztext einer Anschluss-Zelle. Davor zaehlt die **Ankunft** des Vorgaengers, danach die
+ * **Abfahrt** des Nachfolgers — beides die Zeit am Uebergang.
+ */
+function anschlussText(link: TimetableLink, seite: 'before' | 'after'): string {
+  if (link.kind !== 'link') {
+    return link.depot ?? 'Hof'
+  }
+  if (link.trip === null) {
+    return '?'
+  }
+
+  return seite === 'before' ? `← ${link.trip.line}` : `${link.trip.line} →`
+}
+
+function anschlussTitel(link: TimetableLink, seite: 'before' | 'after'): string {
+  if (link.kind === 'start') {
+    return `Beginnt hier, aus dem Betriebshof${link.depot ? ` ${link.depot}` : ''}`
+  }
+  if (link.kind === 'end') {
+    return `Endet hier, in den Betriebshof${link.depot ? ` ${link.depot}` : ''}`
+  }
+  if (link.trip === null) {
+    return 'Anschluss ohne lesbare Partnerfahrt'
+  }
+
+  const t = link.trip
+  const lauf = `${t.start_stop ?? '?'} → ${t.end_stop ?? '?'}`
+  const zeit =
+    seite === 'before' ? `an ${formatClock(t.arrival_time)}` : `ab ${formatClock(t.departure_time)}`
+  const kurs = t.course ? ` · Kurs ${t.course}` : ''
+  const wende = link.turnaround_seconds !== null ? ` · Wende ${formatDuration(link.turnaround_seconds)}` : ''
+  const richtung = seite === 'before' ? 'Kommt von' : 'Fährt weiter als'
+
+  return `${richtung} Linie ${t.line} (${lauf}), ${zeit}${wende}${kurs} — klicken zum Springen`
+}
+
+function anschlussKlasse(link: TimetableLink): string {
+  return link.kind === 'link'
+    ? 'bg-sky-100 text-sky-900 hover:bg-sky-200'
+    : 'bg-slate-200 text-slate-700'
+}
 
 /**
  * Die Zeile „Sichtungen" erscheint nur, wenn es in dieser Richtung etwas zu entscheiden gibt —
@@ -168,6 +261,9 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
       </h3>
       <p class="mt-1 text-xs text-slate-500">
         {{ direction.trip_count }} Fahrten · {{ direction.rows.length }} Halte
+        <template v-if="endpointsOnly && sichtbareZeilen.length < direction.rows.length">
+          · {{ direction.rows.length - sichtbareZeilen.length }} Zwischenhalte ausgeblendet
+        </template>
         <template v-if="direction.variant_count > 1">
           · {{ direction.variant_count }} Laufwege auf eine Achse gebracht
         </template>
@@ -342,7 +438,44 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
           </tr>
         </thead>
         <tbody>
-          <tr v-for="zeile in direction.rows" :key="zeile.position" class="hover:bg-slate-50">
+          <!-- Davor und danach: Wo kommt das Fahrzeug her, wo faehrt es hin? Die Zeilen stehen am
+               Anfang und Ende der Haltefolge, so wie die Fahrt sich liest. Leer heisst offen. -->
+          <tr>
+            <th
+              scope="row"
+              class="sticky left-0 z-10 bg-sky-50 px-4 py-1 text-left text-xs font-medium uppercase text-sky-800 ring-1 ring-slate-100"
+            >
+              Davor
+            </th>
+            <td
+              v-for="trip in direction.trips"
+              :key="`davor-${trip.id}`"
+              class="px-0.5 py-1 text-center align-top ring-1 ring-slate-100"
+            >
+              <template v-for="(link, n) in trip.links.before" :key="n">
+                <button
+                  v-if="link.kind === 'link' && link.trip"
+                  type="button"
+                  class="block w-full whitespace-nowrap rounded px-1 py-0.5 text-xs font-medium"
+                  :class="anschlussKlasse(link)"
+                  :title="anschlussTitel(link, 'before')"
+                  @click="emit('jump', link.trip)"
+                >
+                  {{ anschlussText(link, 'before') }}
+                </button>
+                <span
+                  v-else
+                  class="block truncate rounded px-1 py-0.5 text-xs"
+                  :class="anschlussKlasse(link)"
+                  :title="anschlussTitel(link, 'before')"
+                >
+                  {{ anschlussText(link, 'before') }}
+                </span>
+              </template>
+              <span v-if="trip.links.before.length === 0" class="text-xs text-amber-500" title="Noch offen">?</span>
+            </td>
+          </tr>
+          <tr v-for="zeile in sichtbareZeilen" :key="zeile.position" class="hover:bg-slate-50">
             <th
               scope="row"
               class="sticky left-0 z-10 max-w-64 truncate bg-white px-4 py-1.5 text-left font-normal text-slate-700 ring-1 ring-slate-100"
@@ -357,11 +490,52 @@ const spaltenbreite = computed(() => `${props.direction.trips.length * 3.5 + 14}
               v-for="trip in direction.trips"
               :key="trip.id"
               class="px-2 py-1.5 text-center ring-1 ring-slate-100"
-              :class="trip.cells[zeile.position] ? 'text-slate-700' : 'text-slate-300'"
+              :class="
+                !trip.cells[zeile.position]
+                  ? 'text-slate-300'
+                  : endpointsOnly && !istEndpunkt(trip, zeile.position)
+                    ? 'text-slate-400'
+                    : 'text-slate-700'
+              "
             >
               <!-- Leere Zelle als Punkt, nicht als Leerraum: Beim horizontalen Scrollen
                    verliert das Auge sonst die Zeile. -->
               {{ trip.cells[zeile.position] ? formatClock(trip.cells[zeile.position]) : '·' }}
+            </td>
+          </tr>
+          <tr>
+            <th
+              scope="row"
+              class="sticky left-0 z-10 bg-sky-50 px-4 py-1 text-left text-xs font-medium uppercase text-sky-800 ring-1 ring-slate-100"
+            >
+              Danach
+            </th>
+            <td
+              v-for="trip in direction.trips"
+              :key="`danach-${trip.id}`"
+              class="px-0.5 py-1 text-center align-top ring-1 ring-slate-100"
+            >
+              <template v-for="(link, n) in trip.links.after" :key="n">
+                <button
+                  v-if="link.kind === 'link' && link.trip"
+                  type="button"
+                  class="block w-full whitespace-nowrap rounded px-1 py-0.5 text-xs font-medium"
+                  :class="anschlussKlasse(link)"
+                  :title="anschlussTitel(link, 'after')"
+                  @click="emit('jump', link.trip)"
+                >
+                  {{ anschlussText(link, 'after') }}
+                </button>
+                <span
+                  v-else
+                  class="block truncate rounded px-1 py-0.5 text-xs"
+                  :class="anschlussKlasse(link)"
+                  :title="anschlussTitel(link, 'after')"
+                >
+                  {{ anschlussText(link, 'after') }}
+                </span>
+              </template>
+              <span v-if="trip.links.after.length === 0" class="text-xs text-amber-500" title="Noch offen">?</span>
             </td>
           </tr>
         </tbody>

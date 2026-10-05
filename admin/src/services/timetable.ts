@@ -33,6 +33,32 @@ export interface TimetableSightingGroup {
   chain_trip_count: number | null
 }
 
+/** Die Partnerfahrt eines Anschlusses — mit allem, was der Sprung in ihren Fahrplan braucht. */
+export interface TimetableLinkTrip {
+  id: number
+  line: string
+  mode: 'tram' | 'bus' | 'other'
+  line_version_id: number
+  version_no: number
+  day_type: string | null
+  period_id: number | null
+  start_stop: string | null
+  end_stop: string | null
+  departure_time: string | null
+  arrival_time: string | null
+  course: string | null
+}
+
+/** Was vor oder nach einer Fahrt kommt: Anschluss, Ausrücken (`start`) oder Einrücken (`end`). */
+export interface TimetableLink {
+  kind: 'link' | 'start' | 'end'
+  /** `null` bei Aus-/Einrücken */
+  trip: TimetableLinkTrip | null
+  turnaround_seconds: number | null
+  /** Kurzname des Betriebshofs, nur bei Aus-/Einrücken */
+  depot: string | null
+}
+
 export interface TimetableTrip {
   id: number
   signature: string
@@ -46,6 +72,11 @@ export interface TimetableTrip {
   course: { id: number; number: string; display: string; sighting: CourseSightingMark } | null
   /** Offene Sichtungen aus MDKursTracker, nach Kursnummer gruppiert */
   sightings: TimetableSightingGroup[]
+  /**
+   * Listen, weil eine Fahrt je Tag einen anderen Anschluss tragen darf (KURSE §3). Leer heißt
+   * offen, nicht Kettenende.
+   */
+  links: { before: TimetableLink[]; after: TimetableLink[] }
   /** Zeiten als „HH:MM", positionsgleich zu `rows`; null = Zeile wird nicht bedient. */
   cells: (string | null)[]
 }

@@ -507,7 +507,12 @@ final class TripLinkAutoService
             // Zwischen Vorschau und Anwenden kann jemand anderes etwas gesetzt haben. Anders als
             // der Einzelklick, der darauf mit 409 antwortet, überspringt der Lauf die Zeile: Ein
             // Zwischenfall darf einen Lauf über 40 Übergänge nicht abbrechen.
-            if ($this->alreadyDecided($von->id, $nach->id)) {
+            //
+            // Geprüft wird je Tag, wie beim Einzelklick — nicht, ob die Fahrt überhaupt einen
+            // Anschluss trägt. Fährt die Gegenseite durch zwei Versionsstände, hängt an ihr im
+            // anderen Stand schon einer, an anderen Tagen (KURSE §2 K7). Die Frage je Fahrt
+            // verwarf am City Carré jedes Paar, das die Vorschau gezeigt hatte.
+            if ($this->validity->conflictFor($von->id, $nach->id) !== null) {
                 $uebersprungen[] = $this->skip(
                     'ending',
                     $paar['from_trip'],
@@ -559,15 +564,6 @@ final class TripLinkAutoService
         }
 
         return $geloest;
-    }
-
-    private function alreadyDecided(int $fromId, int $toId): bool
-    {
-        return DB::table('trip_links')
-            ->where(function ($q) use ($fromId, $toId): void {
-                $q->where('from_trip_id', $fromId)->orWhere('to_trip_id', $toId);
-            })
-            ->exists();
     }
 
     /**

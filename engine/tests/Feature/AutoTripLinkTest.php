@@ -155,6 +155,46 @@ final class AutoTripLinkTest extends TestCase
         ]);
     }
 
+    /**
+     * Der Fall vom City Carré (06.10.2026): Die 13 wechselt mitten in der Periode die Version,
+     * die 2 fährt durch. Die Abfahrt der 2 trägt im ersten Stand schon ihren Vorgänger — an
+     * anderen Tagen als der neue Anschluss (KURSE §2 K7). Die Vorschau zeigte das Paar, das
+     * Anwenden verwarf es als „seit der Vorschau entschieden", weil die Nachprüfung je Fahrt
+     * statt je Tag fragte.
+     */
+    public function test_apply_creates_a_pair_whose_departure_is_linked_on_other_days(): void
+    {
+        $alt = $this->f->version('13', FahrplanTyp::MoFrNormal, 1, $this->f->periode());
+        $this->f->gueltigkeit($alt, '2026-08-17', '2026-08-28');
+        $neu = $this->f->version('13', FahrplanTyp::MoFrNormal, 2, $this->f->periode());
+        $this->f->gueltigkeit($neu, '2026-08-31', '2026-09-18');
+        $zwei = $this->f->version('2', FahrplanTyp::MoFrNormal, 1, $this->f->periode());
+        $this->f->gueltigkeit($zwei, '2026-08-17', '2026-09-18');
+
+        $anAlt = $this->ankunft($alt, '06:48:00');
+        $anNeu = $this->ankunft($neu, '06:48:00');
+        $ab = $this->abfahrt($zwei, '06:52:00');
+
+        TripLink::query()->create([
+            'from_trip_id' => $anAlt->id,
+            'to_trip_id' => $ab->id,
+            'stop_id' => $anAlt->last_stop_id,
+            'kind' => TripLinkKind::Link,
+        ]);
+
+        $rumpf = $this->rumpf($anNeu, $anNeu, ['stand' => 1]);
+
+        $vorschau = $this->vorschau($rumpf);
+        $this->assertSame(1, $vorschau['summary']['planned']);
+
+        $ergebnis = $this->anwenden($rumpf);
+
+        $this->assertSame(1, $ergebnis['summary']['created']);
+        $this->assertSame([], $ergebnis['skipped']);
+        $this->assertDatabaseHas('trip_links', ['from_trip_id' => $anNeu->id, 'to_trip_id' => $ab->id]);
+        $this->assertDatabaseHas('trip_links', ['from_trip_id' => $anAlt->id, 'to_trip_id' => $ab->id]);
+    }
+
     // ---------------------------------------------------------------- Die FIFO-Paarung
 
     public function test_each_arrival_gets_the_earliest_free_departure(): void

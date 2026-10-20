@@ -73,7 +73,7 @@ watch(tauschpunkt, (an) => {
 
 // Eine neue Markierung macht die alte Vorschau ungueltig.
 watch(
-  () => [props.params?.from_trip_id, props.params?.to_trip_id, props.params?.lines?.join(','), props.params?.mode],
+  () => [props.params?.from_trip_id, props.params?.to_trip_id, props.params?.lines?.join(','), props.params?.starting_lines?.join(','), props.params?.mode],
   () => {
     vorschau.value = null
   },
@@ -343,7 +343,11 @@ const uebersprungen = computed(() => {
         Klicke links die Fahrt an, ab der begonnen werden soll — und danach die letzte.
       </p>
       <p v-else class="text-sm text-slate-600">
-        <template v-if="params.lines?.length">Linie {{ params.lines.join(' und ') }} · </template>
+        <template v-if="params.starting_lines">
+          Linie {{ params.lines?.length ? params.lines.join(' und ') : 'alle' }} →
+          {{ params.starting_lines.join(' und ') }} ·
+        </template>
+        <template v-else-if="params.lines?.length">Linie {{ params.lines.join(' und ') }} · </template>
         Bereich markiert
       </p>
     </div>

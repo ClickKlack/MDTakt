@@ -16,8 +16,12 @@ const props = defineProps<{
   busy: boolean
   /** `null` = alle Verkehrsmittel. */
   modeFilter: 'tram' | 'bus' | null
-  /** Leer = alle Linien. Mehrfachauswahl, damit ein gewollter Linienwechsel sichtbar bleibt. */
+  /** Linien der Ankuenfte (links). Leer = alle. Mehrfachauswahl, damit ein gewollter Linienwechsel sichtbar bleibt. */
   lineFilter: string[]
+  /** Linien der Abfahrten (rechts), bereits aufgeloest — folgt die Abfahrt der Ankunft, steht hier dasselbe. */
+  startingLineFilter: string[]
+  /** Zeilen ausblenden, an denen nichts mehr offen ist. Reine Anzeige. */
+  hideDecided: boolean
   /**
    * Bereichsmodus: Statt einzeln zu verknuepfen werden Start- und Endfahrt der **linken**
    * Spalte markiert. Die beiden Bedienarten sind nie gleichzeitig scharf — im Bereichsmodus ist
@@ -127,14 +131,32 @@ function signet(trip: StopLinkTrip): Line {
   )
 }
 
-function passt(trip: StopLinkTrip | null): boolean {
+/**
+ * Passt eine Fahrt in den Filter ihrer Spalte? **Wortgleich zur Engine**
+ * (`AutoLinkScope::matchesEnding()`/`matchesStarting()`) — liefen die beiden auseinander,
+ * verknuepfte der Mengen-Lauf etwas, das hier gar nicht zu sehen ist.
+ */
+function passtIn(trip: StopLinkTrip | null, linien: string[]): boolean {
   if (trip === null) {
     return false
   }
   if (props.modeFilter !== null && trip.mode !== props.modeFilter) {
     return false
   }
-  return props.lineFilter.length === 0 || props.lineFilter.includes(trip.line)
+  return linien.length === 0 || linien.includes(trip.line)
+}
+
+function passtEnde(trip: StopLinkTrip | null): boolean {
+  return passtIn(trip, props.lineFilter)
+}
+
+function passtAnfang(trip: StopLinkTrip | null): boolean {
+  return passtIn(trip, props.startingLineFilter)
+}
+
+/** Steht in der Zeile noch etwas zur Entscheidung an? */
+function nochOffen(zeile: Zeile): boolean {
+  return zeile.ending?.decision === null || zeile.starting?.decision === null
 }
 
 /**
@@ -207,17 +229,20 @@ const zeilen = computed<Zeile[]>(() => {
     }
   }
 
-  return ergebnis.filter((zeile) => passt(zeile.ending) || passt(zeile.starting))
+  return ergebnis.filter(
+    (zeile) =>
+      (passtEnde(zeile.ending) || passtAnfang(zeile.starting)) && (!props.hideDecided || nochOffen(zeile)),
+  )
 })
 
 const offeneEnden = computed(
-  () => props.board.ending.filter((f) => passt(f) && f.decision === null).length,
+  () => props.board.ending.filter((f) => passtEnde(f) && f.decision === null).length,
 )
 const offeneAnfaenge = computed(
-  () => props.board.starting.filter((f) => passt(f) && f.decision === null).length,
+  () => props.board.starting.filter((f) => passtAnfang(f) && f.decision === null).length,
 )
-const sichtbareEnden = computed(() => props.board.ending.filter(passt).length)
-const sichtbareAnfaenge = computed(() => props.board.starting.filter(passt).length)
+const sichtbareEnden = computed(() => props.board.ending.filter(passtEnde).length)
+const sichtbareAnfaenge = computed(() => props.board.starting.filter(passtAnfang).length)
 
 /** Nur eine offene beginnende Fahrt kann einen Anschluss aufnehmen. */
 function istZiel(trip: StopLinkTrip | null): boolean {
@@ -393,7 +418,7 @@ function aufEscape(e: KeyboardEvent): void {
       v-if="zeilen.length === 0"
       class="mt-3 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600"
     >
-      <template v-if="modeFilter !== null || lineFilter.length > 0">
+      <template v-if="modeFilter !== null || lineFilter.length > 0 || startingLineFilter.length > 0 || hideDecided">
         Keine Fahrt passt zu diesem Filter. Setz ihn zurück, um alles zu sehen.
       </template>
       <template v-else>

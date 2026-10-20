@@ -1,0 +1,62 @@
+meta {
+  name: Auto Trip Links (Vorschau, Abfahrt getrennt)
+  type: http
+  seq: 38
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/stop-links/auto?stop_group=117&period=1&day_type=mo_fr&from_trip_id=9835&to_trip_id=9902&lines[]=1&starting_lines[]=13
+  body: none
+  auth: bearer
+}
+
+params:query {
+  stop_group: 117
+  period: 1
+  day_type: mo_fr
+  from_trip_id: 9835
+  to_trip_id: 9902
+  lines[]: 1
+  starting_lines[]: 13
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Accept: application/json
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.summary.applied: eq false
+  res.body.data.filter.starting_lines: isArray
+}
+
+script:post-response {
+  // Ankunft 1, Abfahrt 13: Jedes geplante Paar muss genau diesen Wechsel tragen.
+  for (const p of res.body.data.pairs) {
+    if (p.from_trip.line !== "1" || p.to_trip.line !== "13") {
+      throw new Error("Paar " + p.from_trip.line + " -> " + p.to_trip.line + " liegt ausserhalb der Auswahl");
+    }
+  }
+}
+
+docs {
+  Getrennte Linienwahl (KURSE §2): `lines` gilt für die Ankünfte, `starting_lines` für die
+  Abfahrten. Ohne `starting_lines` gilt `lines` für beide Seiten — wie bisher.
+
+  Beispiel-Antwort (gekürzt):
+
+  ```json
+  {
+    "data": {
+      "action": "link",
+      "filter": { "lines": ["1"], "starting_lines": ["13"], "mode": null },
+      "summary": { "candidates": 12, "planned": 12, "created": 0, "skipped": 0, "applied": false },
+      "pairs": [{ "from_trip": { "line": "1" }, "to_trip": { "line": "13" }, "turnaround_seconds": 300 }]
+    }
+  }
+  ```
+}

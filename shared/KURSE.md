@@ -187,6 +187,13 @@ Filter zeigt. Der Linienfilter wurde dafür von Einfach- auf **Mehrfachauswahl**
 gemeinsam, die 6 daneben unberührt. Mit genau einer wählbaren Linie ließe sich der gewollte
 Linienwechsel nur über „Alle" automatisieren, und damit liefen alle übrigen Linien mit.
 
+**Ankunft und Abfahrt getrennt wählbar (20.10.2026).** Die Wechselsystematik der MVB wechselt über
+den Tag: morgens wird an derselben Endstelle die 1 zur 13, mittags bleibt sie die 1. Mit einer
+gemeinsamen Auswahl {1, 13} liefe 1 → 1 dort immer mit, wo 1 → 13 gemeint ist. Die rechte Spalte hat
+deshalb eine eigene Auswahl (`starting_lines`); ohne eigene Wahl **folgt sie der Ankunft**, und es
+verhält sich alles wie zuvor. Dazu blendet „Entschiedene ausblenden" Zeilen aus, an denen nichts
+mehr offen ist — reine Anzeige, der Lauf fasst Entschiedenes ohnehin nicht an.
+
 #### Die Auswahl arbeitet in Stufen: erst die Tram, dann der Bus
 
 **Entschieden 22.09.2026.** Die Umlauf-Pflege läuft nicht netzweit gleichzeitig, sondern je

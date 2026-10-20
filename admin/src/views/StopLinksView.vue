@@ -41,6 +41,21 @@ const modeFilter = ref<'tram' | 'bus' | null>(null)
  * liefen alle uebrigen Linien der Haltestelle mit.
  */
 const lineFilter = ref<string[]>([])
+/**
+ * Eigene Auswahl fuer die Abfahrten (rechte Spalte). `null` = folgt der Ankunft — dann verhaelt
+ * sich alles wie mit einer gemeinsamen Auswahl. Ueber den Tag wechselt die Systematik: morgens
+ * wird die 1 zur 13, mittags bleibt sie die 1. Mit nur einer Auswahl fuer beide Seiten liefe
+ * 1 → 1 immer mit, wo 1 → 13 gemeint ist.
+ */
+const startingLineFilter = ref<string[] | null>(null)
+/** Die wirksame Auswahl der rechten Spalte. */
+const abfahrtFilter = computed(() => startingLineFilter.value ?? lineFilter.value)
+
+/**
+ * Entschiedenes ausblenden: Es bleiben nur Zeilen, an denen noch etwas offen ist. Reine
+ * Anzeige — der Mengen-Lauf faesst Entschiedenes ohnehin nicht an.
+ */
+const nurUnentschiedene = ref(false)
 
 const board = ref<Board | null>(null)
 const auswahl = ref<number | null>(null)
@@ -238,6 +253,8 @@ async function waehleHaltestelle(id: number): Promise<void> {
   gewaehlteHaltestelle.value = id
   // Ein anderer Halt hat andere Linien — ein mitgeschleppter Linienfilter zeigte dort nichts.
   lineFilter.value = []
+  startingLineFilter.value = null
+  startingLineFilter.value = null
   leereBereich()
   // Eine andere Haltestelle hat eigene Versionsstände — der alte Index sagt dort nichts.
   gewaehlterStand.value = null
@@ -425,6 +442,21 @@ function schalteLinie(linie: string): void {
   leereBereich()
 }
 
+/**
+ * Eine Linie der Abfahrten zu- oder abwaehlen. Der erste Klick loest die Kopplung: Ausgangspunkt
+ * ist dann, was bis eben von der Ankunft uebernommen war.
+ */
+function schalteAbfahrtsLinie(linie: string): void {
+  const basis = startingLineFilter.value ?? [...lineFilter.value]
+  startingLineFilter.value = basis.includes(linie) ? basis.filter((l) => l !== linie) : [...basis, linie]
+  leereBereich()
+}
+
+function setzeAbfahrtFilter(wert: string[] | null): void {
+  startingLineFilter.value = wert
+  leereBereich()
+}
+
 // ---------------------------------------------------------------- Bereichsmodus
 
 /**
@@ -498,6 +530,14 @@ const autoParams = computed<AutoLinkParams | null>(() => {
     from_trip_id: bereichVon.value,
     to_trip_id: bereichBis.value,
     lines: lineFilter.value,
+    // Eigene Auswahl rechts. „Alle" gegen eine eingeschraenkte Ankunft muss ausdruecklich
+    // mitgehen: Ein leeres Array kommt in der Query nicht an und hiesse dort „wie die Ankunft".
+    starting_lines:
+      startingLineFilter.value === null
+        ? undefined
+        : startingLineFilter.value.length === 0
+          ? linienAmHalt.value
+          : startingLineFilter.value,
     mode: modeFilter.value,
   }
 })
@@ -538,6 +578,7 @@ watch([gewaehltePeriode, dayType], () => {
   // Perioden und Fahrplantypen haben je eigene Versionsstände und je eigene Linien.
   gewaehlterStand.value = null
   lineFilter.value = []
+  startingLineFilter.value = null
   leereBereich()
   // Auch die Arbeitslast je Haltestelle haengt daran — sonst stuende ueber der Liste ein
   // Fahrplantyp und darin die offenen Fahrten eines anderen.
@@ -549,6 +590,7 @@ watch([gewaehltePeriode, dayType], () => {
 // Zufall, und ein mitgeschleppter Linienfilter zeigte dort nichts.
 watch(modeFilter, () => {
   lineFilter.value = []
+  startingLineFilter.value = null
   leereBereich()
 })
 
@@ -847,14 +889,14 @@ watch(gewaehlterStand, (neu, alt) => {
           <!-- Das Verkehrsmittel steht jetzt oben bei der Auswahl: Es entscheidet schon
                mit, welche Haltestellen ueberhaupt angeboten werden. Hier bleibt der
                Linienfilter, der nur innerhalb einer Haltestelle Sinn ergibt. -->
-          <div v-if="board.ending.length || board.starting.length" class="mt-4 flex flex-wrap items-center gap-4">
+          <div v-if="board.ending.length || board.starting.length" class="mt-4 flex flex-col items-start gap-2">
             <div v-if="linienAmHalt.length > 1" class="flex flex-wrap items-center gap-1.5">
-              <span class="text-xs uppercase tracking-wide text-slate-500">Linie</span>
+              <span class="w-20 text-xs uppercase tracking-wide text-slate-500">Ankunft</span>
               <button
                 type="button"
                 class="rounded-md border px-2.5 py-1 text-sm transition"
                 :class="lineFilter.length === 0 ? 'border-slate-800 bg-slate-800 font-medium text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'"
-                @click="lineFilter = []"
+                @click="lineFilter = []; leereBereich()"
               >
                 Alle
               </button>
@@ -869,11 +911,56 @@ watch(gewaehlterStand, (neu, alt) => {
                 {{ linie }}
               </button>
             </div>
+            <!-- Die Abfahrt folgt der Ankunft, bis hier selbst gewaehlt wird. Gekoppelt sind
+                 ihre Knoepfe nur angedeutet: Sie zeigen, was gerade wirkt, ohne es zu besitzen. -->
+            <div v-if="linienAmHalt.length > 1" class="flex flex-wrap items-center gap-1.5">
+              <span class="w-20 text-xs uppercase tracking-wide text-slate-500">Abfahrt</span>
+              <button
+                type="button"
+                class="rounded-md border px-2.5 py-1 text-sm transition"
+                :class="startingLineFilter === null ? 'border-slate-800 bg-slate-800 font-medium text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'"
+                @click="setzeAbfahrtFilter(null)"
+              >
+                wie Ankunft
+              </button>
+              <button
+                type="button"
+                class="rounded-md border px-2.5 py-1 text-sm transition"
+                :class="
+                  startingLineFilter !== null && startingLineFilter.length === 0
+                    ? 'border-slate-800 bg-slate-800 font-medium text-white'
+                    : 'border-slate-200 text-slate-700 hover:border-slate-400'
+                "
+                @click="setzeAbfahrtFilter([])"
+              >
+                Alle
+              </button>
+              <button
+                v-for="linie in linienAmHalt"
+                :key="linie"
+                type="button"
+                class="rounded-md border px-2.5 py-1 text-sm tabular-nums transition"
+                :class="
+                  abfahrtFilter.includes(linie)
+                    ? startingLineFilter === null
+                      ? 'border-slate-400 bg-slate-100 text-slate-700'
+                      : 'border-slate-800 bg-slate-800 font-medium text-white'
+                    : 'border-slate-200 text-slate-700 hover:border-slate-400'
+                "
+                @click="schalteAbfahrtsLinie(linie)"
+              >
+                {{ linie }}
+              </button>
+            </div>
+            <label class="flex items-center gap-2 text-sm text-slate-700">
+              <input v-model="nurUnentschiedene" type="checkbox" class="rounded border-slate-300" />
+              Entschiedene ausblenden
+            </label>
           </div>
 
           <p v-if="linienAmHalt.length > 1" class="mt-1.5 max-w-3xl text-xs text-slate-500">
-            Mehrere Linien lassen sich gleichzeitig wählen — so bleibt der gewollte Linienwechsel (1 → 13) im Blick,
-            ein ungewollter aber außen vor.
+            Ankunft und Abfahrt lassen sich getrennt wählen — morgens die 1 → 13, mittags 1 → 1. Ohne eigene Wahl folgt
+            die Abfahrt der Ankunft; mehrere Linien gleichzeitig bleiben möglich.
           </p>
 
           <!-- Der Mengen-Lauf. Bewusst ein eigener Modus: Solange er aus ist, verhält sich der
@@ -944,6 +1031,8 @@ watch(gewaehlterStand, (neu, alt) => {
             :busy="busy"
             :mode-filter="modeFilter"
             :line-filter="lineFilter"
+            :starting-line-filter="abfahrtFilter"
+            :hide-decided="nurUnentschiedene"
             :range-mode="autoModus"
             :range-from="bereichVon"
             :range-to="bereichBis"

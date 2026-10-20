@@ -253,7 +253,10 @@ export interface AutoLinkParams {
   to_trip_id: number
   stand?: number | null
   action?: AutoLinkAction
+  /** Linien der Ankuenfte (linke Spalte). */
   lines?: string[]
+  /** Linien der Abfahrten (rechte Spalte). Fehlt der Wert, gilt `lines` fuer beide Seiten. */
+  starting_lines?: string[]
   mode?: 'tram' | 'bus' | null
   min_turnaround_minutes?: number
   max_turnaround_minutes?: number

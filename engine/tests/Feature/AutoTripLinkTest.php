@@ -325,6 +325,59 @@ final class AutoTripLinkTest extends TestCase
         $this->assertDatabaseMissing('trip_links', ['to_trip_id' => $ab6->id]);
     }
 
+    public function test_separate_departure_lines_turn_the_1_into_the_13(): void
+    {
+        $eins = $this->version('1');
+        $dreizehn = $this->version('13');
+
+        // Die nächste freie Abfahrt wäre die 1 — gewollt ist aber der Wechsel auf die 13.
+        $an = $this->ankunft($eins, '06:00:00');
+        $ab1 = $this->abfahrt($eins, '06:04:00');
+        $ab13 = $this->abfahrt($dreizehn, '06:06:00');
+
+        $daten = $this->anwenden($this->rumpf($an, $an, ['lines' => ['1'], 'starting_lines' => ['13']]));
+
+        $this->assertSame(1, $daten['summary']['created']);
+        $this->assertSame(['13'], $daten['filter']['starting_lines']);
+        $this->assertDatabaseHas('trip_links', ['from_trip_id' => $an->id, 'to_trip_id' => $ab13->id]);
+        $this->assertDatabaseMissing('trip_links', ['to_trip_id' => $ab1->id]);
+    }
+
+    public function test_without_departure_lines_the_arrival_selection_applies_to_both_sides(): void
+    {
+        $eins = $this->version('1');
+        $dreizehn = $this->version('13');
+
+        $an = $this->ankunft($eins, '06:00:00');
+        $ab13 = $this->abfahrt($dreizehn, '06:04:00');
+        $ab1 = $this->abfahrt($eins, '06:06:00');
+
+        $daten = $this->anwenden($this->rumpf($an, $an, ['lines' => ['1']]));
+
+        // Wie bisher: Die 13 steht nicht in der Auswahl und wird übergangen.
+        $this->assertNull($daten['filter']['starting_lines']);
+        $this->assertDatabaseHas('trip_links', ['from_trip_id' => $an->id, 'to_trip_id' => $ab1->id]);
+        $this->assertDatabaseMissing('trip_links', ['to_trip_id' => $ab13->id]);
+    }
+
+    public function test_departure_lines_do_not_widen_the_arrival_range(): void
+    {
+        $eins = $this->version('1');
+        $dreizehn = $this->version('13');
+
+        $an = $this->ankunft($eins, '06:00:00');
+        $an13 = $this->ankunft($dreizehn, '06:01:00');
+        $this->abfahrt($dreizehn, '06:05:00');
+
+        // Die markierte Grenze liegt bei der 13 — die steht links aber nicht in der Auswahl.
+        $this->withToken($this->token())
+            ->postJson('/api/v1/admin/stop-links/auto', $this->rumpf($an, $an13, ['lines' => ['1'], 'starting_lines' => ['13']]))
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 422);
+
+        $this->assertDatabaseCount('trip_links', 0);
+    }
+
     public function test_only_the_marked_range_is_touched(): void
     {
         $version = $this->version();

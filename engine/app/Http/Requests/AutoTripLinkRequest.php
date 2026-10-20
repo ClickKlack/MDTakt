@@ -43,6 +43,9 @@ final class AutoTripLinkRequest extends ApiFormRequest
             'action' => ['nullable', Rule::enum(AutoLinkAction::class)],
             'lines' => ['nullable', 'array'],
             'lines.*' => ['string', 'max:8'],
+            // Eigene Auswahl für die Abfahrten (rechte Spalte). Fehlt sie, gilt `lines` für beide.
+            'starting_lines' => ['nullable', 'array'],
+            'starting_lines.*' => ['string', 'max:8'],
             'mode' => ['nullable', 'string', 'in:tram,bus'],
             // 0 ist erlaubt: An einer Endstelle mit getrennten Bahnsteigen kann die Abfahrt
             // zeitgleich mit der Ankunft liegen, und das ist kein Fehler.
@@ -77,6 +80,7 @@ final class AutoTripLinkRequest extends ApiFormRequest
             dayType: FahrplanTyp::from((string) $this->input('day_type')),
             standIndex: $this->standIndex(),
             lines: $this->lines(),
+            startingLines: $this->startingLines(),
             mode: $this->mode(),
             fromTripId: $this->integer('from_trip_id'),
             toTripId: $this->integer('to_trip_id'),
@@ -107,10 +111,28 @@ final class AutoTripLinkRequest extends ApiFormRequest
      */
     public function lines(): array
     {
-        $wert = $this->input('lines');
+        return $this->lineList('lines') ?? [];
+    }
+
+    /**
+     * `null` = keine eigene Auswahl, die Abfahrten folgen `lines`.
+     *
+     * @return array<int, string>|null
+     */
+    public function startingLines(): ?array
+    {
+        return $this->lineList('starting_lines');
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private function lineList(string $feld): ?array
+    {
+        $wert = $this->input($feld);
 
         if (! is_array($wert)) {
-            return [];
+            return null;
         }
 
         return array_values(array_unique(array_map(static fn ($linie): string => (string) $linie, $wert)));

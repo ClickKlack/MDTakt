@@ -19,7 +19,11 @@ use App\Models\StopGroup;
 final readonly class AutoLinkScope
 {
     /**
-     * @param  array<int, string>  $lines  Leer = alle Linien der Haltestelle.
+     * @param  array<int, string>  $lines  Linien der **Ankünfte** (linke Spalte). Leer = alle Linien der Haltestelle.
+     * @param  array<int, string>|null  $startingLines  Linien der **Abfahrten** (rechte Spalte); `null` = wie `$lines`.
+     *                                                  Über den Tag wechselt die Systematik — morgens wird die 1 zur 13,
+     *                                                  mittags bleibt sie die 1. Mit nur einer Auswahl für beide Seiten
+     *                                                  liefe 1 → 1 immer mit, wo 1 → 13 gemeint ist.
      * @param  string|null  $mode  Verkehrsmittel (`tram`/`bus`), nicht die Aktion.
      * @param  int  $fromTripId  Markierte Startfahrt der **linken** Spalte (endende Fahrten).
      * @param  int  $toTripId  Markierte letzte Fahrt, ebenfalls links.
@@ -40,10 +44,11 @@ final readonly class AutoLinkScope
         public AutoLinkAction $action,
         public bool $includeTerminals,
         public bool $throughStop = false,
+        public ?array $startingLines = null,
     ) {}
 
     /**
-     * Passt eine Fahrt in den Filter?
+     * Passt eine ankommende Fahrt (linke Spalte) in den Filter?
      *
      * **Wortgleich zur Anzeige** (`StopLinkBoard.vue::passt()`). Laufen die beiden auseinander,
      * verknüpft der Lauf etwas, das der Pflegende gar nicht sieht — der einzige Schaden, den
@@ -51,12 +56,31 @@ final readonly class AutoLinkScope
      *
      * @param  array<string, mixed>  $trip
      */
-    public function matches(array $trip): bool
+    public function matchesEnding(array $trip): bool
+    {
+        return $this->matches($trip, $this->lines);
+    }
+
+    /**
+     * Passt eine abfahrende Fahrt (rechte Spalte) in den Filter? Ohne eigene Auswahl wie die Ankünfte.
+     *
+     * @param  array<string, mixed>  $trip
+     */
+    public function matchesStarting(array $trip): bool
+    {
+        return $this->matches($trip, $this->startingLines ?? $this->lines);
+    }
+
+    /**
+     * @param  array<string, mixed>  $trip
+     * @param  array<int, string>  $lines
+     */
+    private function matches(array $trip, array $lines): bool
     {
         if ($this->mode !== null && $trip['mode'] !== $this->mode) {
             return false;
         }
 
-        return $this->lines === [] || in_array($trip['line'], $this->lines, true);
+        return $lines === [] || in_array($trip['line'], $lines, true);
     }
 }

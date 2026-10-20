@@ -75,6 +75,7 @@ final class TripLinkAutoService
             'day_type' => $scope->dayType->value,
             'action' => $scope->action->value,
             'lines' => $scope->lines,
+            'starting_lines' => $scope->startingLines,
         ] + $ergebnis['summary']);
 
         return $ergebnis;
@@ -89,8 +90,8 @@ final class TripLinkAutoService
         // die Versionsstände zu falten. Ihn je Schritt zu rufen wäre die teuerste Zeile hier.
         $board = $this->board->board($scope->stopGroup, $scope->period, $scope->dayType, $scope->standIndex);
 
-        $endend = array_values(array_filter($board['ending'], $scope->matches(...)));
-        $beginnend = array_values(array_filter($board['starting'], $scope->matches(...)));
+        $endend = array_values(array_filter($board['ending'], $scope->matchesEnding(...)));
+        $beginnend = array_values(array_filter($board['starting'], $scope->matchesStarting(...)));
 
         // Entlang des Betriebstags, mit der Fahrt-Id als Stichentscheid — dieselbe Regel wie in
         // der Anzeige. Ohne den Stichentscheid hinge die Bereichsgrenze bei zeitgleichen
@@ -676,6 +677,7 @@ final class TripLinkAutoService
             'stand' => $board['stand'],
             'filter' => [
                 'lines' => $scope->lines,
+                'starting_lines' => $scope->startingLines,
                 'mode' => $scope->mode,
                 'from_trip_id' => $scope->fromTripId,
                 'to_trip_id' => $scope->toTripId,

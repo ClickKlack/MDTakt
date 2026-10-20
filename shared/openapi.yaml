@@ -2084,11 +2084,17 @@ components:
                 Der Lauf fasst **nur an, was der Filter zeigt** — das ist der Punkt der Funktion:
                 Ein Linienwechsel 1 -> 13 ist manchmal Absicht und manchmal nicht, und nur der
                 Pflegende weiss, welcher Fall vorliegt. Die Regel ist wortgleich zur Anzeige:
-                `mode` muss passen, und `lines` ist leer oder enthaelt die Linie der Fahrt.
+                `mode` muss passen, und `lines` (Ankünfte) bzw. `starting_lines` (Abfahrten) ist leer
+                oder enthaelt die Linie der Fahrt.
               properties:
                 lines:
                   type: array
-                  description: Leer = alle Linien der Haltestelle. Mehrfachauswahl ist der Regelfall.
+                  description: Linien der **Ankünfte** (linke Spalte). Leer = alle Linien der Haltestelle. Mehrfachauswahl ist der Regelfall.
+                  items: { type: string }
+                starting_lines:
+                  type: array
+                  nullable: true
+                  description: Linien der **Abfahrten** (rechte Spalte). `null` = keine eigene Auswahl, es gilt `lines`.
                   items: { type: string }
                 mode:
                   type: string
@@ -3946,6 +3952,8 @@ paths:
         **Der Filter entscheidet mit, und das ist der Punkt.** Ein Linienwechsel 1 -> 13 ist
         manchmal Absicht und manchmal nicht. Verknüpft wird ausschließlich, was der Filter zeigt —
         `lines` ist deshalb eine Mehrfachauswahl: 1 und 13 gemeinsam, die 6 daneben unberührt.
+        Weil die Systematik über den Tag wechselt (morgens 1 -> 13, mittags 1 -> 1), lässt sich die
+        Abfahrtsseite mit `starting_lines` getrennt wählen; ohne Angabe gilt `lines` für beide Seiten.
 
 
         **Nie überschreiben.** Fahrten, die bereits eine Entscheidung tragen, werden übersprungen
@@ -3997,7 +4005,17 @@ paths:
         - name: 'lines[]'
           in: query
           required: false
-          description: Linien, die mitlaufen. Ohne Angabe alle Linien der Haltestelle.
+          description: Linien der **Ankünfte** (linke Spalte). Ohne Angabe alle Linien der Haltestelle.
+          schema:
+            type: array
+            items: { type: string, maxLength: 8 }
+        - name: 'starting_lines[]'
+          in: query
+          required: false
+          description: >
+            Linien der **Abfahrten** (rechte Spalte). Ohne Angabe gilt `lines` auch hier. „Alle“ gegen
+            eine eingeschränkte Ankunft wird ausdrücklich als Liste aller Linien übergeben — ein leeres
+            Array kommt in der Query nicht an.
           schema:
             type: array
             items: { type: string, maxLength: 8 }
@@ -4098,6 +4116,11 @@ paths:
                 action: { type: string, enum: [link, unlink], default: link }
                 lines:
                   type: array
+                  description: Linien der Ankünfte (linke Spalte).
+                  items: { type: string, maxLength: 8 }
+                starting_lines:
+                  type: array
+                  description: Linien der Abfahrten (rechte Spalte). Ohne Angabe gilt `lines`.
                   items: { type: string, maxLength: 8 }
                 mode: { type: string, enum: [tram, bus], nullable: true }
                 min_turnaround_minutes: { type: integer, minimum: 0, maximum: 600 }

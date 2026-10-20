@@ -238,6 +238,20 @@ interface KursLage {
  * Zwei Umlaeufe koennen dieselbe Nummer tragen und trotzdem verschieden sein, weil die Nummer
  * nur je Linie eindeutig ist.
  */
+/**
+ * Gleiche Kursnummer ohne Ruecksicht auf fuehrende Nullen und Gross/Klein — **wortgleich zur
+ * Engine** (`Course::sameNumber()`). Verglichen wird die Nummer, nicht die Anzeige: „9/23" und
+ * „4/23" sind derselbe Kurs 23 auf zwei Linien, und die Engine fuehrt sie beim Verknuepfen
+ * zusammen.
+ */
+function gleicheNummer(a: string, b: string): boolean {
+  const norm = (n: string): string => {
+    const t = n.trim()
+    return /^\d+$/.test(t) ? t.replace(/^0+/, '') || '0' : t.toLowerCase()
+  }
+  return norm(a) === norm(b)
+}
+
 function kursLage(paar: AutoLinkPair): KursLage {
   const a = paar.from_trip.course
   const b = paar.to_trip.course
@@ -255,15 +269,28 @@ function kursLage(paar: AutoLinkPair): KursLage {
       }
     }
 
+    // Dieselbe Nummer auf zwei Umlaeufen ist kein Widerspruch: Die Engine fuehrt sie beim
+    // Anwenden zu einem zusammen (KURSE §2 K2) — der Linienwechsel 9 → 4 behaelt den Kurs 23.
+    if (gleicheNummer(a.number, b.number)) {
+      return {
+        von: a.display,
+        nach: b.display,
+        vonKlasse: KURS_GESETZT,
+        nachKlasse: KURS_GESETZT,
+        hinweis: `Kurs ${a.number} wird zusammengeführt`,
+        hinweisKlasse: 'bg-emerald-50 text-emerald-800',
+        titel:
+          'Beide Ketten tragen dieselbe Kursnummer als getrennte Umläufe. Beim Anwenden werden sie zu einem '
+          + 'zusammengeführt — verknüpfte Fahrten sind dasselbe Fahrzeug.',
+      }
+    }
+
     return {
       von: a.display,
       nach: b.display,
       vonKlasse: KURS_STREIT,
       nachKlasse: KURS_STREIT,
-      hinweis:
-        a.display === b.display
-          ? 'zwei Umläufe mit derselben Nummer'
-          : `Kurs ${a.display} ≠ ${b.display}`,
+      hinweis: `Kurs ${a.display} ≠ ${b.display}`,
       hinweisKlasse: 'bg-rose-100 font-medium text-rose-900',
       titel:
         'Beide Ketten tragen schon eine Nummer, und zwar verschiedene. Der Anschluss wird trotzdem '

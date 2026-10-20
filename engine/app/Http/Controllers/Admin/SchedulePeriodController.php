@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\SchedulePeriodRequest;
 use App\Http\Resources\SchedulePeriodResource;
 use App\Models\SchedulePeriod;
+use App\Services\PeriodResetService;
 use App\Services\SchedulePeriodService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -19,7 +20,10 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class SchedulePeriodController extends Controller
 {
-    public function __construct(private readonly SchedulePeriodService $periods) {}
+    public function __construct(
+        private readonly SchedulePeriodService $periods,
+        private readonly PeriodResetService $reset,
+    ) {}
 
     /** GET /api/v1/admin/schedule-periods */
     public function index(): AnonymousResourceCollection
@@ -30,15 +34,15 @@ final class SchedulePeriodController extends Controller
     /** POST /api/v1/admin/schedule-periods */
     public function store(SchedulePeriodRequest $request): JsonResponse
     {
-        $periode = $this->periods->create($request->label(), $request->validFrom());
+        $periode = $this->reset->create($request->label(), $request->validFrom());
 
-        return SchedulePeriodResource::make($periode)->response()->setStatusCode(Response::HTTP_CREATED);
+        return SchedulePeriodResource::make($periode->loadCount('lineVersions'))->response()->setStatusCode(Response::HTTP_CREATED);
     }
 
     /** PUT /api/v1/admin/schedule-periods/{period} */
     public function update(SchedulePeriodRequest $request, SchedulePeriod $period): SchedulePeriodResource
     {
-        $periode = $this->periods->update($period, $request->label(), $request->validFrom());
+        $periode = $this->reset->update($period, $request->label(), $request->validFrom());
 
         return SchedulePeriodResource::make($periode->loadCount('lineVersions'));
     }

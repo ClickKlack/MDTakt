@@ -101,6 +101,19 @@ Zwei Ebenen: **Perioden** (kuratiert, netzweit) und **Linien-Versionen** (automa
 - **Manuell deklarierbar** für große Änderungen (z. B. Großbaustelle).
 - **Nicht** automatisch bei kleinen Änderungen.
 - Eine neue Periode **setzt alle Linien zurück** — jede (Linie, Fahrplantyp) startet mit Version 1 im neuen Fahrplan.
+- **Gilt auch für die von Hand angelegte oder verschobene Periode (20.10.2026).** Bis dahin setzte nur ein
+  angenommener Vorschlag (§4.3) zurück; eine manuell angelegte Periode stellte bloß die Kette um und blieb leer —
+  die Tage ab ihrem Beginn hingen weiter an der Vorperiode. Der Fall: „Freigabe Breiter Weg" ab 02.11.2026, deren
+  Wechsel hinter dem Ferienfahrplan kein Vorschlag erkennen konnte. Jetzt wird ab der Grenze (beim Verschieben ab
+  dem früheren Datum) zurückgenommen und aus dem aktuellen Lauf neu aufgebaut. Weil ältere Läufe nicht
+  wiederbeschaffbar sind, wird eine Grenze **vor dem Feed-Fenster** abgewiesen, sobald dahinter schon
+  Beobachtungen stehen.
+- **Die Grenze erledigt, was sie trägt (20.10.2026).** Nach dem Neuaufbau beginnt jede Linie in der neuen Periode
+  mit Version 1 — das ist die Periode selbst und zählt **nicht** als Wechsel für einen Vorschlag (§4.3). Offene
+  Vorschläge ab der Grenze, die der Neuaufbau nicht mehr als Wechsel sieht, gehen auf `superseded` („durch Periode
+  erfasst"). Anlass: Werktags verdeckte der Ferienfahrplan den Wechsel zum 02.11.2026, sichtbar wurde er nur am
+  ersten Wochenende — die Vorschläge 07./08.11. gehören zur Periode ab 02.11. Dasselbe gilt beim Annehmen: Der
+  Sonntags-Zwilling eines angenommenen Samstags-Vorschlags erledigt sich mit.
 
 ### 4.2 Linien-Version (je Linie & Fahrplantyp, automatisch)
 - Ein **Fingerprint je (Linie, Fahrplantyp)** = Signatur der Trips/Zeiten dieser Linie an diesem Betriebstag-Typ.

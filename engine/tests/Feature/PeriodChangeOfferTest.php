@@ -20,6 +20,7 @@ use App\Models\Trip;
 use App\Models\User;
 use App\Services\ScheduleVersionService;
 use App\Services\TripSignatureService;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\ConsolidatedFixtures;
 use Tests\TestCase;
@@ -28,6 +29,9 @@ use Tests\TestCase;
  * Periodenwechsel-Vorschlag (FAHRPLANPERIODEN §4.3): Ändern sich an einem Tag mindestens
  * 33 % der verkehrenden Linien, bietet das System einen Periodenwechsel an — legt ihn aber
  * nicht selbst an.
+ *
+ * Dazu der manuelle Weg (§4.1): Eine vom Admin angelegte oder verschobene Periode setzt die
+ * Linien-Versionen genauso zurück wie ein angenommener Vorschlag.
  */
 final class PeriodChangeOfferTest extends TestCase
 {
@@ -508,5 +512,182 @@ final class PeriodChangeOfferTest extends TestCase
             ->assertJsonPath('data.0.suggested_from', '2026-08-24')
             ->assertJsonPath('data.0.changed_line_count', 4)
             ->assertJsonPath('data.0.share', 0.4);
+    }
+
+    public function test_a_manually_created_period_resets_the_line_versions_like_an_accepted_offer(): void
+    {
+        $token = $this->adminToken();
+        // Nur eine von zehn Linien wechselt — kein Vorschlag, der Admin legt die Grenze selbst an
+        // (so wie beim Ferienfahrplan, hinter dem der Wechsel unsichtbar bleibt).
+        $this->netz(10, 1);
+        $this->konsolidieren();
+        $this->assertDatabaseCount('period_change_offers', 0);
+
+        $this->withToken($token)->postJson('/api/v1/admin/schedule-periods', [
+            'label' => 'Freigabe Breiter Weg',
+            'valid_from' => '2026-08-24',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.line_version_count', 10);
+
+        $alt = SchedulePeriod::query()->whereDate('valid_from', '<', '2026-08-24')->sole();
+        $neu = SchedulePeriod::query()->whereDate('valid_from', '2026-08-24')->sole();
+
+        // Die zweite Version von Linie 1 ist in der Periodengrenze aufgegangen.
+        $this->assertSame([1], LineVersion::query()->where('period_id', $alt->id)->pluck('version_no')->unique()->values()->all());
+        $this->assertSame(10, LineVersion::query()->where('period_id', $alt->id)->count());
+        $this->assertSame([1], LineVersion::query()->where('period_id', $neu->id)->pluck('version_no')->unique()->values()->all());
+
+        // Kein Tag ab der Grenze hängt mehr an der Vorperiode.
+        $this->assertFalse(LineVersionInterval::query()
+            ->whereIn('line_version_id', LineVersion::query()->select('id')->where('period_id', $alt->id))
+            ->whereDate('valid_to', '>=', '2026-08-24')
+            ->exists());
+    }
+
+    public function test_moving_a_period_start_rebuilds_the_days_that_change_period(): void
+    {
+        $token = $this->adminToken();
+        $this->netz(10, 1);
+        $this->konsolidieren();
+
+        $this->withToken($token)->postJson('/api/v1/admin/schedule-periods', [
+            'label' => 'Freigabe Breiter Weg',
+            'valid_from' => '2026-08-24',
+        ])->assertCreated();
+
+        $neu = SchedulePeriod::query()->whereDate('valid_from', '2026-08-24')->sole();
+
+        // Grenze zwei Tage später: 24./25.08. fallen zurück an die Vorperiode.
+        $this->withToken($token)->putJson("/api/v1/admin/schedule-periods/{$neu->id}", [
+            'label' => 'Freigabe Breiter Weg',
+            'valid_from' => '2026-08-26',
+        ])->assertOk();
+
+        $alt = SchedulePeriod::query()->whereDate('valid_from', '<', '2026-08-26')->sole();
+
+        // In der Vorperiode ist der Wechsel von Linie 1 jetzt wieder eine eigene Version.
+        $this->assertSame(
+            [1, 2],
+            LineVersion::query()->where('period_id', $alt->id)->where('line', '1')->orderBy('version_no')->pluck('version_no')->all(),
+        );
+
+        $erstes = LineVersionInterval::query()
+            ->whereIn('line_version_id', LineVersion::query()->select('id')->where('period_id', $neu->id))
+            ->min('valid_from');
+        $this->assertSame('2026-08-26', CarbonImmutable::parse($erstes)->toDateString());
+    }
+
+    public function test_a_period_start_before_the_feed_window_is_refused_when_observations_would_fall(): void
+    {
+        $token = $this->adminToken();
+        $this->netz(10, 1);
+        $this->konsolidieren();
+
+        // Beobachtungen vor dem Fenster (17.08.) — wie aus einem früheren Lauf.
+        LineVersionInterval::query()->update(['valid_from' => '2026-08-10']);
+        $vorher = LineVersionInterval::query()->count();
+
+        $this->withToken($token)->postJson('/api/v1/admin/schedule-periods', [
+            'label' => 'Zu früh',
+            'valid_from' => '2026-08-12',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 422);
+
+        $this->assertDatabaseCount('schedule_periods', 1);
+        $this->assertSame($vorher, LineVersionInterval::query()->count());
+    }
+
+    /**
+     * Der Fall vom 02.11.2026: Werktags verdeckt der (unveränderte) Ferienfahrplan den Wechsel,
+     * sichtbar wird er nur am Wochenende. Der Vorschlag landet deshalb auf Sa/So statt auf dem
+     * Montag, an dem der neue Fahrplan wirklich beginnt.
+     */
+    private function wochenendWechsel(int $anzahl): void
+    {
+        for ($i = 1; $i <= $anzahl; $i++) {
+            $route = Route::factory()->create(['route_id' => "R{$i}", 'route_short_name' => (string) $i]);
+            $minute = str_pad((string) $i, 2, '0', STR_PAD_LEFT);
+
+            $this->werktagsService("W{$i}", '2026-08-17', '2026-09-04');
+            $this->fahrt("T-W{$i}", "W{$i}", $route->route_id, ["09:{$minute}:00", "09:{$minute}:00"]);
+
+            foreach (['ALT' => ['2026-08-22', '2026-08-23'], 'NEU' => ['2026-08-29', '2026-08-30']] as $stand => [$von, $bis]) {
+                Calendar::factory()->create([
+                    'service_id' => "{$stand}{$i}",
+                    'monday' => false, 'tuesday' => false, 'wednesday' => false, 'thursday' => false,
+                    'friday' => false, 'saturday' => true, 'sunday' => true,
+                    'start_date' => $von, 'end_date' => $bis,
+                ]);
+                $stunde = $stand === 'ALT' ? '10' : '11';
+                $this->fahrt("T-{$stand}{$i}", "{$stand}{$i}", $route->route_id, ["{$stunde}:{$minute}:00", "{$stunde}:{$minute}:00"]);
+            }
+        }
+
+        // Ein Werktag hinter dem Wochenende, damit der Sonntag nicht am Fensterende liegt.
+        $this->werktagsService('X', '2026-08-31', '2026-09-01');
+    }
+
+    public function test_a_manual_period_supersedes_the_weekend_offers_it_covers(): void
+    {
+        $token = $this->adminToken();
+        $this->wochenendWechsel(10);
+        $this->konsolidieren();
+
+        $this->assertSame(
+            ['2026-08-29', '2026-08-30'],
+            PeriodChangeOffer::query()->orderBy('suggested_from')->get()
+                ->map(fn (PeriodChangeOffer $o): string => $o->suggested_from->toDateString())->all(),
+        );
+
+        $this->withToken($token)->postJson('/api/v1/admin/schedule-periods', [
+            'label' => 'Freigabe Breiter Weg',
+            'valid_from' => '2026-08-24',
+        ])->assertCreated();
+
+        // Die neue Periode trägt den Wechsel — Sa und So beginnen in ihr bei Version 1.
+        $this->assertSame(0, PeriodChangeOffer::query()->where('status', PeriodOfferStatus::Open)->count());
+        $this->assertSame(2, PeriodChangeOffer::query()->where('status', PeriodOfferStatus::Superseded)->count());
+
+        // Und die Grenze schlägt sich nicht selbst noch einmal vor.
+        $this->assertDatabaseCount('period_change_offers', 2);
+
+        $neu = SchedulePeriod::query()->whereDate('valid_from', '2026-08-24')->sole();
+        $this->assertSame([1], LineVersion::query()->where('period_id', $neu->id)->pluck('version_no')->unique()->values()->all());
+    }
+
+    public function test_accepting_one_weekend_offer_supersedes_its_twin(): void
+    {
+        $token = $this->adminToken();
+        $this->wochenendWechsel(10);
+        $this->konsolidieren();
+
+        $samstag = PeriodChangeOffer::query()->whereDate('suggested_from', '2026-08-29')->sole();
+        $sonntag = PeriodChangeOffer::query()->whereDate('suggested_from', '2026-08-30')->sole();
+
+        $this->withToken($token)
+            ->postJson("/api/v1/admin/period-change-offers/{$samstag->id}/accept", ['label' => 'Ab Samstag'])
+            ->assertCreated();
+
+        $this->assertSame(PeriodOfferStatus::Accepted, $samstag->refresh()->status);
+        $this->assertSame(PeriodOfferStatus::Superseded, $sonntag->refresh()->status);
+    }
+
+    public function test_a_later_real_change_stays_open_behind_a_manual_period(): void
+    {
+        $token = $this->adminToken();
+        $this->wochenendWechsel(10);
+        $this->konsolidieren();
+
+        // Grenze erst nach dem Samstag: Der Sonntag beginnt in der neuen Periode, der Samstag
+        // bleibt ein Wechsel der Vorperiode — dessen Vorschlag liegt vor der Grenze und bleibt.
+        $this->withToken($token)->postJson('/api/v1/admin/schedule-periods', [
+            'label' => 'Ab Sonntag',
+            'valid_from' => '2026-08-30',
+        ])->assertCreated();
+
+        $this->assertSame(PeriodOfferStatus::Open, PeriodChangeOffer::query()->whereDate('suggested_from', '2026-08-29')->sole()->status);
+        $this->assertSame(PeriodOfferStatus::Superseded, PeriodChangeOffer::query()->whereDate('suggested_from', '2026-08-30')->sole()->status);
     }
 }

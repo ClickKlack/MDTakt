@@ -703,7 +703,13 @@ components:
             ist kein Fahrplanwechsel (§5.4 b); erst der nächste Import entscheidet. Der Wert wird
             zur Lesezeit berechnet und verschwindet von selbst, sobald ein späterer Import den
             Zeitraum dahinter abdeckt.
-        status: { type: string, enum: [open, accepted, declined] }
+        status:
+          type: string
+          enum: [open, accepted, declined, superseded]
+          description: >
+            `superseded` — von einer Periodengrenze erledigt, ohne selbst entschieden zu sein: Nach dem
+            Neuaufbau ab einer angelegten, verschobenen oder angenommenen Periode ist der Tag kein
+            Wechsel mehr (etwa der Wochenend-Vorschlag hinter einer Periode ab dem Montag davor).
         status_label: { type: string }
         decided_at: { type: string, format: date-time, nullable: true }
 
@@ -4526,6 +4532,12 @@ paths:
 
         Eine neue Periode **setzt die Linien-Versionen zurück** — jede (Linie, Fahrplantyp) beginnt darin
         wieder mit Version 1 (§4.1). Bereits erfasste Versionen der Vorperiode bleiben als Historie erhalten.
+        Wie beim angenommenen Vorschlag wird die beobachtete Gültigkeit ab `valid_from` zurückgenommen und
+        aus dem aktuellen Lauf neu aufgebaut.
+
+
+        Neu aufbauen lässt sich nur, was der aktuelle Lauf enthält: Ein `valid_from` vor dem Feed-Fenster,
+        hinter dem schon Beobachtungen stehen, wird abgewiesen (422) — sie gingen sonst verloren.
       tags: [Admin]
       security: [{ AdminToken: [] }]
       requestBody:
@@ -4545,7 +4557,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: Validierungsfehler — etwa ein bereits belegtes `valid_from`
+          description: Validierungsfehler — etwa ein bereits belegtes `valid_from` oder eines vor dem Feed-Fenster, hinter dem Beobachtungen stehen
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4561,7 +4573,9 @@ paths:
       summary: Fahrplanperiode ändern
       description: >
         Ändert Label und/oder Beginn. Beim Verschieben von `valid_from` wird die Kette neu gerechnet;
-        die Gültigkeit der Nachbarperioden zieht mit.
+        die Gültigkeit der Nachbarperioden zieht mit. Die Linien-Versionen werden ab dem früheren von
+        altem und neuem Beginn zurückgenommen und aus dem aktuellen Lauf neu aufgebaut — mit derselben
+        Grenze wie beim Anlegen (422 vor dem Feed-Fenster).
       tags: [Admin]
       security: [{ AdminToken: [] }]
       requestBody:
@@ -4581,7 +4595,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: Validierungsfehler
+          description: Validierungsfehler — etwa ein Beginn vor dem Feed-Fenster, hinter dem Beobachtungen stehen
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

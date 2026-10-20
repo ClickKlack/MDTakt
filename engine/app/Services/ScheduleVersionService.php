@@ -37,10 +37,28 @@ final class ScheduleVersionService
     ) {}
 
     /**
+     * Tage, die der letzte Lauf als Periodenwechsel gewertet hat — ob schon vorgeschlagen oder
+     * nicht. Daran prüft der Neuaufbau nach einer Periodengrenze, welche offenen Vorschläge die
+     * Grenze erledigt hat ({@see PeriodResetService::rebuildFrom()}).
+     *
+     * @var list<string>
+     */
+    private array $changeDays = [];
+
+    /**
+     * @return list<string>
+     */
+    public function changeDaysOfLastRun(): array
+    {
+        return $this->changeDays;
+    }
+
+    /**
      * @return array{signatures: int, versions_created: int, intervals_written: int, lines_changed: int, consolidated_stops: int, consolidated_trips: int}
      */
     public function updateFromCurrentImport(): array
     {
+        $this->changeDays = [];
         $window = $this->serviceDays->feedWindow();
 
         if ($window === null) {
@@ -93,7 +111,7 @@ final class ScheduleVersionService
                     $abschnitte[array_key_last($abschnitte)]['to_confirmed'] = true;
                 }
 
-                foreach ($abschnitte as $abschnitt) {
+                foreach ($abschnitte as $nr => $abschnitt) {
                     $version = $this->findOrCreateVersion(
                         $lauf['period'], $line, $dayType, $abschnitt['fingerprint'], $neu
                     );
@@ -107,7 +125,14 @@ final class ScheduleVersionService
                         // Anfang bloß eine Untergrenze — daraus lässt sich kein Wechseltag
                         // ableiten (§5.4 b). Und kehrt der vorherige Fahrplan hinter ihr
                         // zurück, war sie eine Abweichung, kein Wechsel (§4.3).
-                        if ($abschnitt['from_confirmed'] && ! $abschnitt['reverted']) {
+                        //
+                        // Ebenso wenig der erste Abschnitt hinter einer Periodengrenze: Dass dort
+                        // jede Linie mit Version 1 beginnt, *ist* die Periode — kein weiterer
+                        // Wechsel. Sonst schlüge die Grenze sich selbst noch einmal vor, für Sa
+                        // und So erst am ersten Wochenende der Periode (Fall 02.11.2026 → 07./08.11.).
+                        $periodenbeginn = $nr === 0 && $lauf['cut_before'];
+
+                        if ($abschnitt['from_confirmed'] && ! $abschnitt['reverted'] && ! $periodenbeginn) {
                             $wechselProTag[$abschnitt['from']][$line] = true;
                         }
                     }
@@ -376,6 +401,8 @@ final class ScheduleVersionService
             if ($aktiv === 0 || $betroffen / $aktiv < $schwelle) {
                 continue;
             }
+
+            $this->changeDays[] = (string) $datum;
 
             // `whereDate` statt Gleichheit: Der `date`-Cast schreibt `Y-m-d H:i:s`; PostgreSQL
             // wirft die Uhrzeit in der `date`-Spalte weg, SQLite (Testlauf) behält sie.

@@ -58,7 +58,7 @@ export interface PeriodChangeOffer {
   // ein einziger beobachteter Tag, meist der Rand des Feed-Fensters.
   observed_until: string
   single_day_observation: boolean
-  status: 'open' | 'accepted' | 'declined'
+  status: 'open' | 'accepted' | 'declined' | 'superseded'
   status_label: string
   decided_at: string | null
 }

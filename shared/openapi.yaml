@@ -5168,7 +5168,8 @@ paths:
         Setzt die gesichtete Kursnummer an die ganze Kette der zugeordneten Fahrt (wie die Kurs-Eingabe im
         Fahrplan). Trägt die Kette einen anderen Kurs, wird sie umnummeriert. Weitere offene Sichtungen der
         Kette mit derselben Nummer werden danach automatisch bestätigt. Nur offene Sichtungen mit Fahrt;
-        verschiedene Nummern für dieselbe Fahrt werden abgewiesen.
+        verschiedene Nummern für dieselbe Fahrt oder dieselbe Kette werden abgewiesen (dann wird nichts
+        gesetzt).
       tags: [Admin]
       security:
         - AdminToken: []

@@ -270,6 +270,51 @@ final class SightingReviewTest extends TestCase
         $this->assertDatabaseCount('courses', 0);
     }
 
+    /**
+     * Sammel-Annehmen: Zwei Sichtungen an verschiedenen Fahrten derselben Kette mit
+     * verschiedenen Nummern — die zweite würde die erste still umnummerieren. Nichts wird gesetzt.
+     */
+    public function test_accept_conflicting_numbers_for_one_chain_is_refused(): void
+    {
+        $a = $this->fahrt();
+        $b = $this->f->fahrt($this->version, ['B', 'A'], ['06:35:00', '07:05:00']);
+        TripLink::factory()->create([
+            'from_trip_id' => $a->id,
+            'to_trip_id' => $b->id,
+            'stop_id' => $a->last_stop_id,
+            'kind' => 'link',
+        ]);
+        $eins = $this->sichtung($a, '03');
+        $zwei = $this->sichtung($b, '04');
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/sightings/accept', ['ids' => [$eins->id, $zwei->id]])
+            ->assertStatus(422);
+
+        $this->assertDatabaseCount('course_trips', 0);
+        $this->assertSame(SightingStatus::Pending, $eins->refresh()->status);
+    }
+
+    public function test_accept_several_trips_of_one_chain_with_the_same_number(): void
+    {
+        $a = $this->fahrt();
+        $b = $this->f->fahrt($this->version, ['B', 'A'], ['06:35:00', '07:05:00']);
+        TripLink::factory()->create([
+            'from_trip_id' => $a->id,
+            'to_trip_id' => $b->id,
+            'stop_id' => $a->last_stop_id,
+            'kind' => 'link',
+        ]);
+        $eins = $this->sichtung($a, '03');
+        $zwei = $this->sichtung($b, '3');
+
+        $this->withToken($this->token())->postJson('/api/v1/admin/sightings/accept', ['ids' => [$eins->id, $zwei->id]])
+            ->assertOk()
+            ->assertJsonPath('data.accepted', 2);
+
+        $this->assertSame(1, Course::query()->count());
+        $this->assertSame(SightingStatus::Accepted, $zwei->refresh()->status);
+    }
+
     public function test_accept_twice_is_refused(): void
     {
         $s = $this->sichtung($this->fahrt(), werte: ['status' => SightingStatus::Accepted]);

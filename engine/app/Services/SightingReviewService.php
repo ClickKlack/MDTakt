@@ -133,16 +133,26 @@ final class SightingReviewService
 
         DB::transaction(function () use ($gruppen, &$fahrtenGesetzt, &$geaenderteFahrten): void {
             $jetzt = CarbonImmutable::now();
+            // Nummer je Fahrt, die dieser Lauf schon gesetzt hat — eine spätere Gruppe derselben
+            // Kette darf sie nicht still umnummerieren (Sammel-Annehmen einer ganzen Seite).
+            $gesetzt = [];
 
             foreach ($gruppen as $tripId => $gruppe) {
                 $fahrt = ConsolidatedTrip::query()->with('lineVersion')->findOrFail($tripId);
                 $nummer = $gruppe[0]->course_number;
+
+                if (isset($gesetzt[$tripId]) && ! SightingIngestService::sameNumber($gesetzt[$tripId], $nummer)) {
+                    throw new InvalidArgumentException('Für dieselbe Kette sind verschiedene Kursnummern ausgewählt.');
+                }
 
                 $kurs = $this->courses->findOrCreateForChain($fahrt, $nummer);
                 $ergebnis = $this->courses->assign($fahrt, $kurs);
 
                 $fahrtenGesetzt += $ergebnis['trips_assigned'];
                 array_push($geaenderteFahrten, ...$ergebnis['trip_ids']);
+                foreach ($ergebnis['trip_ids'] as $id) {
+                    $gesetzt[$id] = $nummer;
+                }
 
                 foreach ($gruppe as $s) {
                     $s->status = SightingStatus::Accepted;

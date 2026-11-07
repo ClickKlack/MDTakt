@@ -71,17 +71,22 @@ async function load(): Promise<void> {
   })
 
   try {
-    result.value = await fetchSightings(
-      {
-        state: state.value,
-        line: line.value,
-        date_from: dateFrom.value,
-        date_to: dateTo.value,
-        differs_only: differsOnly.value,
-      },
-      page.value,
-      PER_PAGE,
-    )
+    const filter = {
+      state: state.value,
+      line: line.value,
+      date_from: dateFrom.value,
+      date_to: dateTo.value,
+      differs_only: differsOnly.value,
+    }
+    const antwort = await fetchSightings(filter, page.value, PER_PAGE)
+
+    // Nach dem Abarbeiten der letzten Seite liegt sie hinter dem Ende — auf die letzte vorhandene springen.
+    if (antwort.items.length === 0 && page.value > 1 && antwort.meta.last_page < page.value) {
+      page.value = Math.max(1, antwort.meta.last_page)
+      return load()
+    }
+
+    result.value = antwort
   } catch {
     error.value = 'Sichtungen konnten nicht geladen werden.'
   } finally {
@@ -200,6 +205,52 @@ const statusClass: Record<Sighting['status'], string> = {
 function kannAnnehmen(s: Sighting): boolean {
   return s.status === 'pending' && s.trip !== null
 }
+
+/** Kursnummern wie die Engine vergleichen: „3" und „03" sind derselbe Kurs. */
+function nummer(n: string): string {
+  return n.replace(/^0+(?=.)/, '')
+}
+
+/**
+ * Offene Sichtungen der Seite, die sich ohne Rückfrage annehmen lassen: mit Fahrt, ohne
+ * abweichenden Kurs, nicht aus der Folgeversion, und keine andere Sichtung der Seite nennt
+ * für dieselbe Fahrt eine andere Nummer. Kollisionen innerhalb einer Kette weist die Engine ab.
+ */
+const konfliktfrei = computed<Sighting[]>(() => {
+  const offen = (result.value?.items ?? []).filter(kannAnnehmen)
+  const nummernJeFahrt = new Map<number, Set<string>>()
+  for (const s of offen) {
+    const set = nummernJeFahrt.get(s.trip!.id) ?? new Set<string>()
+    set.add(nummer(s.course_number))
+    nummernJeFahrt.set(s.trip!.id, set)
+  }
+  return offen.filter(
+    (s) => acceptQuestion(s, s.trip!.line) === null && nummernJeFahrt.get(s.trip!.id)!.size === 1,
+  )
+})
+
+async function alleAnnehmen(): Promise<void> {
+  const auswahl = konfliktfrei.value
+  if (auswahl.length === 0 || !confirm(`${auswahl.length} konfliktfreie Sichtung(en) dieser Seite annehmen?`)) {
+    return
+  }
+
+  busy.value = true
+  error.value = null
+  hinweis.value = null
+
+  try {
+    const r = await acceptSightings(auswahl.map((s) => s.id))
+    hinweis.value =
+      `${r.accepted} Sichtung(en) angenommen, Kurse an ${r.trips_assigned} Fahrt(en) gesetzt.` +
+      (r.confirmed_others > 0 ? ` ${r.confirmed_others} weitere Sichtung(en) dadurch bestätigt.` : '')
+    await load()
+  } catch (e) {
+    error.value = meldung(e, 'Annehmen fehlgeschlagen.')
+  } finally {
+    busy.value = false
+  }
+}
 </script>
 
 <template>
@@ -207,9 +258,20 @@ function kannAnnehmen(s: Sighting): boolean {
     <AppHeader />
 
     <main class="mx-auto max-w-7xl space-y-4 px-6 py-8">
-      <div class="flex items-baseline justify-between">
+      <div class="flex items-baseline justify-between gap-4">
         <h1 class="text-lg font-semibold text-slate-900">Sichtungen aus MDKursTracker</h1>
-        <span v-if="result" class="text-sm text-slate-500">{{ result.meta.total }} Treffer</span>
+        <div class="flex items-baseline gap-4">
+          <span v-if="result" class="text-sm text-slate-500">{{ result.meta.total }} Treffer</span>
+          <button
+            v-if="konfliktfrei.length > 0"
+            class="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            :disabled="busy || loading"
+            title="Offene Sichtungen dieser Seite mit Fahrt, ohne abweichenden Kurs und nicht aus der Folgeversion"
+            @click="alleAnnehmen"
+          >
+            ✓ {{ konfliktfrei.length }} konfliktfreie annehmen
+          </button>
+        </div>
       </div>
 
       <!-- Filterleiste -->
@@ -361,7 +423,7 @@ function kannAnnehmen(s: Sighting): boolean {
         </table>
       </div>
 
-      <div v-if="result && result.meta.last_page > 1" class="flex items-center justify-between text-sm text-slate-600">
+      <div v-if="result && (result.meta.last_page > 1 || result.meta.current_page > 1)" class="flex items-center justify-between text-sm text-slate-600">
         <span>Seite {{ result.meta.current_page }} von {{ result.meta.last_page }}</span>
         <div class="flex gap-2">
           <button

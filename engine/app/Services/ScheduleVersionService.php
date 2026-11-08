@@ -96,6 +96,17 @@ final class ScheduleVersionService
             // erst danach gebündelt — so endet ein Abschnitt am letzten wirklich beobachteten
             // Tag vor der Grenze, nicht am Kalendertag davor.
             foreach ($this->groupByPeriod($tage, $kette) as $lauf) {
+                // „Kein Betrieb" ist ebenso eine Beobachtung des neuen Laufs wie ein Fahrplan:
+                // Eine Version, die ein älterer Feed für diese Tage vorhergesagt hat, muss
+                // weichen — sonst zeigt sie Fahrten, die der aktuelle Feed nicht mehr kennt
+                // (Fall Linie 13, Periode ab 02.11.2026: eine Fahrt aus dem Feed vom 25.10.).
+                foreach ($this->noServiceRuns($lauf['tage']) as $ruhe) {
+                    $this->displaceOtherVersions(
+                        $lauf['period']->id, $line, $dayType, null,
+                        CarbonImmutable::parse($ruhe['from']), CarbonImmutable::parse($ruhe['to']),
+                    );
+                }
+
                 $abschnitte = $this->foldIntoIntervals($lauf['tage']);
 
                 if ($abschnitte === []) {
@@ -433,6 +444,39 @@ final class ScheduleVersionService
     }
 
     /**
+     * Aufeinanderfolgende Vorkommen eines Typs, an denen die Linie nicht fährt — als
+     * Datumsbereiche. Wie in `foldIntoIntervals` zählt die Reihenfolge der Vorkommen, nicht
+     * der Kalenderabstand.
+     *
+     * @param  array<int, array{date: string, fingerprint: string|null}>  $tage
+     * @return array<int, array{from: string, to: string}>
+     */
+    private function noServiceRuns(array $tage): array
+    {
+        usort($tage, static fn (array $a, array $b): int => $a['date'] <=> $b['date']);
+
+        $laeufe = [];
+        $offen = false;
+
+        foreach ($tage as $tag) {
+            if ($tag['fingerprint'] !== null) {
+                $offen = false;
+
+                continue;
+            }
+
+            if ($offen) {
+                $laeufe[array_key_last($laeufe)]['to'] = $tag['date'];
+            } else {
+                $laeufe[] = ['from' => $tag['date'], 'to' => $tag['date']];
+                $offen = true;
+            }
+        }
+
+        return $laeufe;
+    }
+
+    /**
      * Bündelt aufeinanderfolgende Vorkommen eines Typs mit gleichem Fingerprint zu Intervallen.
      *
      * Die Tage eines Typs liegen nicht nebeneinander (Sonntage im Wochenabstand) — maßgeblich
@@ -588,7 +632,9 @@ final class ScheduleVersionService
             'to_confirmed' => $bisBestaetigt,
         ]);
 
-        $this->displaceOtherVersions($version, $von, $bis);
+        $this->displaceOtherVersions(
+            $version->period_id, $version->line, $version->day_type->value, $version->id, $von, $bis,
+        );
     }
 
     /**
@@ -606,15 +652,17 @@ final class ScheduleVersionService
      * Die entstehenden Schnittkanten gelten als **offen**: Dass an diesem Tag ein anderer
      * Fahrplan gilt, wissen wir aus zwei verschiedenen Läufen — beobachtet wurde der Wechsel
      * damit nicht, und eine Bestätigung wäre eine Behauptung (§5.4 b).
+     *
+     * Ohne `$winnerId` gewinnt „kein Betrieb": Dann weichen alle Versionen des Strangs.
      */
-    private function displaceOtherVersions(LineVersion $version, CarbonImmutable $von, CarbonImmutable $bis): void
+    private function displaceOtherVersions(int $periodId, string $line, string $dayType, ?int $winnerId, CarbonImmutable $von, CarbonImmutable $bis): void
     {
         // Perioden sind zeitlich disjunkt — ein Konflikt kann nur innerhalb einer entstehen.
         $fremdeVersionen = LineVersion::query()
-            ->where('period_id', $version->period_id)
-            ->where('line', $version->line)
-            ->where('day_type', $version->day_type)
-            ->whereKeyNot($version->id)
+            ->where('period_id', $periodId)
+            ->where('line', $line)
+            ->where('day_type', $dayType)
+            ->when($winnerId !== null, static fn ($q) => $q->whereKeyNot($winnerId))
             ->pluck('id');
 
         if ($fremdeVersionen->isEmpty()) {
@@ -671,9 +719,9 @@ final class ScheduleVersionService
 
         if ($betroffen->isNotEmpty()) {
             Log::debug('Older versions displaced from reobserved days', [
-                'line' => $version->line,
-                'day_type' => $version->day_type->value,
-                'winning_version_id' => $version->id,
+                'line' => $line,
+                'day_type' => $dayType,
+                'winning_version_id' => $winnerId,
                 'from' => $von->toDateString(),
                 'to' => $bis->toDateString(),
                 'intervals_touched' => $betroffen->count(),

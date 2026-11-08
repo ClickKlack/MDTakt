@@ -396,4 +396,38 @@ final class ScheduleVersionTest extends TestCase
         $this->assertSame($fahrtenVorher, $alteVersion->consolidatedTrips()->count(), 'Fahrten bleiben erhalten');
         $this->assertNotNull(LineVersion::query()->find($alteVersion->id), 'Die Version selbst bleibt');
     }
+
+    public function test_a_later_run_without_service_displaces_an_older_version(): void
+    {
+        $andere = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
+        $linie = Route::factory()->create(['route_id' => 'R13', 'route_short_name' => '13']);
+
+        // Erster Lauf: Linie 13 hat noch eine Fahrt — ein Rest, den der Feed vorhersagt.
+        $this->werktagsService('ALT', '2026-11-02', '2026-11-13');
+        $this->fahrt('T-1', 'ALT', $andere->route_id, ['07:00:00', '07:20:00']);
+        $this->fahrt('T-13', 'ALT', $linie->route_id, ['23:05:00', '23:32:00']);
+        $this->konsolidieren();
+
+        $alteVersion = LineVersion::query()->where('line', '13')->sole();
+        $this->assertSame(1, $alteVersion->intervals()->count());
+
+        // Zweiter Lauf: Der korrigierte Feed kennt die Linie noch, sie faehrt aber nicht mehr.
+        StopTime::query()->delete();
+        Trip::query()->delete();
+        Calendar::query()->delete();
+        $this->werktagsService('NEU', '2026-11-02', '2026-11-13');
+        $this->fahrt('T-1', 'NEU', $andere->route_id, ['07:00:00', '07:20:00']);
+        $this->konsolidieren();
+
+        // „Kein Betrieb" ist die neuere Beobachtung — die alte Version verliert die Tage,
+        // bleibt aber samt Fahrten bestehen (entschieden 20.09.2026).
+        $alteVersion->refresh();
+        $this->assertSame(0, $alteVersion->intervals()->count(), 'Keine Gueltigkeit mehr');
+        $this->assertGreaterThan(0, $alteVersion->consolidatedTrips()->count(), 'Fahrten bleiben erhalten');
+        $this->assertSame(
+            0,
+            count(app(ConsolidatedScheduleService::class)->trips(['date' => '2026-11-04', 'line' => '13'])),
+            'Ein Tag ohne Betrieb darf keine Fahrten liefern',
+        );
+    }
 }

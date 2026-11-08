@@ -322,7 +322,20 @@ final class ScheduleVersionService
             ->groupBy(static fn (object $r): string => $r->service_id."\0".$r->day_type
                 ."\0".(isset($verschoben[$r->trip_id]) ? 'previous' : 'same'));
 
-        $alleLinien = DB::table('routes')->distinct()->pluck('route_short_name');
+        // Dazu jede Linie, die im Fenster noch Gültigkeit hat, auch wenn der Feed sie nicht mehr
+        // kennt: Ihr Fehlen ist die Beobachtung „fährt nicht" und muss die alte Vorhersage
+        // verdrängen. Längst verschwundene Linien bleiben außen vor.
+        $alleLinien = DB::table('routes')->distinct()->pluck('route_short_name')
+            ->merge(
+                DB::table('line_versions')
+                    ->join('line_version_intervals', 'line_version_intervals.line_version_id', '=', 'line_versions.id')
+                    ->whereDate('line_version_intervals.valid_from', '<=', $to->toDateString())
+                    ->whereDate('line_version_intervals.valid_to', '>=', $from->toDateString())
+                    ->distinct()
+                    ->pluck('line_versions.line')
+            )
+            ->unique()
+            ->values();
         $result = [];
         $aktiveLinien = [];
 

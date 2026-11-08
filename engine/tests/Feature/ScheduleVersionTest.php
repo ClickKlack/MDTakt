@@ -430,4 +430,61 @@ final class ScheduleVersionTest extends TestCase
             'Ein Tag ohne Betrieb darf keine Fahrten liefern',
         );
     }
+
+    public function test_a_line_missing_from_the_feed_loses_its_predicted_validity(): void
+    {
+        $andere = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
+        $linie = Route::factory()->create(['route_id' => 'R13', 'route_short_name' => '13']);
+
+        // Erster Lauf: Linie 13 ist fuer zwei Wochen vorhergesagt.
+        $this->werktagsService('ALT', '2026-11-02', '2026-11-13');
+        $this->fahrt('T-1', 'ALT', $andere->route_id, ['07:00:00', '07:20:00']);
+        $this->fahrt('T-13', 'ALT', $linie->route_id, ['23:05:00', '23:32:00']);
+        $this->konsolidieren();
+
+        $alteVersion = LineVersion::query()->where('line', '13')->sole();
+        $this->assertSame(1, $alteVersion->intervals()->count());
+
+        // Zweiter Lauf: Die Linie ist ganz aus dem Feed verschwunden, samt Route.
+        StopTime::query()->delete();
+        Trip::query()->delete();
+        Calendar::query()->delete();
+        $linie->delete();
+        $this->werktagsService('NEU', '2026-11-02', '2026-11-13');
+        $this->fahrt('T-1', 'NEU', $andere->route_id, ['07:00:00', '07:20:00']);
+        $this->konsolidieren();
+
+        $alteVersion->refresh();
+        $this->assertSame(0, $alteVersion->intervals()->count(), 'Die Vorhersage muss weichen');
+        $this->assertGreaterThan(0, $alteVersion->consolidatedTrips()->count(), 'Fahrten bleiben erhalten');
+    }
+
+    public function test_a_line_gone_before_the_window_is_not_observed(): void
+    {
+        $andere = Route::factory()->create(['route_id' => 'R1', 'route_short_name' => '1']);
+        $linie = Route::factory()->create(['route_id' => 'R13', 'route_short_name' => '13']);
+
+        // Erster Lauf: Linie 13 faehrt bis 06.11.
+        $this->werktagsService('ALT', '2026-11-02', '2026-11-13');
+        $this->werktagsService('ALT13', '2026-11-02', '2026-11-06');
+        $this->fahrt('T-1', 'ALT', $andere->route_id, ['07:00:00', '07:20:00']);
+        $this->fahrt('T-13', 'ALT13', $linie->route_id, ['23:05:00', '23:32:00']);
+        $this->konsolidieren();
+
+        $intervall = LineVersion::query()->where('line', '13')->sole()->intervals()->sole();
+        $this->assertSame('2026-11-06', $intervall->valid_to->toDateString());
+
+        // Zweiter Lauf: Fenster beginnt nach dem Ende der Linie — ihre Geschichte bleibt unberuehrt.
+        StopTime::query()->delete();
+        Trip::query()->delete();
+        Calendar::query()->delete();
+        $linie->delete();
+        $this->werktagsService('NEU', '2026-11-09', '2026-11-20');
+        $this->fahrt('T-1', 'NEU', $andere->route_id, ['07:00:00', '07:20:00']);
+        $this->konsolidieren();
+
+        $nachher = LineVersion::query()->where('line', '13')->sole()->intervals()->sole();
+        $this->assertSame('2026-11-02', $nachher->valid_from->toDateString());
+        $this->assertSame('2026-11-06', $nachher->valid_to->toDateString());
+    }
 }

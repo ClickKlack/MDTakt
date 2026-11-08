@@ -257,7 +257,8 @@ Innerhalb der aktuellen Periode, **je (Linie, Fahrplantyp)**:
    - **kein Betrieb** (die Linie fährt an Tagen, an denen andere fahren, nicht) → erzeugt keine Version, verdrängt
      aber ältere Versionen aus diesen Tagen — auch „fährt nicht" ist die neuere Beobachtung (Fall Linie 13,
      08.11.2026: eine Fahrt aus dem Feed vom 25.10. blieb in der Periode ab 02.11. stehen). Die verdrängte Version
-     bleibt samt Fahrten erhalten.
+     bleibt samt Fahrten erhalten. Das gilt auch für eine Linie, die ganz aus dem Feed verschwunden ist, solange sie
+     im Fenster noch Gültigkeit hat; längst verschwundene Linien werden nicht mehr beobachtet.
 3. Halte per Koordinaten deduplizieren.
 4. Sind **viele (Linie, Typ) gleichzeitig** betroffen → **Periodenwechsel anbieten** (§4.3).
 
